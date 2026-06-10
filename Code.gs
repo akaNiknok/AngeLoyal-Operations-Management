@@ -363,9 +363,9 @@ function getTrips(dateFrom, dateTo) {
       tier:                _numOrNull(_val(row, headers, 'Tier')),
       remarks:             _val(row, headers, 'Remarks') || '',
       statusChangedBy:     _val(row, headers, 'Status Changed By') || '',
-      statusChangedAt:     _val(row, headers, 'Status Changed At') || '',
+      statusChangedAt:     _valDateTime(row, headers, 'Status Changed At'),
       addedBy:             _val(row, headers, 'Added By') || '',
-      addedAt:             _val(row, headers, 'Added At') || '',
+      addedAt:             _valDateTime(row, headers, 'Added At'),
     };
   }).filter(t => t !== null);
 }
@@ -440,7 +440,7 @@ function getWaybillsForTrip(tripId) {
     status:          _val(row, headers, 'Status'),
     locked:          _val(row, headers, 'Locked') === true || _val(row, headers, 'Locked') === 'TRUE',
     confirmedBy:     _val(row, headers, 'Confirmed By'),
-    confirmedAt:     _val(row, headers, 'Confirmed At'),
+    confirmedAt:     _valDateTime(row, headers, 'Confirmed At'),
   })).filter(w => w.id !== null && Number(w.tripId) === Number(tripId));
 }
 
@@ -823,6 +823,10 @@ function confirmWaybill(waybillId, customNumber) {
  *   - Creates a suggested waybill.
  *   - Appends to Route Frequency Log if a default driver is known.
  *
+ * Unlike createTrip (used for single manual trips), this writes each affected
+ * sheet in one batch at the end instead of once per row — needed because a
+ * 44-row import previously meant 400+ individual Sheets API calls.
+ *
  * @param {string}   tripDate   'M/d/yyyy' — the date these trips are for
  * @param {number}   prefixId   Waybill prefix to use for auto-generation
  * @param {Object[]} rowData    Array of parsed route rows
@@ -831,15 +835,14 @@ function confirmWaybill(waybillId, customNumber) {
 function importRouteFile(tripDate, prefixId, rowData) {
   _requirePermission('ADD_MANUAL_TRIP');
   try {
-    const defaults  = getDefaultAssignments();    // [{truckId, defaultDriverId, defaultHelperIds}]
-    const trucks    = getTrucks();
-    const typeMap   = _buildTruckTypeMap();
+    const defaults = getDefaultAssignments();    // [{truckId, defaultDriverId, defaultHelperIds}]
+    const trucks   = getTrucks();
 
     // Build a lookup of restriction → list of trucks that match that billing category
     // so we can pre-fill the most likely truck per row.
     const trucksByCategory = {};
     trucks.forEach(t => {
-      const cat = t.billingCategory || typeMap[t.type] || '';
+      const cat = t.billingCategory || '';
       if (!trucksByCategory[cat]) trucksByCategory[cat] = [];
       trucksByCategory[cat].push(t);
     });
@@ -847,6 +850,44 @@ function importRouteFile(tripDate, prefixId, rowData) {
     // Build default assignment lookup by truckId
     const defaultByTruck = {};
     defaults.forEach(d => { defaultByTruck[d.truckId] = d; });
+
+    // --- Outlets: read once, build a name → ID lookup we can extend in-memory ---
+    const outletsSheet   = _getSheet(SHEET_OUTLETS);
+    const outletsRows    = outletsSheet.getDataRange().getValues();
+    const outletsHeaders = outletsRows[0].map(h => h.toString().trim());
+    const outletNameToId = {};
+    outletsRows.slice(1).forEach(row => {
+      const id   = _numOrNull(_val(row, outletsHeaders, 'ID'));
+      const name = String(_val(row, outletsHeaders, 'Outlet Name')).trim().toLowerCase();
+      if (id !== null && name) outletNameToId[name] = id;
+    });
+    let nextOutletId = _nextRowId(outletsSheet);
+    const newOutletRows = [];
+
+    // --- Waybill prefix: track the running sequence number in-memory so
+    //     every row in this import gets a unique suggested number ---
+    const prefixes = getWaybillPrefixes();
+    const pref = prefixes.find(p => Number(p.id) === Number(prefixId));
+    if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+    let nextSeq = pref.lastSequenceNumber || 0;
+
+    // --- Next IDs for the sheets we'll append to ---
+    const tripsSheet     = _getSheet(SHEET_TRIPS);
+    const waybillsSheet  = _getSheet(SHEET_WAYBILLS);
+    const routeFreqSheet = _getSheet(SHEET_ROUTE_FREQ);
+    const auditSheet     = _getSheet(SHEET_AUDIT);
+    let nextTripId      = _nextRowId(tripsSheet);
+    let nextWaybillId   = _nextRowId(waybillsSheet);
+    let nextRouteFreqId = _nextRowId(routeFreqSheet);
+    let nextAuditId     = _nextRowId(auditSheet);
+
+    const newTripRows      = [];
+    const newWaybillRows   = [];
+    const newRouteFreqRows = [];
+    const newAuditRows     = [];
+
+    const email  = _getCurrentUserEmail();
+    const nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
 
     let imported = 0;
     let skipped  = 0;
@@ -856,46 +897,115 @@ function importRouteFile(tripDate, prefixId, rowData) {
       try {
         if (!rd.foNumber && !rd.outletName) { skipped++; return; }
 
+        // Resolve or create the outlet
+        let outletId = '';
+        if (rd.outletName) {
+          const nameLower = rd.outletName.trim().toLowerCase();
+          if (outletNameToId[nameLower] !== undefined) {
+            outletId = outletNameToId[nameLower];
+          } else {
+            outletId = nextOutletId++;
+            outletNameToId[nameLower] = outletId;
+            newOutletRows.push([
+              outletId,
+              rd.outletName.trim(),
+              rd.area    || '',
+              rd.address || '',
+              '',   // Customer Group
+              '',   // Notes
+              nowStr,
+            ]);
+          }
+        }
+
         // Try to match a truck to the restriction hint (e.g. "6W", "4W", "L300")
         // If no match, leave truck/driver blank for dispatcher to fill
-        const restriction   = (rd.restrictions || '').trim().toUpperCase();
-        const matchedTrucks = trucksByCategory[restriction] || [];
-
-        // Pick first unoccupied truck today if we can, otherwise just the first
-        // (dispatcher will reassign manually in the UI anyway)
-        const candidateTruck = matchedTrucks[0] || null;
+        const restriction      = (rd.restrictions || '').trim().toUpperCase();
+        const matchedTrucks    = trucksByCategory[restriction] || [];
+        const candidateTruck   = matchedTrucks[0] || null;
         const candidateDefault = candidateTruck ? defaultByTruck[candidateTruck.id] : null;
 
-        const result = createTrip({
-          tripDate:    tripDate,
-          billingDate: tripDate,
-          foNumber:    rd.foNumber    || '',
-          outletName:  rd.outletName  || '',
-          area:        rd.area        || '',
-          address:     rd.address     || '',
-          quantity:    rd.quantity    || '',
-          cbm:         rd.cbm         || '',
-          restrictions: rd.restrictions || '',
-          tier:        rd.tier        || '',
-          truckId:     candidateTruck        ? candidateTruck.id              : '',
-          driverId:    candidateDefault      ? candidateDefault.defaultDriverId  : '',
-          helperIds:   candidateDefault      ? candidateDefault.defaultHelperIds : [],
-          truckBillingCategory: candidateTruck ? candidateTruck.billingCategory : '',
-          source:      'Import',
-          prefixId:    prefixId,
-        });
+        const truckId    = candidateTruck   ? candidateTruck.id                 : '';
+        const driverId   = candidateDefault ? candidateDefault.defaultDriverId  : '';
+        const helperIds  = candidateDefault ? candidateDefault.defaultHelperIds : [];
+        const billingCat = candidateTruck   ? candidateTruck.billingCategory    : '';
 
-        if (result.success) {
-          imported++;
-        } else {
-          errors.push(`Row ${idx + 1} (${rd.outletName}): ${result.error}`);
-          skipped++;
+        // Trip row
+        const tripId = nextTripId++;
+        newTripRows.push([
+          tripId,
+          tripDate,
+          tripDate,                // Billing Date = Trip Date on import
+          rd.foNumber || '',
+          '',                      // FO Split Suffix
+          outletId,
+          rd.area     || '',
+          rd.quantity || '',
+          rd.cbm      || '',
+          rd.restrictions || '',
+          truckId,
+          driverId,
+          Array.isArray(helperIds) ? helperIds.join(',') : (helperIds || ''),
+          billingCat,
+          'Scheduled',
+          '',                      // Parent Trip ID
+          'Import',
+          rd.tier || '',
+          '',                      // Remarks
+          '',                      // Status Changed By
+          '',                      // Status Changed At
+          email,
+          nowStr,
+        ]);
+
+        // Suggested waybill — sequence increments per row within this import
+        nextSeq += 1;
+        const waybillId = nextWaybillId++;
+        newWaybillRows.push([
+          waybillId,
+          `${pref.prefix}-${nextSeq}`,
+          prefixId,
+          nextSeq,
+          tripId,
+          rd.foNumber || '',
+          'Regular',
+          '',                      // Parent Waybill ID
+          'Suggested',
+          false,
+          '',                      // Confirmed By
+          '',                      // Confirmed At
+        ]);
+
+        // Route frequency log
+        if (driverId && outletId) {
+          newRouteFreqRows.push([nextRouteFreqId++, tripId, tripDate, driverId, outletId]);
         }
+
+        // Audit log
+        newAuditRows.push([
+          nextAuditId++,
+          nowStr,
+          email || 'unknown',
+          'TRIP_CREATE',
+          '',
+          SHEET_TRIPS,
+          tripId,
+          '',
+          JSON.stringify({ foNumber: rd.foNumber || '', outletId, tripDate }),
+        ]);
+
+        imported++;
       } catch (rowErr) {
         errors.push(`Row ${idx + 1}: ${rowErr.message}`);
         skipped++;
       }
     });
+
+    _appendRows(outletsSheet, newOutletRows);
+    _appendRows(tripsSheet, newTripRows);
+    _appendRows(waybillsSheet, newWaybillRows);
+    _appendRows(routeFreqSheet, newRouteFreqRows);
+    _appendRows(auditSheet, newAuditRows);
 
     return { success: true, imported, skipped, errors };
   } catch (e) {
@@ -1466,6 +1576,23 @@ function _val(row, headers, colName) {
 }
 
 /**
+ * Reads a cell that should be a timestamp string. If Sheets has auto-converted
+ * the cell to a Date object (e.g. because the column is date-formatted),
+ * formats it back to 'M/d/yyyy HH:mm:ss' so it serializes safely over
+ * google.script.run (which can't handle raw Date objects nested in arrays).
+ *
+ * @param {Array} row
+ * @param {string[]} headers
+ * @param {string} colName
+ * @returns {string}
+ */
+function _valDateTime(row, headers, colName) {
+  const v = _val(row, headers, colName);
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+  return v || '';
+}
+
+/**
  * Converts a value to a number or returns null if not numeric.
  * Guards against Google Sheets returning empty strings for blank numeric cells.
  *
@@ -1554,6 +1681,19 @@ function _nextRowId(sheet) {
   if (lastRow < 2) return 1;
   const lastId = Number(sheet.getRange(lastRow, 1).getValue());
   return isNaN(lastId) ? lastRow : lastId + 1;
+}
+
+/**
+ * Appends multiple rows to a sheet in a single Sheets API call.
+ * No-op if `rows2D` is empty.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array[]} rows2D  Array of row arrays, all the same length.
+ */
+function _appendRows(sheet, rows2D) {
+  if (!rows2D || rows2D.length === 0) return;
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, rows2D.length, rows2D[0].length).setValues(rows2D);
 }
 
 /**
