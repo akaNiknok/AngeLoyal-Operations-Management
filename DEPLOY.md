@@ -88,3 +88,36 @@ npm run release         # push + redeploy the live web app
 - `.clasp.json` contains the Script ID (not secret, just an identifier) and
   is committed so the whole team points at the same project.
 - Auth tokens (`~/.clasprc.json`) are per-user and never committed.
+
+## Reading live sheet data locally (for testing/verification)
+
+`Code.gs` has a token-gated `devDump` endpoint (`doGet` with
+`?action=devDump`) that returns raw sheet data as JSON. It's used by
+`scripts/fetch-sheet-data.js` to snapshot the live data for local
+inspection — never exposed in the UI.
+
+**One-time setup:**
+
+1. In the Apps Script editor, open `Code.gs`, select the `setupDevDumpToken`
+   function in the function dropdown, and click **Run**. Authorize if
+   prompted, then check the execution log (View -> Logs / Ctrl+Enter) for
+   the generated token.
+2. Copy `.env.example` to `.env` and paste the token as `DEV_DUMP_TOKEN`.
+   `.env` is gitignored and never committed.
+3. Run `npm run release` so the deployed web app has the `devDump` endpoint
+   (only needed once after adding it).
+
+**Usage:**
+
+```sh
+npm run fetch-data            # dumps every sheet to data/sheets-snapshot.json
+npm run fetch-data -- Trips   # dumps just the "Trips" sheet to data/Trips.json
+```
+
+`data/` is gitignored — these snapshots contain real operational data
+(driver names, routes, etc.) and stay local only.
+
+> Security note: the `devDump` endpoint is reachable by anyone with the web
+> app URL **and** the token — treat `DEV_DUMP_TOKEN` like a password. To
+> revoke it, run `setupDevDumpToken()` again to generate a new one (and
+> redeploy).

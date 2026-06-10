@@ -2,3 +2,5 @@
 *.pdf
 node_modules/
 .clasprc.json
+.env
+data/

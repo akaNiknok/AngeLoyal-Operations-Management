@@ -12,7 +12,8 @@
     "deploy": "clasp deploy -i AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0",
     "release": "clasp push --force && npm run deploy",
     "deployments": "clasp deployments",
-    "logs": "clasp logs"
+    "logs": "clasp logs",
+    "fetch-data": "node scripts/fetch-sheet-data.js"
   },
   "devDependencies": {
     "@google/clasp": "^2.4.2"
