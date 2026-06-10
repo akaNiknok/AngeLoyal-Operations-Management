@@ -1,2 +1,4 @@
 *.xlsx
 *.pdf
+node_modules/
+.clasprc.json

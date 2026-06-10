@@ -1,0 +1,19 @@
+{
+  "name": "angeloyal-operations-management",
+  "private": true,
+  "version": "1.0.0",
+  "description": "AngeLoyal Logistics - Operations Management System (Google Apps Script)",
+  "scripts": {
+    "login": "clasp login",
+    "pull": "clasp pull",
+    "push": "clasp push",
+    "watch": "clasp push --watch",
+    "open": "clasp open",
+    "deploy": "clasp deploy",
+    "deployments": "clasp deployments",
+    "logs": "clasp logs"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  }
+}
