@@ -58,20 +58,27 @@ git pull                # get latest code
 # ... make changes to Code.gs / Index.html ...
 git add -A && git commit -m "..."
 git push                # back up to GitHub
-npm run push            # deploy to the Apps Script project (clasp push)
+npm run release         # push + redeploy the live web app
 ```
 
 - `npm run push` — pushes local files to the **Apps Script editor** (updates
   the "head" / dev version, what you see when you open the script editor).
+  This alone does **not** update the live web app.
+- `npm run deploy` — creates a new version and updates the **live web app
+  deployment** to point at it. The deployment ID is the one used by the
+  AngeLoyal OMS web app:
+  `AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0`
+  (`https://script.google.com/macros/s/AKfycby8.../exec`).
+- `npm run release` — runs both: `clasp push --force` then `npm run deploy`.
+  **Use this when you want your changes to go live.**
 - `npm run open` — opens the project in the Apps Script editor in your browser.
-- `npm run watch` — watches for local file changes and auto-pushes.
-- `npm run deploy` — creates a new versioned **deployment** (needed if the
-  Sheet/web app is served from a specific deployment rather than `HEAD`).
+- `npm run watch` — watches for local file changes and auto-pushes (editor only,
+  does not redeploy the live web app).
 
-> Pushing does **not** automatically update an existing deployment's pinned
-> version. If users access the tool via a deployed web app URL, run
-> `npm run deploy` (or update the deployment via the Apps Script editor)
-> after pushing changes you want live.
+> The live AngeLoyal OMS web app is served from a **versioned deployment**,
+> not `HEAD`. `npm run push` updates the editor/dev copy only — always run
+> `npm run release` (or `npm run deploy` after pushing) to make changes
+> visible to actual users.
 
 ## Notes
 

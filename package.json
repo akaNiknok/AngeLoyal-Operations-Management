@@ -9,7 +9,8 @@
     "push": "clasp push",
     "watch": "clasp push --watch",
     "open": "clasp open",
-    "deploy": "clasp deploy",
+    "deploy": "clasp deploy -i AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0",
+    "release": "clasp push --force && npm run deploy",
     "deployments": "clasp deployments",
     "logs": "clasp logs"
   },
