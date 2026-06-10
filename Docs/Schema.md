@@ -1,44 +1,42 @@
-# AngeLoyal OMS — Google Sheets Schema Specification
-## Phase 1 (Pre-Phase + Dispatch)
+# **AngeLoyal OMS — Google Sheets Schema Specification**
 
----
+## **Overview: Sheet Registry**
 
-## Overview: Sheet List
+The AngeLoyal Order Management System (OMS) relies on a structured collection of Google Sheets, categorized into functional groups. All sheets listed below are active components of the current operational system.
 
-| # | Sheet Name | Group | Type | Status |
-|---|---|---|---|---|
-| 1 | Users | Config | Editable by Admin | New |
-| 2 | Truck Type Map | Config | Editable by Admin | New |
-| 3 | Waybill Prefixes | Config | Editable by Admin | New |
-| 4 | Employees | People & Trucks | Master records | Existing (keep as-is) |
-| 5 | Trucks | People & Trucks | Master records | Existing — add 2 columns |
-| 6 | Default Assignments | People & Trucks | Editable by Admin/Dispatcher | New |
-| 7 | Employee-Truck Assignment | People & Trucks | Append-only log | Existing (keep as-is) |
-| 8 | Outlets | People & Trucks | Auto-seeded + editable | New |
-| 9 | Trips | Dispatch | Core operational table | New |
-| 10 | Route Frequency Log | Dispatch | Append-only, written by backend | New |
-| 11 | Waybills | Waybills | Append-only once confirmed | New |
-| 12 | Audit Log | Audit | Append-only | Existing — extended |
+| \# | Sheet Name | Group | Access / Type |
+| :---- | :---- | :---- | :---- |
+| 1 | Users | Config | Administrative Setup |
+| 2 | Truck Type Map | Config | Administrative Setup |
+| 3 | Waybill Prefixes | Config | Administrative Setup |
+| 4 | Employees | People & Trucks | Master Records |
+| 5 | Trucks | People & Trucks | Master Records |
+| 6 | Default Assignments | People & Trucks | Operations Config |
+| 7 | Employee-Truck Assignment | People & Trucks | Append-Only Log |
+| 8 | Outlets | People & Trucks | Master Records (Auto-Populating) |
+| 9 | Trips | Dispatch | Core Operational Ledger |
+| 10 | Route Frequency Log | Dispatch | Append-Only Performance Log |
+| 11 | Waybills | Waybills | Append-Only Transaction Ledger |
+| 12 | Audit Log | Audit | System-Wide Activity Journal |
 
----
+## **Group 1: Config Sheets**
 
-## Group 1: Config Sheets
+### **Sheet 1: Users**
 
-### Sheet 1: `Users`
-Maps Google account emails to system roles.
+Maps Google account emails to specific system roles to manage access control.
 
 | Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Email | String | Google account email — used by `Session.getActiveUser().getEmail()` |
-| Display Name | String | Friendly name shown in UI |
-| Role | String | One of: `Admin`, `Dispatcher`, `Payroll`, `Viewer` |
-| Active | Boolean | `TRUE`/`FALSE` — inactive users are blocked |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Email | String | Google account email—validated via Session.getActiveUser().getEmail() |
+| Display Name | String | User's name displayed within the user interface |
+| Role | String | Authorized roles: Admin, Dispatcher, Payroll, Viewer |
+| Active | Boolean | TRUE/FALSE—inactive users are blocked from system access |
 
-**Role permissions matrix (Phase 1):**
+#### **Role Permissions Matrix**
 
 | Feature | Admin | Dispatcher | Payroll | Viewer |
-|---|---|---|---|---|
+| :---- | :---- | :---- | :---- | :---- |
 | View dispatch board | ✓ | ✓ | ✓ | ✓ |
 | Assign drivers to trips | ✓ | ✓ | — | — |
 | Add manual trips | ✓ | ✓ | — | — |
@@ -49,21 +47,20 @@ Maps Google account emails to system roles.
 | Edit Users sheet | ✓ | — | — | — |
 | View Audit Log | ✓ | — | — | — |
 
----
+### **Sheet 2: Truck Type Map**
 
-### Sheet 2: `Truck Type Map`
-Maps the verbose truck model names to billing categories. Admin-editable so new models can be added without code changes.
+Maps verbose truck model designations to unified billing categories. This allows administrators to introduce new vehicle models without modifying system code.
 
 | Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Full Model Name | String | Exact string from the `Trucks` sheet Brand+Type, e.g. `NMR 85 H 6W CLOSED VAN` |
-| Billing Category | String | One of: `10W`, `6W`, `4W`, `L300` |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Full Model Name | String | Exact string matching the Brand \+ Type from the Trucks sheet (e.g., NMR 85 H 6W CLOSED VAN) |
+| Billing Category | String | Standardization values: 10W, 6W, 4W, L300 |
 
-**Initial seed data (based on current truck roster):**
+#### **Active Reference Data**
 
 | Full Model Name | Billing Category |
-|---|---|
+| :---- | :---- |
 | 12W WING VAN | 10W |
 | NMR 85 H 6W CLOSED VAN | 6W |
 | ELF 6W CLOSED VAN | 6W |
@@ -73,19 +70,18 @@ Maps the verbose truck model names to billing categories. Admin-editable so new 
 | 6W | 6W |
 | L300 FB BODY | L300 |
 
-> **Note on lookup:** The `Trucks` sheet's `Type` column is matched against this table. If no match is found, the trip is flagged for manual review during billing.
+**System Behavior:** The application matches the Trucks sheet's vehicle properties against this table. If no matching model name is found, the associated trip is automatically flagged for manual review during billing cycles.
 
----
+### **Sheet 3: Waybill Prefixes**
 
-### Sheet 3: `Waybill Prefixes`
-One row per company/subcontractor that issues waybills through this system.
+Tracks the alphanumeric code sequences allocated to each company or subcontractor generating waybills within the platform.
 
 | Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Prefix | String | Short code, e.g. `AY`. Prepended to the sequence number. |
-| Company Name | String | e.g. `AngeLoyal Logistics` |
-| Last Sequence Number | Number | The last waybill number issued under this prefix. **Updated by backend on each confirmation.** At deployment, set this to the last manually issued waybill number so the system continues the sequence. |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Prefix | String | Unique short code (e.g., AY) prepended to the numeric sequence |
+| Company Name | String | Corporate identity associated with the prefix (e.g., AngeLoyal Logistics) |
+| Last Sequence Number | Number | The most recent sequence number issued. **Updated by the backend on every waybill confirmation.** |
 
 **Initial seed:**
 
@@ -93,50 +89,62 @@ One row per company/subcontractor that issues waybills through this system.
 |---|---|---|
 | AY | AngeLoyal Logistics | (set at deployment, e.g. 10760) |
 
----
+## **Group 2: People & Trucks**
 
-## Group 2: People & Trucks
+### **Sheet 4: Employees**
 
-### Sheet 4: `Employees` — **Existing, no changes**
-Keep exactly as-is. Current columns: `ID`, `Nickname`, `First Name`, `Middle Name`, `Last Name`, `Role`.
-
-One optional addition: `Status` column (`Active` / `Inactive`) — inactive employees are excluded from the dispatch dropdowns.
-
----
-
-### Sheet 5: `Trucks` — **Existing, add 2 columns**
-Keep all existing columns. Add:
-
-| New Column | Type | Notes |
-|---|---|---|
-| Status | String | `Active` / `Inactive` — inactive trucks hidden from dispatch dropdowns |
-| Billing Category | String | Computed by backend using `Truck Type Map` lookup. Stored here for speed. Updated whenever `Truck Type Map` changes. |
-
-Existing columns: `ID`, `Plate Number`, `Brand`, `Type`
-
----
-
-### Sheet 6: `Default Assignments` — **New**
-One row per truck. Defines the "standing" crew for each truck. Used to pre-fill the daily dispatch board.
+Maintains the authoritative roster of personnel.
 
 | Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Truck ID | Number | FK → `Trucks.ID` |
-| Default Driver ID | Number | FK → `Employees.ID`. Nullable if truck is currently uncrewed. |
-| Default Helper IDs | String | Comma-separated Employee IDs. e.g. `30,52`. Nullable. |
-| Notes | String | e.g. "Jaymart only available Mon–Wed" |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Nickname | String | Preferred name used throughout operational dropdowns |
+| First Name | String | Legal first name |
+| Middle Name | String | Legal middle name |
+| Last Name | String | Legal last name |
+| Role | String | Employee job function (e.g., Driver, Helper) |
+| Status | String | Active / Inactive—inactive employees are excluded from dispatch options |
 
-**Behaviour:** The UI shows this table in a simple editable grid. Changing a default here does NOT retroactively affect existing Trips. It only affects new trips created after the change.
+### **Sheet 5: Trucks**
 
----
+Maintains the authoritative fleet registry, combining physical specifications with system billing metrics.
 
-### Sheet 7: `Employee-Truck Assignment` — **Existing, no changes**
-Append-only log. Used by the existing Truck Roster web app. Keep intact.
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Plate Number | String | Unique vehicle license plate |
+| Brand | String | Vehicle manufacturer (e.g., Isuzu, Mitsubishi) |
+| Type | String | Detailed model/body designation |
+| Status | String | Active / Inactive—inactive trucks are hidden from dispatch options |
+| Billing Category | String | Computed by the backend via Truck Type Map lookup. Saved directly here for query performance. |
 
----
+### **Sheet 6: Default Assignments**
 
-### Sheet 8: `Outlets` — **New, auto-seeded**
+Establishes the permanent, baseline crew configuration for each vehicle. These records are used to auto-populate the daily dispatch board.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Truck ID | Number | Foreign Key → Trucks.ID |
+| Default Driver ID | Number | Foreign Key → Employees.ID (Nullable if unassigned) |
+| Default Helper IDs | String | Comma-separated list of Employee IDs (e.g., 30,52, Nullable) |
+| Notes | String | Special scheduling constraints (e.g., "Driver available Mon–Wed only") |
+
+**System Behavior:** Updates made to default assignments apply strictly to newly generated trips. Historical trip logs remain unchanged.
+
+### **Sheet 7: Employee-Truck Assignment**
+
+An append-only transaction ledger utilized by the internal fleet management applications to track real-time personnel movements.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Employee ID | Number | Foreign Key → Employee.ID |
+| Truck ID | Number | Foreign Key → Truck.ID |
+| Type | String | Driver or Helper |
+
+### **Sheet 8: Outlets**
+
 Created empty. On first import of a Rebisco route file, the backend scans all outlet names in the file and inserts any that don't already exist as new rows. Admin can then enrich the records (add address, notes, etc.).
 
 | Column | Type | Notes |
@@ -149,40 +157,40 @@ Created empty. On first import of a Rebisco route file, the backend scans all ou
 | Notes | String | Any special delivery notes (restricted times, dock info, etc.) |
 | Created At | DateTime | Timestamp of first import |
 
----
+## **Group 3: Dispatch**
 
-## Group 3: Dispatch
+### **Sheet 9: Trips**
 
-### Sheet 9: `Trips` — **New, core operational table**
-One row per delivery trip. Multiple trips can share an FO Number (combined drops on one truck), and one FO can have suffix A/B/C for split trucks.
+The core transactional table of the system. Each row tracks an individual delivery assignment. Multiple rows may share an FO Number for multi-drop routes, or contain distinct alphabetical suffixes for split-load allocations.
 
 | Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Trip Date | Date | The date the trip is scheduled / was dispatched |
-| Billing Date | Date | The original trip date — preserved when a trip is carried over. Equals `Trip Date` on first creation. |
-| FO Number | String | Rebisco Freight Order number, e.g. `6100044620`. Required; can be filled in later for manual trips. |
-| FO Split Suffix | String | `A`, `B`, `C`, etc. Null for single-truck FOs. |
-| Outlet ID | Number | FK → `Outlets.ID` |
-| Area | String | Copied from Outlet, for display convenience |
-| Quantity | Number | Cartons/packs |
-| CBM | Number | Cubic meters |
-| Restrictions | String | Truck type hint from Rebisco, e.g. `6W` |
-| Truck ID | Number | FK → `Trucks.ID`. The actual assigned truck for this trip. |
-| Driver ID | Number | FK → `Employees.ID`. The actual assigned driver. |
-| Helper IDs | String | Comma-separated Employee IDs. Nullable. |
-| Truck Billing Category | String | Snapshot of billing category at time of dispatch. Stored so it can't change retroactively. |
-| Trip Status | String | One of: `Scheduled`, `Delivered`, `Undelivered`, `Foul Trip - No Redeliver`, `Foul Trip - For Redeliver`, `Redeliver`, `Two-Day Trip` |
-| Parent Trip ID | Number | FK → `Trips.ID`. For redeliver/foul trip rows, points to the original trip. Null for originals. |
-| Source | String | `Import` or `Manual` |
-| Tier | Number | From Rebisco file (1, 2, 3). Nullable for manual trips. |
-| Remarks | String | Free text notes by dispatcher |
-| Status Changed By | String | Email of user who last changed Trip Status |
-| Status Changed At | DateTime | Timestamp of last status change |
-| Added By | String | Email of user who created this row |
-| Added At | DateTime | Timestamp of creation |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Trip Date | Date | Calendar date the delivery is scheduled for dispatch |
+| Billing Date | Date | The original operational date. This date remains constant even if a trip carries over to subsequent days |
+| FO Number | String | Client Freight Order identifier (e.g., 6100044620\) |
+| FO Split Suffix | String | Suffix identifier (A, B, C) for split shipments; Null for single-truck loads |
+| Outlet ID | Number | Foreign Key → Outlets.ID |
+| Area | String | Denormalized location name copied from the Outlet profile for UI sorting |
+| Quantity | Number | Total volume in cartons or packages |
+| CBM | Number | Volume measurement in cubic meters |
+| Restrictions | String | Vehicle configuration constraints requested by the client (e.g., 6W) |
+| Truck ID | Number | Foreign Key → Trucks.ID pointing to the physical vehicle dispatched |
+| Driver ID | Number | Foreign Key → Employees.ID pointing to the operating driver |
+| Helper IDs | String | Comma-separated Employee IDs for assigned crew; Nullable |
+| Truck Billing Category | String | Historical snapshot of the vehicle's billing class at the exact moment of dispatch |
+| Trip Status | String | Current execution state: Scheduled, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
+| Parent Trip ID | Number | Foreign Key → Trips.ID. Points to the initiating record for all redeliveries or foul trip tracking |
+| Source | String | Generation origin: Import, Manual, or Carry-over |
+| Tier | Number | Client priority ranking (1, 2, 3); Nullable for manual entries |
+| Remarks | String | Free-form operational commentary from dispatchers |
+| Status Changed By | String | Email address of the user who performed the latest status update |
+| Status Changed At | DateTime | Timestamp of the latest status modification |
+| Added By | String | Email address of the user who generated the record |
+| Added At | DateTime | Creation timestamp |
 
-**Trip Status flow:**
+#### **Status & Carry-Over Workflow**
+
 ```
 Scheduled
   → Delivered (normal completion)
@@ -190,134 +198,113 @@ Scheduled
       → Foul Trip - No Redeliver (billed as foul, no next-day attempt)
       → Foul Trip - For Redeliver (carries over to next day, generates -FT waybill)
       → Redeliver (carries over to next day, generates -R waybill)
-      → Two-Day Trip (spans 2 days, single billing, marks both days)
+      → Two-Day Trip (spans 2 days, single billing, covers both days)
 ```
 
-**Carry-over logic:** When a trip is flagged as `Foul Trip - For Redeliver` or `Redeliver`, the backend creates a NEW row in `Trips` for the next day with:
-- `Trip Date` = next business day
-- `Billing Date` = original trip's `Billing Date` (preserved)
-- `Parent Trip ID` = original trip's `ID`
-- `Source` = `Carry-over`
+When a trip status transitions to `Foul Trip - For Redeliver` or `Redeliver`, the system automatically inserts a new row into the Trips log for the following business day using these parameters:
 
----
+* Trip Date \= Next business day
+* Billing Date \= Preserves the original initiating trip's Billing Date
+* Parent Trip ID \= Links back to the original trip's ID
+* Source \= Carry-over
 
-### Sheet 10: `Route Frequency Log` — **New, append-only**
-Written by the backend every time a trip is saved. Used to surface the "driver assigned to same outlet too often" warning.
+### **Sheet 10: Route Frequency Log**
 
-| Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Trip ID | Number | FK → `Trips.ID` |
-| Trip Date | Date | Denormalized for fast querying |
-| Driver ID | Number | FK → `Employees.ID` |
-| Outlet ID | Number | FK → `Outlets.ID` |
-
-**Warning threshold:** Configurable in the `Users` sheet as a global config row, or as a dedicated single-cell named range. Default: if a driver-outlet pair appears more than **5 times in the last 21 days**, surface a warning. This threshold is checked at assignment time, not after.
-
----
-
-## Group 4: Waybills
-
-### Sheet 11: `Waybills` — **New, append-only once locked**
-Waybill numbers are suggested by the system and confirmed by the dispatcher. Once confirmed (`Locked = TRUE`), the row cannot be changed via the UI — only the Audit Log can record any discrepancy.
+An append-only table compiled automatically upon saving any trip. It acts as the data source for real-time compliance alerts regarding driver delivery frequencies.
 
 | Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Waybill Number | String | Full waybill string, e.g. `AY-10761` or `AY-10761-R` or `AY-10761-FT` |
-| Prefix ID | Number | FK → `Waybill Prefixes.ID` |
-| Sequence Number | Number | Numeric part only, e.g. `10761`. For sorting and duplicate detection. |
-| Trip ID | Number | FK → `Trips.ID` |
-| FO Number | String | Denormalized from Trip for quick billing reference |
-| Waybill Type | String | `Regular`, `Redeliver` (-R), `Foul Trip` (-FT) |
-| Parent Waybill ID | Number | FK → `Waybills.ID`. For -R and -FT types, points to the original waybill. Null for Regular. |
-| Status | String | `Suggested` or `Confirmed` |
-| Locked | Boolean | `FALSE` when suggested. Set to `TRUE` on confirmation. Once `TRUE`, backend rejects any write attempts to this row and logs to Audit Log instead. |
-| Confirmed By | String | Email of user who confirmed |
-| Confirmed At | DateTime | Timestamp of confirmation |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Trip ID | Number | Foreign Key → Trips.ID |
+| Trip Date | Date | Denormalized date field to support high-speed query indexing |
+| Driver ID | Number | Foreign Key → Employees.ID |
+| Outlet ID | Number | Foreign Key → Outlets.ID |
 
-**Auto-generation logic:**
-1. When a trip is created, backend reads `Last Sequence Number` from `Waybill Prefixes` for the selected prefix.
-2. Increments by 1, writes a new `Waybills` row with `Status = Suggested`, `Locked = FALSE`.
-3. Dispatcher sees the suggested number in the UI, can change it to any number.
-4. If changed, backend checks `Waybills` sheet — if the entered number already exists with `Status = Confirmed`, it rejects with a "Duplicate waybill" error.
-5. On dispatcher confirmation, sets `Status = Confirmed`, `Locked = TRUE`, updates `Last Sequence Number` in `Waybill Prefixes`.
+**Validation Logic:** At the moment of assignment, the system counts entries within this ledger. If a specific Driver-Outlet combination occurs more than **5 times within a rolling 21-day window**, the user interface generates a compliance warning.
 
----
+## **Group 4: Waybills**
 
-## Group 5: Audit
+### **Sheet 11: Waybills**
 
-### Sheet 12: `Audit Log` — **Existing, extended**
-Keep existing columns. Add two new columns to support Phase 1's richer logging:
+Tracks system-generated billing numbers. Once a record is finalized by operational staff (Locked \= TRUE), it becomes immutable within the workspace UI; any subsequent amendments can only be executed via structural audit overrides.
 
 | Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment (new — add to existing sheet) |
-| Timestamp | DateTime | Existing |
-| User | String | Email — Existing |
-| Action | String | Existing — extend vocabulary (see below) |
-| Detail | String | Existing — free text summary |
-| Table | String | **New** — which sheet was affected, e.g. `Trips`, `Waybills` |
-| Row ID | Number | **New** — the ID of the affected row |
-| Old Value | String | **New** — previous value (JSON string for multi-field changes) |
-| New Value | String | **New** — new value |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Waybill Number | String | Formatted serial number string (e.g., AY-10761, AY-10761-R, AY-10761-FT) |
+| Prefix ID | Number | Foreign Key → Waybill Prefixes.ID |
+| Sequence Number | Number | Raw numeric element used for sorting and ensuring uniqueness |
+| Trip ID | Number | Foreign Key → Trips.ID |
+| FO Number | String | Denormalized freight number for accelerated lookups |
+| Waybill Type | String | Categories: Regular, Redeliver (-R), Foul Trip (-FT) |
+| Parent Waybill ID | Number | Foreign Key → Waybills.ID. Links alternative types back to the initial regular waybill |
+| Status | String | Lifecycle stage: Suggested or Confirmed |
+| Locked | Boolean | TRUE blocks standard interface modifications. The backend rejects direct writes to locked rows |
+| Confirmed By | String | Email address of the user finalizing the transaction |
+| Confirmed At | DateTime | Finalization timestamp |
 
-**Action vocabulary for Phase 1:**
-- `ASSIGN` (existing — Truck Roster)
-- `REMOVE` (existing — Truck Roster)
-- `TRIP_CREATE`
-- `TRIP_STATUS_CHANGE`
-- `TRIP_REASSIGN` (driver or truck changed)
-- `WAYBILL_SUGGEST`
-- `WAYBILL_CONFIRM`
-- `WAYBILL_OVERRIDE` (dispatcher changed the suggested number)
-- `OUTLET_CREATE` (auto-seed from import)
-- `OUTLET_EDIT`
-- `DEFAULT_ASSIGN_CHANGE`
+#### **Document Generation Logic**
 
----
+1. Upon trip registration, the application evaluates the Last Sequence Number for the active prefix within Waybill Prefixes.  
+2. The index increments by 1, rendering a new entry in Waybills marked as Status \= Suggested and Locked \= FALSE.  
+3. Dispatch staff review the layout inside the UI and retain the option to manually alter the number string.  
+4. If changed, the application verifies the registry; if the manually entered string matches an existing record marked Confirmed, the system rejects the input with a validation error.  
+5. Upon confirmation, the parameters shift to Status \= Confirmed and Locked \= TRUE, while updating the master index tracking entry inside Waybill Prefixes.
 
-## Sheet Setup Instructions (Manual steps in Google Sheets before code runs)
+## **Group 5: Audit**
 
-These sheets must be created manually in the Google Spreadsheet before deploying the Apps Script:
+### **Sheet 12: Audit Log**
 
-1. **`Users`** — create with exact headers; add at least one Admin row (your email).
-2. **`Truck Type Map`** — create with exact headers; seed with the initial data above.
-3. **`Waybill Prefixes`** — create with exact headers; add the `AY` row with the correct last sequence number.
-4. **`Default Assignments`** — create with exact headers; fill in the standing crew for each truck.
-5. **`Outlets`** — create with exact headers; leave empty (seeded by first import).
-6. **`Trips`** — create with exact headers; leave empty.
-7. **`Route Frequency Log`** — create with exact headers; leave empty.
-8. **`Waybills`** — create with exact headers; leave empty.
-9. **`Trucks`** — add `Status` and `Billing Category` columns to the existing sheet.
-10. **`Audit Log`** — add `ID`, `Table`, `Row ID`, `Old Value`, `New Value` columns to the existing sheet.
+The global ledger recording all administrative, operational, and data state modifications across the entire environment.
 
-**Existing sheets to leave untouched:** `Employees`, `Employee-Truck Assignment`.
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Timestamp | DateTime | Precise moment the change occurred |
+| User | String | Email address of the account executing the change |
+| Action | String | Standardized action vocabulary token |
+| Detail | String | Human-readable explanation of the operational event |
+| Table | String | Target worksheet affected by the transaction (e.g., Trips, Waybills) |
+| Row ID | Number | Unique row identifier inside the target sheet |
+| Old Value | String | Previous data state, stored as a JSON string for multi-column changes |
+| New Value | String | Revised data state, stored as a JSON string for multi-column changes |
 
----
+#### **System Action Vocabulary**
 
-## Naming Conventions
+* ASSIGN / REMOVE — Personnel adjustments on the vehicle roster  
+* TRIP\_CREATE — Registration of a new delivery record  
+* TRIP\_STATUS\_CHANGE — Modifications to an active trip's state  
+* TRIP\_REASSIGN — Changes made to a trip's driver or vehicle allocation  
+* WAYBILL\_SUGGEST — Draft creation of a billing document sequence  
+* WAYBILL\_CONFIRM — Locking and finalizing a waybill sequence  
+* WAYBILL\_OVERRIDE — Manual adjustment of a system-suggested waybill number  
+* OUTLET\_CREATE — Auto-populating a new destination via route file import  
+* OUTLET\_EDIT — Administrative updates to existing outlet records  
+* DEFAULT\_ASSIGN\_CHANGE — Adjustments to a vehicle's standard crew configuration
 
-- All sheet names: **Title Case with spaces** (as listed above).
-- All header row values: **Title Case with spaces**, exactly as listed in the column tables.
-- Boolean columns: stored as `TRUE`/`FALSE` strings (Google Sheets native boolean format).
-- DateTime columns: stored as formatted strings `"M/d/yyyy HH:mm:ss"` (consistent with existing Code.gs pattern).
-- Date columns (no time): stored as `"M/d/yyyy"`.
-- ID columns: always row 1 = 1, auto-increment (last row ID + 1).
-- FK columns: store the numeric ID only (not the name). The backend does lookups; the sheet stores IDs.
+## **Structural Implementation Conventions**
 
----
+* **Sheet Names:** Title Case formatting incorporating spaces exactly as designated in the registry.  
+* **Header Configurations:** Row 1 contains headers using Title Case formatting with spaces, matching this document explicitly.  
+* **Boolean Formatting:** Evaluated natively inside cells as standard TRUE/FALSE parameters.  
+* **Temporal Records:** Complete date/time strings utilize "M/d/yyyy HH:mm:ss" formatting. Pure date records omit timestamps, using "M/d/yyyy".  
+* **Primary Identifiers (IDs):** Calculated dynamically using an auto-incrementing method ($Last\\ Row\\ ID \+ 1$), starting at row value 1\.  
+* **Relational Mappings (FKs):** Relational keys map strictly via numeric database ID values, rather than text string names.
 
-## Key Design Decisions
+## **Technical Design Rationale**
 
-**Why `Billing Date` is separate from `Trip Date`:**
-When a trip carries over to the next day (redeliver/foul trip), the new row gets tomorrow's date as `Trip Date`. But `Billing Date` stays as the original day. This means billing always uses `Billing Date` — so a trip dispatched May 15 that needed a redeliver on May 16 still bills at May 15's DOE rate (Phase 2) and counts toward May 15's waybill sequence.
+### **Separation of Billing Date and Trip Date**
 
-**Why Helper IDs are comma-separated in one column:**
-Variable helper counts (0–3 per truck) make a relational sub-table overcomplicated for a Sheets-based system. Comma-separated IDs in one column, parsed by the backend, is the practical tradeoff. If helper counts grow beyond 3 consistently, this can be refactored in Phase 2.
+When delayed delivery statuses necessitate next-day carry-overs, the newly generated record uses the actual calendar date for its Trip Date. However, it preserves the original day's value as its Billing Date. This ensures that billing calculations consistently reference the original transaction date—maintaining correct fuel price indexing, operational periods, and sequential tracking.
 
-**Why `Truck Billing Category` is snapshotted in `Trips`:**
-The DOE rate in Phase 2 depends on both area and truck type at trip time. If the `Truck Type Map` is ever updated, past trips must not be re-priced. Snapshotting at dispatch time prevents this entirely.
+### **Delimited Helper Records**
 
-**Why `Route Frequency Log` is a separate sheet and not a formula:**
-FILTER+SORT patterns on large date ranges get slow in Sheets. The backend writes one row per trip and the warning check is a simple count query over a rolling 21-day window — fast and reliable.
+To handle fluid crew sizes (ranging from 0 to 3 helpers per vehicle) without adding the structural weight of relational sub-tables, helper identities are maintained as a comma-separated string of IDs. The application code handles parsing this string during operations.
+
+### **Snapshotting Vehicle Billing Classes**
+
+Vehicle billing classifications are stamped directly onto individual trip lines when they are dispatched. This historical snapshot protects past financial summaries from altering if an administrator subsequently changes entries within the master Truck Type Map.
+
+### **Independent Route Frequency Tracking**
+
+Relying on live spreadsheet formulas (FILTER or SORT) across large date boundaries degrades sheet responsiveness over time. Offloading these interactions to an append-only transaction sheet allows the system to evaluate driver assignment thresholds using simple count queries over a rolling 21-day timeline.
