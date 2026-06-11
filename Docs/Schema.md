@@ -139,9 +139,12 @@ An append-only transaction ledger utilized by the internal fleet management appl
 | Column | Type | Notes |
 | :---- | :---- | :---- |
 | ID | Number | Auto-incrementing primary key |
+| Date | String | Timestamp of the assignment change (M/d/yyyy HH:mm:ss) |
 | Employee ID | Number | Foreign Key → Employee.ID |
-| Truck ID | Number | Foreign Key → Truck.ID |
+| Truck ID | Number | Foreign Key → Truck.ID (empty signals "unassigned") |
 | Type | String | Driver or Helper |
+
+**System Behavior:** `getCurrentAssignments()` reduces this log to the most recent row per employee (by Date) to derive the live current roster.
 
 ### **Sheet 8: Outlets**
 

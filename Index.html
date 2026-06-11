@@ -751,33 +751,44 @@
                 font-size: 12px;
             }
 
-            /* Unassigned drivers strip */
-            .unassigned-strip {
-                background: var(--amber-bg);
-                border-top: 1px solid #f0d9b5;
-                padding: 6px 14px;
+            /* Today's Roster (collapsible section in Dispatch panel) */
+            .today-roster {
                 display: flex;
-                align-items: center;
-                gap: 8px;
-                flex-wrap: wrap;
+                flex-direction: row;
                 flex-shrink: 0;
+                height: 300px;
+                border-top: 1px solid var(--border);
+                overflow: hidden;
             }
-            .unassigned-label {
+            .today-roster.collapsed {
+                display: none;
+            }
+            .roster-toggle-badge {
                 font-size: 10px;
                 font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                color: var(--amber);
-                white-space: nowrap;
-            }
-            .unassigned-driver-chip {
-                font-size: 11px;
-                padding: 2px 9px;
-                background: white;
-                border: 1px solid #f0d9b5;
+                padding: 1px 6px;
                 border-radius: 99px;
+                background: var(--amber-bg);
                 color: var(--amber);
+                margin-left: 4px;
+            }
+            .roster-toggle-badge:empty {
+                display: none;
+            }
+            #btn-toggle-roster.active {
+                background: var(--surface);
+                border-color: var(--border-md);
+                color: var(--text);
+            }
+            .sub-badge {
+                font-size: 10px;
+                font-family: "DM Mono", monospace;
                 font-weight: 500;
+                padding: 1px 6px;
+                border-radius: 99px;
+                background: var(--amber-bg);
+                color: var(--amber);
+                margin-left: 6px;
             }
 
             /* ── IMPORT PANEL ── */
@@ -956,10 +967,6 @@
             }
 
             /* ── ROSTER PANEL ── */
-            #panel-roster {
-                flex-direction: row;
-            }
-
             .col-left,
             .col-right {
                 display: flex;
@@ -1200,6 +1207,10 @@
                 border-collapse: collapse;
                 font-size: 12px;
             }
+            #defaults-table {
+                width: 100%;
+                table-layout: fixed;
+            }
             table.data-table thead th {
                 position: sticky;
                 top: 0;
@@ -1247,13 +1258,25 @@
                 white-space: nowrap;
             }
 
-            /* ── DEFAULT ASSIGNMENTS PANEL ── */
-            #panel-defaults {
-                flex-direction: column;
+            /* ── TRUCK ROSTER PANEL (default crew template) ── */
+            .roster-split {
+                display: flex;
+                flex-direction: row;
+                flex: 1;
+                overflow: hidden;
+            }
+            .roster-split .defaults-table-wrap {
+                flex: 1.4;
+            }
+            .roster-split .col-right {
+                border-left: 1px solid var(--border);
             }
             .defaults-table-wrap {
                 flex: 1;
                 overflow: auto;
+            }
+            table.data-table tbody tr.row-selected {
+                background: var(--blue-bg);
             }
 
             /* ── LOADING OVERLAY ── */
@@ -1536,13 +1559,6 @@
                     >
                         Outlets
                     </button>
-                    <button
-                        class="nav-btn admin-only"
-                        id="nav-defaults"
-                        onclick="switchPanel('defaults')"
-                    >
-                        Defaults
-                    </button>
                 </nav>
 
                 <div class="header-right">
@@ -1636,6 +1652,18 @@
                     >
                         ↺ Refresh
                     </button>
+                    <div class="tb-sep"></div>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-toggle-roster"
+                        onclick="toggleTodayRoster()"
+                    >
+                        Today's Roster
+                        <span
+                            class="roster-toggle-badge"
+                            id="roster-unassigned-badge"
+                        ></span>
+                    </button>
                 </div>
 
                 <!-- Stat bar -->
@@ -1667,8 +1695,8 @@
                         <div class="stat-val amber" id="ds-nowb">—</div>
                     </div>
                     <div class="stat-cell">
-                        <div class="stat-label">Unassigned drivers</div>
-                        <div class="stat-val muted" id="ds-unadrivers">—</div>
+                        <div class="stat-label">Unassigned crew</div>
+                        <div class="stat-val muted" id="ds-unassigned-crew">—</div>
                     </div>
                 </div>
 
@@ -1715,18 +1743,6 @@
                                 <tbody id="dispatch-tbody"></tbody>
                             </table>
                         </div>
-
-                        <!-- Unassigned drivers strip -->
-                        <div
-                            class="unassigned-strip"
-                            id="unassigned-strip"
-                            style="display: none"
-                        >
-                            <span class="unassigned-label"
-                                >Standby drivers</span
-                            >
-                            <div id="unassigned-driver-chips"></div>
-                        </div>
                     </div>
 
                     <!-- Trip sidebar (hidden until row selected) -->
@@ -1748,6 +1764,102 @@
                         </div>
                         <div class="sidebar-body" id="sb-body"></div>
                         <div class="sidebar-footer" id="sb-footer"></div>
+                    </div>
+                </div>
+
+                <!-- Today's Roster (collapsible) -->
+                <div class="today-roster collapsed" id="today-roster-section">
+                    <div class="col-left">
+                        <div class="col-head">
+                            <span>Trucks</span>
+                            <span
+                                id="truck-count"
+                                style="font-weight: 400"
+                            ></span>
+                        </div>
+                        <div class="col-search">
+                            <input
+                                id="truck-search"
+                                placeholder="Search plate or type…"
+                                oninput="renderTruckList()"
+                            />
+                        </div>
+                        <div class="list-scroll" id="truck-list"></div>
+                    </div>
+
+                    <div class="col-right">
+                        <div class="detail-col">
+                            <div class="col-head">Truck detail</div>
+                            <div class="detail-body" id="roster-detail-body">
+                                <div class="empty-board" style="padding: 24px 0">
+                                    <div class="icon">🚚</div>
+                                    <div class="sub">
+                                        Select a truck to view its crew
+                                    </div>
+                                </div>
+                            </div>
+                            <div
+                                class="assign-bar"
+                                id="roster-assign-bar"
+                                style="display: none"
+                            >
+                                <button
+                                    class="assign-btn disabled"
+                                    id="roster-assign-btn"
+                                    onclick="doAssign()"
+                                >
+                                    Assign employee
+                                </button>
+                                <div
+                                    class="assign-hint"
+                                    id="roster-assign-hint"
+                                ></div>
+                            </div>
+                        </div>
+
+                        <div class="emp-col">
+                            <div class="col-head">
+                                <span>Employees</span>
+                                <span
+                                    id="emp-count-label"
+                                    style="font-weight: 400"
+                                ></span>
+                            </div>
+                            <div class="emp-filter-bar">
+                                <button
+                                    class="pill active"
+                                    onclick="setEmpFilter('all', this)"
+                                >
+                                    All
+                                </button>
+                                <button
+                                    class="pill"
+                                    onclick="setEmpFilter('Driver', this)"
+                                >
+                                    Drivers
+                                </button>
+                                <button
+                                    class="pill"
+                                    onclick="setEmpFilter('Helper', this)"
+                                >
+                                    Helpers
+                                </button>
+                                <button
+                                    class="pill"
+                                    onclick="setEmpFilter('unassigned', this)"
+                                >
+                                    Unassigned
+                                </button>
+                            </div>
+                            <div class="col-search">
+                                <input
+                                    id="emp-search"
+                                    placeholder="Search employee…"
+                                    oninput="renderEmpList()"
+                                />
+                            </div>
+                            <div class="list-scroll" id="emp-list"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1867,96 +1979,117 @@
             </div>
 
             <!-- ══════════════════════════════════════
-       PANEL: TRUCK ROSTER
+       PANEL: TRUCK ROSTER (default crew template)
   ══════════════════════════════════════ -->
             <div class="panel" id="panel-roster">
-                <div class="col-left">
-                    <div class="col-head">
-                        <span>Trucks</span>
-                        <span id="truck-count" style="font-weight: 400"></span>
-                    </div>
-                    <div class="col-search">
-                        <input
-                            id="truck-search"
-                            placeholder="Search plate or type…"
-                            oninput="renderTruckList()"
-                        />
-                    </div>
-                    <div class="list-scroll" id="truck-list"></div>
+                <div class="toolbar">
+                    <input
+                        type="text"
+                        id="defaults-search"
+                        placeholder="Search plate or driver…"
+                        oninput="renderDefaults()"
+                        style="width: 220px"
+                    />
+                    <span class="tb-label" id="defaults-count"></span>
+                    <div class="tb-spacer"></div>
+                    <span
+                        class="tb-label"
+                        style="color: var(--hint); font-size: 10px"
+                        >Changes here affect new dispatch days only — not
+                        existing trips.</span
+                    >
                 </div>
+                <div class="roster-split">
+                    <div class="defaults-table-wrap">
+                        <table class="data-table" id="defaults-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 12%">Plate</th>
+                                    <th style="width: 15%">Type</th>
+                                    <th style="width: 17%">Default Driver</th>
+                                    <th style="width: 19%">Default Helper(s)</th>
+                                    <th style="width: 19%">Today's Crew</th>
+                                    <th style="width: 18%">Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="defaults-tbody"></tbody>
+                        </table>
+                    </div>
 
-                <div class="col-right">
-                    <div class="detail-col">
-                        <div class="col-head">Truck detail</div>
-                        <div class="detail-body" id="roster-detail-body">
-                            <div class="empty-board" style="padding: 24px 0">
-                                <div class="icon">🚚</div>
-                                <div class="sub">
-                                    Select a truck to view its crew
+                    <div class="col-right">
+                        <div class="detail-col">
+                            <div class="col-head">Default crew</div>
+                            <div class="detail-body" id="def-detail-body">
+                                <div class="empty-board" style="padding: 24px 0">
+                                    <div class="icon">🚚</div>
+                                    <div class="sub">
+                                        Select a truck to edit its default
+                                        crew
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <div
-                            class="assign-bar"
-                            id="roster-assign-bar"
-                            style="display: none"
-                        >
-                            <button
-                                class="assign-btn disabled"
-                                id="roster-assign-btn"
-                                onclick="doAssign()"
-                            >
-                                Assign employee
-                            </button>
                             <div
-                                class="assign-hint"
-                                id="roster-assign-hint"
-                            ></div>
+                                class="assign-bar"
+                                id="def-assign-bar"
+                                style="display: none"
+                            >
+                                <button
+                                    class="assign-btn disabled"
+                                    id="def-assign-btn"
+                                    onclick="doDefAssign()"
+                                >
+                                    Assign employee
+                                </button>
+                                <div
+                                    class="assign-hint"
+                                    id="def-assign-hint"
+                                ></div>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="emp-col">
-                        <div class="col-head">
-                            <span>Employees</span>
-                            <span
-                                id="emp-count-label"
-                                style="font-weight: 400"
-                            ></span>
+                        <div class="emp-col">
+                            <div class="col-head">
+                                <span>Employees</span>
+                                <span
+                                    id="def-emp-count-label"
+                                    style="font-weight: 400"
+                                ></span>
+                            </div>
+                            <div class="emp-filter-bar">
+                                <button
+                                    class="pill active"
+                                    onclick="setDefEmpFilter('all', this)"
+                                >
+                                    All
+                                </button>
+                                <button
+                                    class="pill"
+                                    onclick="setDefEmpFilter('Driver', this)"
+                                >
+                                    Drivers
+                                </button>
+                                <button
+                                    class="pill"
+                                    onclick="setDefEmpFilter('Helper', this)"
+                                >
+                                    Helpers
+                                </button>
+                                <button
+                                    class="pill"
+                                    onclick="setDefEmpFilter('unassigned', this)"
+                                >
+                                    Unassigned
+                                </button>
+                            </div>
+                            <div class="col-search">
+                                <input
+                                    id="def-emp-search"
+                                    placeholder="Search employee…"
+                                    oninput="renderDefEmpList()"
+                                />
+                            </div>
+                            <div class="list-scroll" id="def-emp-list"></div>
                         </div>
-                        <div class="emp-filter-bar">
-                            <button
-                                class="pill active"
-                                onclick="setEmpFilter('all', this)"
-                            >
-                                All
-                            </button>
-                            <button
-                                class="pill"
-                                onclick="setEmpFilter('Driver', this)"
-                            >
-                                Drivers
-                            </button>
-                            <button
-                                class="pill"
-                                onclick="setEmpFilter('Helper', this)"
-                            >
-                                Helpers
-                            </button>
-                            <button
-                                class="pill"
-                                onclick="setEmpFilter('unassigned', this)"
-                            >
-                                Unassigned
-                            </button>
-                        </div>
-                        <div class="col-search">
-                            <input
-                                id="emp-search"
-                                placeholder="Search employee…"
-                                oninput="renderEmpList()"
-                            />
-                        </div>
-                        <div class="list-scroll" id="emp-list"></div>
                     </div>
                 </div>
             </div>
@@ -1989,44 +2122,6 @@
                             </tr>
                         </thead>
                         <tbody id="outlets-tbody"></tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- ══════════════════════════════════════
-       PANEL: DEFAULT ASSIGNMENTS (admin)
-  ══════════════════════════════════════ -->
-            <div class="panel" id="panel-defaults">
-                <div class="toolbar">
-                    <input
-                        type="text"
-                        id="defaults-search"
-                        placeholder="Search plate or driver…"
-                        oninput="renderDefaults()"
-                        style="width: 220px"
-                    />
-                    <span class="tb-label" id="defaults-count"></span>
-                    <div class="tb-spacer"></div>
-                    <span
-                        class="tb-label"
-                        style="color: var(--hint); font-size: 10px"
-                        >Changes here affect new dispatch days only — not
-                        existing trips.</span
-                    >
-                </div>
-                <div class="defaults-table-wrap">
-                    <table class="data-table" id="defaults-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 100px">Plate</th>
-                                <th style="width: 80px">Type</th>
-                                <th style="width: 160px">Default Driver</th>
-                                <th style="width: 200px">Default Helper(s)</th>
-                                <th>Notes</th>
-                                <th style="width: 60px"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="defaults-tbody"></tbody>
                     </table>
                 </div>
             </div>
@@ -2106,59 +2201,6 @@
             </div>
         </div>
 
-        <!-- Edit Default Assignment Modal -->
-        <div class="modal-backdrop" id="modal-edit-default">
-            <div class="modal">
-                <div class="modal-head">
-                    <span class="modal-head-title" id="modal-default-title"
-                        >Edit default crew</span
-                    >
-                    <button
-                        class="modal-close"
-                        onclick="closeModal('modal-edit-default')"
-                    >
-                        ✕
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <div class="form-row">
-                        <label class="form-label">Default Driver</label>
-                        <select id="ed-driver"></select>
-                    </div>
-                    <div class="form-row">
-                        <label class="form-label">Default Helpers</label>
-                        <select id="ed-helper1"></select>
-                        <select
-                            id="ed-helper2"
-                            style="margin-top: 5px"
-                        ></select>
-                    </div>
-                    <div class="form-row">
-                        <label class="form-label">Notes</label>
-                        <input
-                            type="text"
-                            id="ed-notes"
-                            placeholder="e.g. Available Mon–Sat only"
-                        />
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button
-                        class="btn btn-ghost"
-                        onclick="closeModal('modal-edit-default')"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        class="btn btn-primary"
-                        onclick="submitEditDefault()"
-                    >
-                        Save
-                    </button>
-                </div>
-            </div>
-        </div>
-
         <div class="toast" id="toast"></div>
 
         <!-- ══ JAVASCRIPT ══ -->
@@ -2184,10 +2226,11 @@
             let defaultAssignments = [];
 
             // Dispatch state
-            let dispatchData = null; // { trips, unassignedDrivers, date }
+            let dispatchData = null; // { trips, date }
             let selectedTripId = null;
             let statusFilter = "all";
             let saving = false;
+            let todayRosterExpanded = false;
 
             // Roster state
             let selectedRosterTruckId = null;
@@ -2199,7 +2242,9 @@
             let importExcluded = new Set(); // indices excluded by dispatcher
 
             // Default assignments edit state
-            let editingDefaultId = null;
+            let selectedDefTruckId = null;
+            let selectedDefEmpId = null;
+            let defEmpFilter = "all";
 
             // ── BOOT ──────────────────────────────────────────────────
             window.addEventListener("load", bootApp);
@@ -2230,7 +2275,7 @@
 
             function loadAllMasterData() {
                 setLoading("Loading master data…");
-                let pending = 5;
+                let pending = 6;
                 const done = () => {
                     if (--pending === 0) {
                         hideLoading();
@@ -2302,12 +2347,29 @@
                         done();
                     })
                     .getOutlets();
+
+                google.script.run
+                    .withSuccessHandler((d) => {
+                        defaultAssignments = d || [];
+                        done();
+                    })
+                    .withFailureHandler((e) => {
+                        showToast(
+                            "Default assignments load failed: " + e.message,
+                            "error",
+                        );
+                        done();
+                    })
+                    .getDefaultAssignments();
             }
 
             function onMasterDataReady() {
-                renderRosterStats();
                 renderTruckList();
                 renderEmpList();
+                renderUnassignedCrewStat();
+                renderDefaults();
+                renderDefEmpList();
+                renderDefDetail();
                 renderOutlets();
                 populateAddTripSelects();
                 loadDispatch();
@@ -2327,7 +2389,6 @@
                     document
                         .querySelectorAll(".admin-only")
                         .forEach((el) => (el.style.display = ""));
-                    loadDefaultAssignments();
                 }
             }
 
@@ -2351,13 +2412,17 @@
                     .classList.add("active");
                 document.getElementById("nav-" + name).classList.add("active");
 
-                if (name === "dispatch") loadDispatch();
-                if (name === "roster") {
+                if (name === "dispatch") {
+                    loadDispatch();
                     renderTruckList();
                     renderEmpList();
                 }
+                if (name === "roster") {
+                    renderDefaults();
+                    renderDefEmpList();
+                    renderDefDetail();
+                }
                 if (name === "outlets") renderOutlets();
-                if (name === "defaults") renderDefaults();
             }
 
             // ── DISPATCH BOARD ────────────────────────────────────────
@@ -2404,26 +2469,7 @@
                     (t) => !t.waybillSuggested && !t.waybillConfirmed,
                 ).length;
                 document.getElementById("ds-nowb").textContent = noWb;
-                document.getElementById("ds-unadrivers").textContent = (
-                    dispatchData.unassignedDrivers || []
-                ).length;
-
-                // Unassigned drivers strip
-                const strip = document.getElementById("unassigned-strip");
-                const uad = dispatchData.unassignedDrivers || [];
-                if (uad.length > 0) {
-                    strip.style.display = "";
-                    document.getElementById(
-                        "unassigned-driver-chips",
-                    ).innerHTML = uad
-                        .map(
-                            (d) =>
-                                `<span class="unassigned-driver-chip">${esc(d.nick)}</span>`,
-                        )
-                        .join("");
-                } else {
-                    strip.style.display = "none";
-                }
+                renderUnassignedCrewStat();
 
                 // Table
                 const empty = document.getElementById("dispatch-empty");
@@ -3330,8 +3376,31 @@
             }
 
             // ── TRUCK ROSTER ──────────────────────────────────────────
-            function renderRosterStats() {
-                // Stats are within the dispatch stat bar for Phase 1 — roster uses live data
+            function getUnassignedCrew() {
+                return employees.filter(
+                    (e) =>
+                        e.active !== false &&
+                        (e.role === "Driver" || e.role === "Helper") &&
+                        !getEmpAssignment(e.id),
+                );
+            }
+
+            function renderUnassignedCrewStat() {
+                const count = getUnassignedCrew().length;
+                document.getElementById("ds-unassigned-crew").textContent =
+                    count;
+                document.getElementById("roster-unassigned-badge").textContent =
+                    count > 0 ? count : "";
+            }
+
+            function toggleTodayRoster() {
+                todayRosterExpanded = !todayRosterExpanded;
+                document
+                    .getElementById("today-roster-section")
+                    .classList.toggle("collapsed", !todayRosterExpanded);
+                document
+                    .getElementById("btn-toggle-roster")
+                    .classList.toggle("active", todayRosterExpanded);
             }
 
             function renderTruckList() {
@@ -3411,8 +3480,8 @@
 
             function setEmpFilter(f, btn) {
                 empFilter = f;
-                document
-                    .querySelectorAll(".emp-filter-bar .pill")
+                btn.parentElement
+                    .querySelectorAll(".pill")
                     .forEach((b) => b.classList.remove("active"));
                 btn.classList.add("active");
                 renderEmpList();
@@ -3612,6 +3681,7 @@
                         renderTruckList();
                         renderEmpList();
                         renderRosterDetail();
+                        renderUnassignedCrewStat();
                     })
                     .withFailureHandler((e) => {
                         showToast("Sync failed: " + e.message, "error");
@@ -3741,94 +3811,443 @@
                         const helpers = (d.defaultHelperIds || [])
                             .map((hid) => empMap[hid]?.nick || `ID:${hid}`)
                             .join(", ");
-                        return `<tr>
+
+                        const today = getTodaysCrew(d.truckId);
+                        const todayDriver = today.driverId
+                            ? empMap[today.driverId]
+                            : null;
+                        const todayHelperNicks = today.helperIds
+                            .map((hid) => empMap[hid]?.nick || `ID:${hid}`)
+                            .join(", ");
+                        const todayParts = [];
+                        if (todayDriver)
+                            todayParts.push(
+                                `<span style="font-weight:500">${esc(todayDriver.nick)}</span>`,
+                            );
+                        if (todayHelperNicks)
+                            todayParts.push(esc(todayHelperNicks));
+                        const todayCrewHtml = todayParts.length
+                            ? todayParts.join(" + ")
+                            : '<span style="color:var(--hint);font-style:italic">Unassigned</span>';
+
+                        const defDriverId =
+                            d.defaultDriverId != null
+                                ? Number(d.defaultDriverId)
+                                : null;
+                        const defHelperSet = new Set(
+                            (d.defaultHelperIds || []).map(Number),
+                        );
+                        const todayHelperSet = new Set(today.helperIds);
+                        const isSub =
+                            defDriverId !== today.driverId ||
+                            defHelperSet.size !== todayHelperSet.size ||
+                            [...defHelperSet].some(
+                                (id) => !todayHelperSet.has(id),
+                            );
+                        const subBadge = isSub
+                            ? '<span class="sub-badge">Sub</span>'
+                            : "";
+
+                        const selCls =
+                            selectedDefTruckId == d.truckId
+                                ? " row-selected"
+                                : "";
+                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectDefTruck(${d.truckId})">
       <td style="font-family:'DM Mono',monospace;font-weight:500">${esc(truck.plate || "—")}</td>
       <td style="font-size:11px;color:var(--muted)">${esc(truck.type || "—")}</td>
       <td>${driver.nick ? `<span style="font-weight:500">${esc(driver.nick)}</span>` : '<span style="color:var(--hint);font-style:italic">None</span>'}</td>
       <td style="font-size:11px;color:var(--muted)">${helpers || '<span style="color:var(--hint);font-style:italic">None</span>'}</td>
+      <td style="font-size:11px;cursor:pointer" onclick="event.stopPropagation();goToTodaysRoster(${d.truckId})" title="View / edit today's roster for this truck">${todayCrewHtml}${subBadge}</td>
       <td style="font-size:11px;color:var(--muted)">${esc(d.notes || "")}</td>
-      <td><span class="edit-link" onclick="openEditDefaultModal(${d.id})">Edit</span></td>
     </tr>`;
                     })
                     .join("");
             }
 
-            function openEditDefaultModal(defaultId) {
-                editingDefaultId = defaultId;
-                const d = defaultAssignments.find((x) => x.id === defaultId);
-                const truck = trucks.find(
-                    (t) => Number(t.id) === Number(d.truckId),
-                );
-                document.getElementById("modal-default-title").textContent =
-                    `Default crew — ${truck?.plate || "Truck"}`;
-
-                const driverSel = document.getElementById("ed-driver");
-                const helper1 = document.getElementById("ed-helper1");
-                const helper2 = document.getElementById("ed-helper2");
-
-                const driverOpts =
-                    `<option value="">— None —</option>` +
-                    employees
-                        .filter(
-                            (e) => e.role === "Driver" && e.active !== false,
-                        )
-                        .map(
-                            (e) =>
-                                `<option value="${e.id}" ${Number(e.id) === Number(d.defaultDriverId) ? "selected" : ""}>${esc(e.nick)}</option>`,
-                        )
-                        .join("");
-                const helperOpts = (sel) =>
-                    `<option value="">— None —</option>` +
-                    employees
-                        .filter(
-                            (e) => e.role === "Helper" && e.active !== false,
-                        )
-                        .map(
-                            (e) =>
-                                `<option value="${e.id}" ${Number(e.id) === Number(sel) ? "selected" : ""}>${esc(e.nick)}</option>`,
-                        )
-                        .join("");
-
-                driverSel.innerHTML = driverOpts;
-                helper1.innerHTML = helperOpts(d.defaultHelperIds?.[0]);
-                helper2.innerHTML = helperOpts(d.defaultHelperIds?.[1]);
-                document.getElementById("ed-notes").value = d.notes || "";
-
-                openModal("modal-edit-default");
-            }
-
-            function submitEditDefault() {
-                if (!editingDefaultId) return;
-                const driverId =
-                    Number(document.getElementById("ed-driver").value) || null;
-                const h1 =
-                    Number(document.getElementById("ed-helper1").value) || null;
-                const h2 =
-                    Number(document.getElementById("ed-helper2").value) || null;
-                const helperIds = [h1, h2].filter(Boolean);
-                const notes = document.getElementById("ed-notes").value;
-
+            function saveDefNotes(defaultAssignId, notes) {
                 setSyncing(true);
                 google.script.run
                     .withSuccessHandler((r) => {
                         setSyncing(false);
-                        closeModal("modal-edit-default");
                         if (!r.success) {
                             showToast("Save failed: " + r.error, "error");
                             return;
                         }
-                        showToast("Default crew updated.", "success");
-                        loadDefaultAssignments();
+                        const d = defaultAssignments.find(
+                            (x) => x.id === defaultAssignId,
+                        );
+                        if (d) d.notes = notes;
+                        showToast("Notes updated.", "success");
+                        renderDefaults();
                     })
                     .withFailureHandler((e) => {
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
                     })
-                    .updateDefaultAssignment(editingDefaultId, {
-                        defaultDriverId: driverId,
-                        defaultHelperIds: helperIds,
-                        notes,
+                    .updateDefaultAssignment(defaultAssignId, { notes });
+            }
+
+            // ── DEFAULT CREW PICKER (Truck Roster panel) ───────────────
+            function getDefaultCrew(truckId) {
+                const d = defaultAssignments.find(
+                    (x) => Number(x.truckId) === Number(truckId),
+                );
+                return {
+                    driverId:
+                        d?.defaultDriverId != null
+                            ? Number(d.defaultDriverId)
+                            : null,
+                    helperIds: (d?.defaultHelperIds || []).map(Number),
+                };
+            }
+
+            function getDefEmpAssignment(empId) {
+                const id = Number(empId);
+                const d = defaultAssignments.find(
+                    (x) =>
+                        Number(x.defaultDriverId) === id ||
+                        (x.defaultHelperIds || [])
+                            .map(Number)
+                            .includes(id),
+                );
+                if (!d) return null;
+                return {
+                    truckId: d.truckId,
+                    type: Number(d.defaultDriverId) === id ? "Driver" : "Helper",
+                };
+            }
+
+            function selectDefTruck(id) {
+                selectedDefTruckId = Number(id);
+                selectedDefEmpId = null;
+                renderDefaults();
+                renderDefEmpList();
+                renderDefDetail();
+            }
+
+            function selectDefEmp(id) {
+                if (!selectedDefTruckId) {
+                    showToast("Select a truck first.");
+                    return;
+                }
+                selectedDefEmpId =
+                    selectedDefEmpId == id ? null : Number(id);
+                renderDefEmpList();
+                renderDefDetail();
+            }
+
+            function setDefEmpFilter(f, btn) {
+                defEmpFilter = f;
+                btn.parentElement
+                    .querySelectorAll(".pill")
+                    .forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
+                renderDefEmpList();
+            }
+
+            function renderDefEmpList() {
+                const q = (
+                    document.getElementById("def-emp-search").value || ""
+                ).toLowerCase();
+                const list = document.getElementById("def-emp-list");
+                const truckMap = indexById(trucks);
+                const filtered = employees.filter((e) => {
+                    const matchQ =
+                        !q || (e.nick || "").toLowerCase().includes(q);
+                    const asgn = getDefEmpAssignment(e.id);
+                    if (defEmpFilter === "Driver")
+                        return matchQ && e.role === "Driver";
+                    if (defEmpFilter === "Helper")
+                        return matchQ && e.role === "Helper";
+                    if (defEmpFilter === "unassigned")
+                        return matchQ && !asgn;
+                    return matchQ;
+                });
+                document.getElementById("def-emp-count-label").textContent =
+                    `${filtered.length} shown`;
+                list.innerHTML = filtered
+                    .map((e) => {
+                        const asgn = getDefEmpAssignment(e.id);
+                        const truck = asgn
+                            ? truckMap[asgn.truckId]
+                            : null;
+                        const isSel = selectedDefEmpId == e.id;
+                        const isDimmed = !!asgn && !isSel;
+                        return `<div class="list-item${isSel ? " selected" : ""}${isDimmed ? " dimmed" : ""}" onclick="selectDefEmp(${e.id})">
+      <span class="badge ${e.role === "Driver" ? "badge-driver" : "badge-helper"}">${e.role === "Driver" ? "D" : "H"}</span>
+      <div style="min-width:0;flex:1">
+        <div class="item-main">${esc(e.nick)}</div>
+        <div class="item-sub">${truck ? truck.plate : "Unassigned"}</div>
+      </div>
+    </div>`;
+                    })
+                    .join("");
+            }
+
+            function renderDefDetail() {
+                const body = document.getElementById("def-detail-body");
+                const bar = document.getElementById("def-assign-bar");
+                const btn = document.getElementById("def-assign-btn");
+                const hint = document.getElementById("def-assign-hint");
+                const isAdmin = currentUser.role === "Admin";
+
+                if (!selectedDefTruckId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🚚</div><div class="sub">Select a truck to edit its default crew</div></div>`;
+                    bar.style.display = "none";
+                    return;
+                }
+                const t = trucks.find(
+                    (t) => Number(t.id) === Number(selectedDefTruckId),
+                );
+                const crew = getDefaultCrew(selectedDefTruckId);
+                const driver = crew.driverId
+                    ? employees.find(
+                          (e) => Number(e.id) === Number(crew.driverId),
+                      )
+                    : null;
+
+                let html = `<div class="detail-plate">${esc(t.plate)}</div>
+              <div class="detail-type">${esc(t.brand)} · ${esc(t.type)}</div>
+              <div class="section-lbl">Default Driver</div>`;
+                if (driver) {
+                    html += `<div class="crew-item"><span class="badge badge-driver">Driver</span><span class="crew-item-name">${esc(driver.nick)}</span>
+             ${isAdmin ? `<button class="remove-btn" onclick="doDefRemove(${driver.id},'Driver')">Remove</button>` : ""}</div>`;
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic;padding:3px 0">No default driver</div>`;
+                }
+                html += `<div class="section-lbl">Default Helpers (${crew.helperIds.length})</div>`;
+                if (crew.helperIds.length > 0) {
+                    crew.helperIds.forEach((hid) => {
+                        const em = employees.find(
+                            (e) => Number(e.id) === Number(hid),
+                        );
+                        html += `<div class="crew-item"><span class="badge badge-helper">Helper</span><span class="crew-item-name">${esc(em?.nick || "?")}</span>
+               ${isAdmin ? `<button class="remove-btn" onclick="doDefRemove(${hid},'Helper')">Remove</button>` : ""}</div>`;
                     });
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic;padding:3px 0">No default helpers</div>`;
+                }
+
+                const d = defaultAssignments.find(
+                    (x) => Number(x.truckId) === Number(selectedDefTruckId),
+                );
+                html += `<div class="section-lbl">Notes</div>`;
+                if (isAdmin) {
+                    html += `<input type="text" id="def-notes-input" value="${esc(d?.notes || "")}" placeholder="e.g. Available Mon–Sat only" style="width:100%" onchange="saveDefNotes(${d.id}, this.value)" />`;
+                } else if (d?.notes) {
+                    html += `<div style="font-size:11px;color:var(--text)">${esc(d.notes)}</div>`;
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic">No notes</div>`;
+                }
+
+                body.innerHTML = html;
+
+                if (!isAdmin) {
+                    bar.style.display = "none";
+                    return;
+                }
+                bar.style.display = "";
+
+                if (selectedDefEmpId) {
+                    const em = employees.find(
+                        (e) => Number(e.id) === Number(selectedDefEmpId),
+                    );
+                    const onThisTruck =
+                        crew.driverId === Number(selectedDefEmpId) ||
+                        crew.helperIds.includes(Number(selectedDefEmpId));
+                    if (onThisTruck) {
+                        btn.textContent = `Remove ${em.nick}`;
+                        btn.className = "assign-btn";
+                        btn.style.background = "var(--red-bg)";
+                        btn.style.color = "var(--red)";
+                        hint.textContent = "";
+                    } else if (
+                        em.role === "Helper" &&
+                        crew.helperIds.length >= 2
+                    ) {
+                        btn.textContent = `Helper slots full on ${t.plate}`;
+                        btn.className = "assign-btn disabled";
+                        btn.style.background = "";
+                        btn.style.color = "";
+                        hint.textContent =
+                            "Remove a helper first, or pick a different truck.";
+                    } else {
+                        btn.textContent = `Assign ${em.nick} → ${t.plate}`;
+                        btn.className = "assign-btn primary";
+                        btn.style.background = "";
+                        btn.style.color = "";
+                        const existing = getDefEmpAssignment(em.id);
+                        hint.textContent = existing
+                            ? `Will move from ${trucks.find((tt) => Number(tt.id) === Number(existing.truckId))?.plate}`
+                            : "";
+                    }
+                } else {
+                    btn.textContent = "Assign employee";
+                    btn.className = "assign-btn disabled";
+                    btn.style.background = "";
+                    btn.style.color = "";
+                    hint.textContent = "Select an employee from the list →";
+                }
+            }
+
+            function callUpdateDefault(defaultAssignId, changes) {
+                return new Promise((resolve, reject) => {
+                    google.script.run
+                        .withSuccessHandler(resolve)
+                        .withFailureHandler(reject)
+                        .updateDefaultAssignment(defaultAssignId, changes);
+                });
+            }
+
+            async function doDefAssign() {
+                if (saving || !selectedDefTruckId || !selectedDefEmpId)
+                    return;
+                const em = employees.find(
+                    (e) => Number(e.id) === Number(selectedDefEmpId),
+                );
+                const t = trucks.find(
+                    (t) => Number(t.id) === Number(selectedDefTruckId),
+                );
+                const d = defaultAssignments.find(
+                    (x) => Number(x.truckId) === Number(selectedDefTruckId),
+                );
+                if (!d) return;
+
+                const crew = getDefaultCrew(selectedDefTruckId);
+                const onThisTruck =
+                    crew.driverId === Number(em.id) ||
+                    crew.helperIds.includes(Number(em.id));
+                if (onThisTruck) {
+                    doDefRemove(selectedDefEmpId, em.role);
+                    return;
+                }
+
+                if (em.role === "Helper" && crew.helperIds.length >= 2) {
+                    showToast(
+                        `${t.plate} already has 2 default helpers.`,
+                        "error",
+                    );
+                    return;
+                }
+                if (
+                    em.role === "Driver" &&
+                    crew.driverId &&
+                    !confirm(
+                        `${t.plate} already has default driver ${employees.find((e) => Number(e.id) === Number(crew.driverId))?.nick}. Replace?`,
+                    )
+                )
+                    return;
+
+                const existing = getDefEmpAssignment(em.id);
+                if (
+                    existing &&
+                    !confirm(
+                        `${em.nick} is already the default ${existing.type.toLowerCase()} for ${trucks.find((tt) => Number(tt.id) === Number(existing.truckId))?.plate}. Move to ${t.plate}?`,
+                    )
+                )
+                    return;
+
+                saving = true;
+                setSyncing(true);
+                try {
+                    if (existing) {
+                        const ed = defaultAssignments.find(
+                            (x) =>
+                                Number(x.truckId) ===
+                                Number(existing.truckId),
+                        );
+                        const exChanges =
+                            existing.type === "Driver"
+                                ? { defaultDriverId: null }
+                                : {
+                                      defaultHelperIds: (
+                                          ed.defaultHelperIds || []
+                                      ).filter(
+                                          (id) =>
+                                              Number(id) !== Number(em.id),
+                                      ),
+                                  };
+                        const r1 = await callUpdateDefault(ed.id, exChanges);
+                        if (!r1.success) throw new Error(r1.error);
+                        Object.assign(ed, exChanges);
+                    }
+
+                    const changes =
+                        em.role === "Driver"
+                            ? { defaultDriverId: Number(em.id) }
+                            : {
+                                  defaultHelperIds: [
+                                      ...crew.helperIds,
+                                      Number(em.id),
+                                  ],
+                              };
+                    const r2 = await callUpdateDefault(d.id, changes);
+                    if (!r2.success) throw new Error(r2.error);
+                    Object.assign(d, changes);
+
+                    showToast(`${em.nick} → ${t.plate} (default)`, "success");
+                    selectedDefEmpId = null;
+                    renderDefaults();
+                    renderDefEmpList();
+                    renderDefDetail();
+                } catch (e) {
+                    showToast("Error: " + e.message, "error");
+                } finally {
+                    saving = false;
+                    setSyncing(false);
+                }
+            }
+
+            function doDefRemove(empId, type) {
+                if (
+                    !confirm(
+                        `Remove this ${type.toLowerCase()} from the default crew?`,
+                    )
+                )
+                    return;
+                const d = defaultAssignments.find((x) =>
+                    type === "Driver"
+                        ? Number(x.defaultDriverId) === Number(empId)
+                        : (x.defaultHelperIds || [])
+                              .map(Number)
+                              .includes(Number(empId)),
+                );
+                if (!d) return;
+                const changes =
+                    type === "Driver"
+                        ? { defaultDriverId: null }
+                        : {
+                              defaultHelperIds: (
+                                  d.defaultHelperIds || []
+                              ).filter(
+                                  (id) => Number(id) !== Number(empId),
+                              ),
+                          };
+
+                saving = true;
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        saving = false;
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Remove failed: " + r.error, "error");
+                            return;
+                        }
+                        Object.assign(d, changes);
+                        showToast("Removed.", "success");
+                        if (selectedDefEmpId == empId)
+                            selectedDefEmpId = null;
+                        renderDefaults();
+                        renderDefEmpList();
+                        renderDefDetail();
+                    })
+                    .withFailureHandler((e) => {
+                        saving = false;
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateDefaultAssignment(d.id, changes);
             }
 
             // ── ROSTER HELPERS ────────────────────────────────────────
@@ -3853,6 +4272,23 @@
                 if (hasD && hasH) return "full";
                 if (hasD || hasH) return "partial";
                 return "empty";
+            }
+            function getTodaysCrew(truckId) {
+                const crew = getRosterCrew(truckId);
+                const driver = crew.find((a) => a.type === "Driver");
+                const helpers = crew.filter((a) => a.type === "Helper");
+                return {
+                    driverId: driver ? Number(driver.employeeId) : null,
+                    helperIds: helpers.map((h) => Number(h.employeeId)),
+                };
+            }
+            function goToTodaysRoster(truckId) {
+                switchPanel("dispatch");
+                if (!todayRosterExpanded) toggleTodayRoster();
+                selectRosterTruck(truckId);
+                document
+                    .getElementById("today-roster-section")
+                    .scrollIntoView({ behavior: "smooth", block: "nearest" });
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────

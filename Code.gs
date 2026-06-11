@@ -382,7 +382,6 @@ function getDispatchBoardData(dateStr) {
   const outlets  = _indexById(getOutlets());
   const employees = _indexById(getEmployees());
   const trucks   = _indexById(getTrucks());
-  const defaults = getDefaultAssignments();
 
   const enriched = trips.map(trip => {
     const outlet = outlets[trip.outletId] || {};
@@ -402,17 +401,9 @@ function getDispatchBoardData(dateStr) {
     });
   });
 
-  // Drivers not yet assigned to any trip today
-  const assignedDriverIds = new Set(trips.map(t => t.driverId).filter(Boolean));
-  const allDrivers = getEmployees().filter(e => e.role === 'Driver' && e.active !== false);
-  const unassignedDrivers = allDrivers
-    .filter(d => !assignedDriverIds.has(d.id))
-    .map(d => ({ id: d.id, nick: d.nick }));
-
   return {
-    trips:            enriched,
-    unassignedDrivers: unassignedDrivers,
-    date:             dateStr,
+    trips: enriched,
+    date:  dateStr,
   };
 }
 
