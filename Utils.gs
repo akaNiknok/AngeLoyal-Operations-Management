@@ -1,0 +1,203 @@
+// ============================================================
+//  AngeLoyal OMS — Utils.gs
+//  Generic sheet/row helpers shared by all backend modules.
+// ============================================================
+
+/**
+ * Returns the sheet by name, throwing a clear error if not found.
+ * @param {string} name
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet}
+ */
+function _getSheet(name) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) throw new Error(`Sheet "${name}" not found. Check that the sheet name matches exactly.`);
+  return sheet;
+}
+
+/**
+ * Gets the value at a named column header position in a row.
+ * Returns '' if the column doesn't exist or the value is null/undefined.
+ *
+ * @param {Array}  row
+ * @param {Array}  headers
+ * @param {string} colName
+ * @returns {*}
+ */
+function _val(row, headers, colName) {
+  const idx = headers.indexOf(colName);
+  if (idx === -1) return '';
+  const v = row[idx];
+  return (v === null || v === undefined) ? '' : v;
+}
+
+/**
+ * Reads a cell that should be a timestamp string. If Sheets has auto-converted
+ * the cell to a Date object (e.g. because the column is date-formatted),
+ * formats it back to 'M/d/yyyy HH:mm:ss' so it serializes safely over
+ * google.script.run (which can't handle raw Date objects nested in arrays).
+ *
+ * @param {Array} row
+ * @param {string[]} headers
+ * @param {string} colName
+ * @returns {string}
+ */
+function _valDateTime(row, headers, colName) {
+  const v = _val(row, headers, colName);
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+  return v || '';
+}
+
+/**
+ * Converts a value to a number or returns null if not numeric.
+ * Guards against Google Sheets returning empty strings for blank numeric cells.
+ *
+ * @param {*} v
+ * @returns {number|null}
+ */
+function _numOrNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+/**
+ * Reads a date cell value safely.
+ * Google Sheets returns Date objects for formatted date cells and numeric serial numbers
+ * for unformatted ones. Returns a JS Date or null.
+ *
+ * @param {*} val
+ * @returns {Date|null}
+ */
+function _readDateCell(val) {
+  if (!val || val === '') return null;
+  if (val instanceof Date) return val;
+  if (typeof val === 'number') return new Date((val - 25569) * 86400000); // Excel serial → JS Date
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Parses a date string in 'M/d/yyyy' format into a JS Date at midnight.
+ * @param {string} str
+ * @returns {Date}
+ */
+function _parseDate(str) {
+  if (!str) return new Date();
+  const parts = str.split('/');
+  if (parts.length < 3) return new Date(str);
+  return new Date(Number(parts[2]), Number(parts[0]) - 1, Number(parts[1]));
+}
+
+/**
+ * Returns a Date set to midnight (start of day) in the script timezone.
+ * @param {Date} d
+ * @returns {Date}
+ */
+function _startOfDay(d) {
+  const copy = new Date(d);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+/**
+ * Formats a Date as 'M/d/yyyy'.
+ * @param {Date|null} d
+ * @returns {string}
+ */
+function _formatDate(d) {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+
+/**
+ * Returns the next business day (Monday-Saturday schedule; skips Sundays).
+ * Adjust the logic here if the warehouse has different rest days.
+ *
+ * @param {Date} from
+ * @returns {Date}
+ */
+function _nextBusinessDay(from) {
+  const next = new Date(from);
+  next.setDate(next.getDate() + 1);
+  // Skip Sundays (0 = Sunday)
+  if (next.getDay() === 0) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+/**
+ * Computes the next available ID for a sheet by reading the last row's ID column.
+ * Assumes column 1 is the ID column.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @returns {number}
+ */
+function _nextRowId(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 1;
+  const lastId = Number(sheet.getRange(lastRow, 1).getValue());
+  return isNaN(lastId) ? lastRow : lastId + 1;
+}
+
+/**
+ * Appends multiple rows to a sheet in a single Sheets API call.
+ * No-op if `rows2D` is empty.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array[]} rows2D  Array of row arrays, all the same length.
+ */
+function _appendRows(sheet, rows2D) {
+  if (!rows2D || rows2D.length === 0) return;
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, rows2D.length, rows2D[0].length).setValues(rows2D);
+}
+
+/**
+ * Finds the (1-based) row index of a row with a matching ID value.
+ * Returns -1 if not found.
+ * rowIdx returned is 0-based into the rows array; add 1 for sheet row number.
+ *
+ * @param {Array[]}  rows
+ * @param {Array}    headers
+ * @param {number}   id
+ * @returns {number}  0-based index into rows array (rows[0] = header, rows[1] = first data row)
+ */
+function _findRowById(rows, headers, id) {
+  const idIdx = headers.indexOf('ID');
+  if (idIdx === -1) return -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (Number(rows[i][idIdx]) === Number(id)) return i;
+  }
+  return -1;
+}
+
+/**
+ * Applies a set of { colName: value } updates to an in-memory row array,
+ * then writes the entire row back to the sheet in a single setValues() call.
+ * Replaces per-field _setCellByHeader() calls (one Range write per field).
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array}  row      The row's current values (will be mutated in place).
+ * @param {number} rowIdx   0-based index into the sheet's getDataRange() rows array.
+ * @param {Array}  headers
+ * @param {Object} updates  Map of { colName: newValue }
+ */
+function _writeRowFields(sheet, row, rowIdx, headers, updates) {
+  Object.keys(updates).forEach(colName => {
+    const colIdx = headers.indexOf(colName);
+    if (colIdx === -1) throw new Error(`Column "${colName}" not found in sheet "${sheet.getName()}".`);
+    row[colIdx] = updates[colName];
+  });
+  sheet.getRange(rowIdx + 1, 1, 1, row.length).setValues([row]);
+}
+
+/**
+ * Builds a { id → object } index from an array of objects that have an `id` field.
+ * @param {Object[]} arr
+ * @returns {Object}
+ */
+function _indexById(arr) {
+  const map = {};
+  (arr || []).forEach(item => { if (item.id !== null) map[item.id] = item; });
+  return map;
+}

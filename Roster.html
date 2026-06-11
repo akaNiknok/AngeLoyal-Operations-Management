@@ -1,0 +1,911 @@
+<script>
+            // ── TRUCK ROSTER ──────────────────────────────────────────
+            function getUnassignedCrew() {
+                return employees.filter(
+                    (e) =>
+                        e.active !== false &&
+                        (e.role === "Driver" || e.role === "Helper") &&
+                        !getEmpAssignment(e.id),
+                );
+            }
+
+            function renderUnassignedCrewStat() {
+                const count = getUnassignedCrew().length;
+                document.getElementById("ds-unassigned-crew").textContent =
+                    count;
+                document.getElementById("roster-unassigned-badge").textContent =
+                    count > 0 ? count : "";
+            }
+
+            function toggleTodayRoster() {
+                todayRosterExpanded = !todayRosterExpanded;
+                document
+                    .getElementById("today-roster-section")
+                    .classList.toggle("collapsed", !todayRosterExpanded);
+                document
+                    .getElementById("btn-toggle-roster")
+                    .classList.toggle("active", todayRosterExpanded);
+            }
+
+            function renderTruckList() {
+                const q = (
+                    document.getElementById("truck-search").value || ""
+                ).toLowerCase();
+                const list = document.getElementById("truck-list");
+                const filtered = trucks.filter(
+                    (t) =>
+                        !q ||
+                        (t.plate || "").toLowerCase().includes(q) ||
+                        (t.type || "").toLowerCase().includes(q) ||
+                        (t.brand || "").toLowerCase().includes(q),
+                );
+                document.getElementById("truck-count").textContent =
+                    `${filtered.length}/${trucks.length}`;
+                list.innerHTML = filtered
+                    .map((t) => {
+                        const status = crewStatus(t.id);
+                        const pipCls =
+                            status === "full"
+                                ? "pip-full"
+                                : status === "partial"
+                                  ? "pip-partial"
+                                  : "pip-empty";
+                        const selCls =
+                            selectedRosterTruckId == t.id ? " selected" : "";
+                        return `<div class="list-item${selCls}" onclick="selectRosterTruck(${t.id})">
+      <span class="status-pip ${pipCls}"></span>
+      <div style="min-width:0;flex:1">
+        <div class="item-main">${esc(t.plate)}</div>
+        <div class="item-sub">${esc(t.type)}</div>
+      </div>
+    </div>`;
+                    })
+                    .join("");
+            }
+
+            function renderEmpList() {
+                const q = (
+                    document.getElementById("emp-search").value || ""
+                ).toLowerCase();
+                const list = document.getElementById("emp-list");
+                const filtered = employees.filter((e) => {
+                    const matchQ =
+                        !q || (e.nick || "").toLowerCase().includes(q);
+                    const asgn = getEmpAssignment(e.id);
+                    if (empFilter === "Driver")
+                        return matchQ && e.role === "Driver";
+                    if (empFilter === "Helper")
+                        return matchQ && e.role === "Helper";
+                    if (empFilter === "unassigned") return matchQ && !asgn;
+                    return matchQ;
+                });
+                document.getElementById("emp-count-label").textContent =
+                    `${filtered.length} shown`;
+                list.innerHTML = filtered
+                    .map((e) => {
+                        const asgn = getEmpAssignment(e.id);
+                        const truck = asgn
+                            ? trucks.find(
+                                  (t) => Number(t.id) === Number(asgn.truckId),
+                              )
+                            : null;
+                        const isSel = selectedRosterEmpId == e.id;
+                        const isDimmed = !!asgn && !isSel;
+                        return `<div class="list-item${isSel ? " selected" : ""}${isDimmed ? " dimmed" : ""}" onclick="selectRosterEmp(${e.id})">
+      <span class="badge ${e.role === "Driver" ? "badge-driver" : "badge-helper"}">${e.role === "Driver" ? "D" : "H"}</span>
+      <div style="min-width:0;flex:1">
+        <div class="item-main">${esc(e.nick)}</div>
+        <div class="item-sub">${truck ? truck.plate : "Unassigned"}</div>
+      </div>
+    </div>`;
+                    })
+                    .join("");
+            }
+
+            function setEmpFilter(f, btn) {
+                empFilter = f;
+                btn.parentElement
+                    .querySelectorAll(".pill")
+                    .forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
+                renderEmpList();
+            }
+
+            function renderRosterDetail() {
+                const body = document.getElementById("roster-detail-body");
+                const bar = document.getElementById("roster-assign-bar");
+                const btn = document.getElementById("roster-assign-btn");
+                const hint = document.getElementById("roster-assign-hint");
+
+                if (!selectedRosterTruckId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🚚</div><div class="sub">Select a truck to view its crew</div></div>`;
+                    bar.style.display = "none";
+                    return;
+                }
+                bar.style.display = "";
+                const t = trucks.find(
+                    (t) => Number(t.id) === Number(selectedRosterTruckId),
+                );
+                const crew = getRosterCrew(selectedRosterTruckId);
+                const driver = crew.find((a) => a.type === "Driver");
+                const helpers = crew.filter((a) => a.type === "Helper");
+
+                let html = `<div class="detail-plate">${esc(t.plate)}</div>
+              <div class="detail-type">${esc(t.brand)} · ${esc(t.type)}</div>
+              <div class="section-lbl">Driver</div>`;
+                if (driver) {
+                    const em = employees.find(
+                        (e) => Number(e.id) === Number(driver.employeeId),
+                    );
+                    html += `<div class="crew-item"><span class="badge badge-driver">Driver</span><span class="crew-item-name">${esc(em?.nick || "?")}</span>
+             <button class="remove-btn" onclick="doRosterRemove(${driver.employeeId},'Driver')">Remove</button></div>`;
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic;padding:3px 0">No driver assigned</div>`;
+                }
+                html += `<div class="section-lbl">Helpers (${helpers.length})</div>`;
+                if (helpers.length > 0) {
+                    helpers.forEach((h) => {
+                        const em = employees.find(
+                            (e) => Number(e.id) === Number(h.employeeId),
+                        );
+                        html += `<div class="crew-item"><span class="badge badge-helper">Helper</span><span class="crew-item-name">${esc(em?.nick || "?")}</span>
+               <button class="remove-btn" onclick="doRosterRemove(${h.employeeId},'Helper')">Remove</button></div>`;
+                    });
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic;padding:3px 0">No helpers assigned</div>`;
+                }
+                body.innerHTML = html;
+
+                if (selectedRosterEmpId) {
+                    const em = employees.find(
+                        (e) => Number(e.id) === Number(selectedRosterEmpId),
+                    );
+                    const onThisTruck = crew.some(
+                        (a) =>
+                            Number(a.employeeId) ===
+                            Number(selectedRosterEmpId),
+                    );
+                    if (onThisTruck) {
+                        btn.textContent = `Remove ${em.nick}`;
+                        btn.className = "assign-btn";
+                        btn.style.background = "var(--red-bg)";
+                        btn.style.color = "var(--red)";
+                    } else {
+                        btn.textContent = `Assign ${em.nick} → ${t.plate}`;
+                        btn.className = "assign-btn primary";
+                        btn.style.background = "";
+                        btn.style.color = "";
+                        const existing = getEmpAssignment(em.id);
+                        hint.textContent = existing
+                            ? `Will move from ${trucks.find((t) => Number(t.id) === Number(existing.truckId))?.plate}`
+                            : "";
+                    }
+                } else {
+                    btn.textContent = "Assign employee";
+                    btn.className = "assign-btn disabled";
+                    btn.style.background = "";
+                    btn.style.color = "";
+                    hint.textContent = "Select an employee from the list →";
+                }
+            }
+
+            function selectRosterTruck(id) {
+                selectedRosterTruckId = Number(id);
+                selectedRosterEmpId = null;
+                renderTruckList();
+                renderEmpList();
+                renderRosterDetail();
+            }
+            function selectRosterEmp(id) {
+                if (!selectedRosterTruckId) {
+                    showToast("Select a truck first.");
+                    return;
+                }
+                selectedRosterEmpId =
+                    selectedRosterEmpId == id ? null : Number(id);
+                renderEmpList();
+                renderRosterDetail();
+            }
+
+            function _patchRosterAssignment(row) {
+                const idx = rosterAssignments.findIndex(
+                    (a) => Number(a.employeeId) === Number(row.employeeId),
+                );
+                if (idx >= 0) rosterAssignments[idx] = row;
+                else rosterAssignments.push(row);
+                renderTruckList();
+                renderEmpList();
+                renderRosterDetail();
+                renderUnassignedCrewStat();
+            }
+
+            function doAssign() {
+                if (saving || !selectedRosterTruckId || !selectedRosterEmpId)
+                    return;
+                const em = employees.find(
+                    (e) => Number(e.id) === Number(selectedRosterEmpId),
+                );
+                const t = trucks.find(
+                    (t) => Number(t.id) === Number(selectedRosterTruckId),
+                );
+                const crew = getRosterCrew(selectedRosterTruckId);
+                const onThisTruck = crew.some(
+                    (a) => Number(a.employeeId) === Number(selectedRosterEmpId),
+                );
+                if (onThisTruck) {
+                    doRosterRemove(selectedRosterEmpId, em.role);
+                    return;
+                }
+
+                const existing = getEmpAssignment(em.id);
+                if (
+                    existing &&
+                    !confirm(
+                        `${em.nick} is on ${trucks.find((t) => Number(t.id) === Number(existing.truckId))?.plate}. Move to ${t.plate}?`,
+                    )
+                )
+                    return;
+                if (em.role === "Driver") {
+                    const d = crew.find((a) => a.type === "Driver");
+                    if (
+                        d &&
+                        !confirm(
+                            `${t.plate} already has driver ${employees.find((e) => Number(e.id) === Number(d.employeeId))?.nick}. Replace?`,
+                        )
+                    )
+                        return;
+                }
+
+                saving = true;
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        saving = false;
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        showToast(`${em.nick} → ${t.plate}`, "success");
+                        selectedRosterEmpId = null;
+                        _patchRosterAssignment(r.row);
+                    })
+                    .withFailureHandler((e) => {
+                        saving = false;
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .saveAssignment(em.id, t.id, em.role);
+            }
+
+            function doRosterRemove(empId, type) {
+                if (
+                    !confirm(
+                        `Remove this ${type.toLowerCase()} from their truck?`,
+                    )
+                )
+                    return;
+                saving = true;
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        saving = false;
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Remove failed: " + r.error, "error");
+                            return;
+                        }
+                        showToast("Removed.", "success");
+                        if (selectedRosterEmpId == empId)
+                            selectedRosterEmpId = null;
+                        _patchRosterAssignment(r.row);
+                    })
+                    .withFailureHandler((e) => {
+                        saving = false;
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .removeAssignment(empId, type);
+            }
+
+            // ── OUTLETS ────────────────────────────────────────────────
+            function renderOutlets() {
+                const q = (
+                    document.getElementById("outlets-search").value || ""
+                ).toLowerCase();
+                const tbody = document.getElementById("outlets-tbody");
+                const filtered = outlets.filter(
+                    (o) =>
+                        !q ||
+                        (o.outletName || "").toLowerCase().includes(q) ||
+                        (o.area || "").toLowerCase().includes(q),
+                );
+                document.getElementById("outlets-count").textContent =
+                    `${filtered.length} outlets`;
+                const isAdmin = currentUser.role === "Admin";
+                tbody.innerHTML = filtered
+                    .map(
+                        (o) => `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${o.id}</td>
+    <td style="font-weight:500">${esc(o.outletName)}</td>
+    <td>${esc(o.area) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(o.address) || "—"}</td>
+    <td><span class="status-chip" style="background:var(--bg);color:var(--muted)">${esc(o.customerGroup) || "—"}</span></td>
+    <td style="font-size:11px;color:var(--muted)">${esc(o.notes) || ""}</td>
+    <td>${isAdmin ? `<span class="edit-link" onclick="editOutletInline(${o.id})">Edit</span>` : "—"}</td>
+  </tr>`,
+                    )
+                    .join("");
+            }
+
+            function editOutletInline(id) {
+                const outlet = outlets.find((o) => o.id === id);
+                if (!outlet) return;
+                const row = document
+                    .getElementById("outlets-tbody")
+                    .querySelectorAll("tr")[outlets.indexOf(outlet)];
+                if (!row) return;
+                const cells = row.querySelectorAll("td");
+                // Simple inline edit for area, group, notes (most-changed fields)
+                cells[2].innerHTML = `<input type="text" value="${esc(outlet.area || "")}" id="oe-area-${id}" style="width:100px">`;
+                cells[4].innerHTML = `<input type="text" value="${esc(outlet.customerGroup || "")}" id="oe-group-${id}" style="width:80px">`;
+                cells[5].innerHTML = `<input type="text" value="${esc(outlet.notes || "")}" id="oe-notes-${id}" style="width:130px">`;
+                cells[6].innerHTML = `<span class="edit-link" onclick="saveOutletInline(${id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="renderOutlets()">Cancel</span>`;
+            }
+
+            function saveOutletInline(id) {
+                const area =
+                    document.getElementById(`oe-area-${id}`)?.value || "";
+                const group =
+                    document.getElementById(`oe-group-${id}`)?.value || "";
+                const notes =
+                    document.getElementById(`oe-notes-${id}`)?.value || "";
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        showToast("Outlet updated.", "success");
+                        const o = outlets.find((o) => o.id === id);
+                        if (o) {
+                            o.area = area;
+                            o.customerGroup = group;
+                            o.notes = notes;
+                        }
+                        renderOutlets();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateOutlet(id, { area, customerGroup: group, notes });
+            }
+
+            // ── DEFAULT ASSIGNMENTS ────────────────────────────────────
+            function loadDefaultAssignments() {
+                google.script.run
+                    .withSuccessHandler((d) => {
+                        defaultAssignments = d || [];
+                        renderDefaults();
+                    })
+                    .withFailureHandler((e) => {
+                        showToast(
+                            "Could not load defaults: " + e.message,
+                            "error",
+                        );
+                    })
+                    .getDefaultAssignments();
+            }
+
+            function renderDefaults() {
+                const q = (
+                    document.getElementById("defaults-search").value || ""
+                ).toLowerCase();
+                const tbody = document.getElementById("defaults-tbody");
+
+                const truckMap = indexById(trucks);
+                const empMap = indexById(employees);
+
+                const filtered = defaultAssignments.filter((d) => {
+                    const truck = truckMap[d.truckId] || {};
+                    const driver = empMap[d.defaultDriverId] || {};
+                    return (
+                        !q ||
+                        (truck.plate || "").toLowerCase().includes(q) ||
+                        (driver.nick || "").toLowerCase().includes(q)
+                    );
+                });
+
+                document.getElementById("defaults-count").textContent =
+                    `${filtered.length} trucks`;
+
+                tbody.innerHTML = filtered
+                    .map((d) => {
+                        const truck = truckMap[d.truckId] || {};
+                        const driver = empMap[d.defaultDriverId] || {};
+                        const helpers = (d.defaultHelperIds || [])
+                            .map((hid) => empMap[hid]?.nick || `ID:${hid}`)
+                            .join(", ");
+
+                        const today = getTodaysCrew(d.truckId);
+                        const todayDriver = today.driverId
+                            ? empMap[today.driverId]
+                            : null;
+                        const todayHelperNicks = today.helperIds
+                            .map((hid) => empMap[hid]?.nick || `ID:${hid}`)
+                            .join(", ");
+                        const todayParts = [];
+                        if (todayDriver)
+                            todayParts.push(
+                                `<span style="font-weight:500">${esc(todayDriver.nick)}</span>`,
+                            );
+                        if (todayHelperNicks)
+                            todayParts.push(esc(todayHelperNicks));
+                        const todayCrewHtml = todayParts.length
+                            ? todayParts.join(" + ")
+                            : '<span style="color:var(--hint);font-style:italic">Unassigned</span>';
+
+                        const defDriverId =
+                            d.defaultDriverId != null
+                                ? Number(d.defaultDriverId)
+                                : null;
+                        const defHelperSet = new Set(
+                            (d.defaultHelperIds || []).map(Number),
+                        );
+                        const todayHelperSet = new Set(today.helperIds);
+                        const isSub =
+                            defDriverId !== today.driverId ||
+                            defHelperSet.size !== todayHelperSet.size ||
+                            [...defHelperSet].some(
+                                (id) => !todayHelperSet.has(id),
+                            );
+                        const subBadge = isSub
+                            ? '<span class="sub-badge">Sub</span>'
+                            : "";
+
+                        const selCls =
+                            selectedDefTruckId == d.truckId
+                                ? " row-selected"
+                                : "";
+                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectDefTruck(${d.truckId})">
+      <td style="font-family:'DM Mono',monospace;font-weight:500">${esc(truck.plate || "—")}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(truck.type || "—")}</td>
+      <td>${driver.nick ? `<span style="font-weight:500">${esc(driver.nick)}</span>` : '<span style="color:var(--hint);font-style:italic">None</span>'}</td>
+      <td style="font-size:11px;color:var(--muted)">${helpers || '<span style="color:var(--hint);font-style:italic">None</span>'}</td>
+      <td style="font-size:11px;cursor:pointer" onclick="event.stopPropagation();goToTodaysRoster(${d.truckId})" title="View / edit today's roster for this truck">${todayCrewHtml}${subBadge}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(d.notes || "")}</td>
+    </tr>`;
+                    })
+                    .join("");
+            }
+
+            function saveDefNotes(defaultAssignId, notes) {
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        const d = defaultAssignments.find(
+                            (x) => x.id === defaultAssignId,
+                        );
+                        if (d) d.notes = notes;
+                        showToast("Notes updated.", "success");
+                        renderDefaults();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateDefaultAssignment(defaultAssignId, { notes });
+            }
+
+            // ── DEFAULT CREW PICKER (Truck Roster panel) ───────────────
+            function getDefaultCrew(truckId) {
+                const d = defaultAssignments.find(
+                    (x) => Number(x.truckId) === Number(truckId),
+                );
+                return {
+                    driverId:
+                        d?.defaultDriverId != null
+                            ? Number(d.defaultDriverId)
+                            : null,
+                    helperIds: (d?.defaultHelperIds || []).map(Number),
+                };
+            }
+
+            function getDefEmpAssignment(empId) {
+                const id = Number(empId);
+                const d = defaultAssignments.find(
+                    (x) =>
+                        Number(x.defaultDriverId) === id ||
+                        (x.defaultHelperIds || [])
+                            .map(Number)
+                            .includes(id),
+                );
+                if (!d) return null;
+                return {
+                    truckId: d.truckId,
+                    type: Number(d.defaultDriverId) === id ? "Driver" : "Helper",
+                };
+            }
+
+            function selectDefTruck(id) {
+                selectedDefTruckId = Number(id);
+                selectedDefEmpId = null;
+                renderDefaults();
+                renderDefEmpList();
+                renderDefDetail();
+            }
+
+            function selectDefEmp(id) {
+                if (!selectedDefTruckId) {
+                    showToast("Select a truck first.");
+                    return;
+                }
+                selectedDefEmpId =
+                    selectedDefEmpId == id ? null : Number(id);
+                renderDefEmpList();
+                renderDefDetail();
+            }
+
+            function setDefEmpFilter(f, btn) {
+                defEmpFilter = f;
+                btn.parentElement
+                    .querySelectorAll(".pill")
+                    .forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
+                renderDefEmpList();
+            }
+
+            function renderDefEmpList() {
+                const q = (
+                    document.getElementById("def-emp-search").value || ""
+                ).toLowerCase();
+                const list = document.getElementById("def-emp-list");
+                const truckMap = indexById(trucks);
+                const filtered = employees.filter((e) => {
+                    const matchQ =
+                        !q || (e.nick || "").toLowerCase().includes(q);
+                    const asgn = getDefEmpAssignment(e.id);
+                    if (defEmpFilter === "Driver")
+                        return matchQ && e.role === "Driver";
+                    if (defEmpFilter === "Helper")
+                        return matchQ && e.role === "Helper";
+                    if (defEmpFilter === "unassigned")
+                        return matchQ && !asgn;
+                    return matchQ;
+                });
+                document.getElementById("def-emp-count-label").textContent =
+                    `${filtered.length} shown`;
+                list.innerHTML = filtered
+                    .map((e) => {
+                        const asgn = getDefEmpAssignment(e.id);
+                        const truck = asgn
+                            ? truckMap[asgn.truckId]
+                            : null;
+                        const isSel = selectedDefEmpId == e.id;
+                        const isDimmed = !!asgn && !isSel;
+                        return `<div class="list-item${isSel ? " selected" : ""}${isDimmed ? " dimmed" : ""}" onclick="selectDefEmp(${e.id})">
+      <span class="badge ${e.role === "Driver" ? "badge-driver" : "badge-helper"}">${e.role === "Driver" ? "D" : "H"}</span>
+      <div style="min-width:0;flex:1">
+        <div class="item-main">${esc(e.nick)}</div>
+        <div class="item-sub">${truck ? truck.plate : "Unassigned"}</div>
+      </div>
+    </div>`;
+                    })
+                    .join("");
+            }
+
+            function renderDefDetail() {
+                const body = document.getElementById("def-detail-body");
+                const bar = document.getElementById("def-assign-bar");
+                const btn = document.getElementById("def-assign-btn");
+                const hint = document.getElementById("def-assign-hint");
+                const isAdmin = currentUser.role === "Admin";
+
+                if (!selectedDefTruckId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🚚</div><div class="sub">Select a truck to edit its default crew</div></div>`;
+                    bar.style.display = "none";
+                    return;
+                }
+                const t = trucks.find(
+                    (t) => Number(t.id) === Number(selectedDefTruckId),
+                );
+                const crew = getDefaultCrew(selectedDefTruckId);
+                const driver = crew.driverId
+                    ? employees.find(
+                          (e) => Number(e.id) === Number(crew.driverId),
+                      )
+                    : null;
+
+                let html = `<div class="detail-plate">${esc(t.plate)}</div>
+              <div class="detail-type">${esc(t.brand)} · ${esc(t.type)}</div>
+              <div class="section-lbl">Default Driver</div>`;
+                if (driver) {
+                    html += `<div class="crew-item"><span class="badge badge-driver">Driver</span><span class="crew-item-name">${esc(driver.nick)}</span>
+             ${isAdmin ? `<button class="remove-btn" onclick="doDefRemove(${driver.id},'Driver')">Remove</button>` : ""}</div>`;
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic;padding:3px 0">No default driver</div>`;
+                }
+                html += `<div class="section-lbl">Default Helpers (${crew.helperIds.length})</div>`;
+                if (crew.helperIds.length > 0) {
+                    crew.helperIds.forEach((hid) => {
+                        const em = employees.find(
+                            (e) => Number(e.id) === Number(hid),
+                        );
+                        html += `<div class="crew-item"><span class="badge badge-helper">Helper</span><span class="crew-item-name">${esc(em?.nick || "?")}</span>
+               ${isAdmin ? `<button class="remove-btn" onclick="doDefRemove(${hid},'Helper')">Remove</button>` : ""}</div>`;
+                    });
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic;padding:3px 0">No default helpers</div>`;
+                }
+
+                const d = defaultAssignments.find(
+                    (x) => Number(x.truckId) === Number(selectedDefTruckId),
+                );
+                html += `<div class="section-lbl">Notes</div>`;
+                if (isAdmin) {
+                    html += `<input type="text" id="def-notes-input" value="${esc(d?.notes || "")}" placeholder="e.g. Available Mon–Sat only" style="width:100%" onchange="saveDefNotes(${d.id}, this.value)" />`;
+                } else if (d?.notes) {
+                    html += `<div style="font-size:11px;color:var(--text)">${esc(d.notes)}</div>`;
+                } else {
+                    html += `<div style="font-size:11px;color:var(--hint);font-style:italic">No notes</div>`;
+                }
+
+                body.innerHTML = html;
+
+                if (!isAdmin) {
+                    bar.style.display = "none";
+                    return;
+                }
+                bar.style.display = "";
+
+                if (selectedDefEmpId) {
+                    const em = employees.find(
+                        (e) => Number(e.id) === Number(selectedDefEmpId),
+                    );
+                    const onThisTruck =
+                        crew.driverId === Number(selectedDefEmpId) ||
+                        crew.helperIds.includes(Number(selectedDefEmpId));
+                    if (onThisTruck) {
+                        btn.textContent = `Remove ${em.nick}`;
+                        btn.className = "assign-btn";
+                        btn.style.background = "var(--red-bg)";
+                        btn.style.color = "var(--red)";
+                        hint.textContent = "";
+                    } else if (
+                        em.role === "Helper" &&
+                        crew.helperIds.length >= 2
+                    ) {
+                        btn.textContent = `Helper slots full on ${t.plate}`;
+                        btn.className = "assign-btn disabled";
+                        btn.style.background = "";
+                        btn.style.color = "";
+                        hint.textContent =
+                            "Remove a helper first, or pick a different truck.";
+                    } else {
+                        btn.textContent = `Assign ${em.nick} → ${t.plate}`;
+                        btn.className = "assign-btn primary";
+                        btn.style.background = "";
+                        btn.style.color = "";
+                        const existing = getDefEmpAssignment(em.id);
+                        hint.textContent = existing
+                            ? `Will move from ${trucks.find((tt) => Number(tt.id) === Number(existing.truckId))?.plate}`
+                            : "";
+                    }
+                } else {
+                    btn.textContent = "Assign employee";
+                    btn.className = "assign-btn disabled";
+                    btn.style.background = "";
+                    btn.style.color = "";
+                    hint.textContent = "Select an employee from the list →";
+                }
+            }
+
+            function callUpdateDefault(defaultAssignId, changes) {
+                return new Promise((resolve, reject) => {
+                    google.script.run
+                        .withSuccessHandler(resolve)
+                        .withFailureHandler(reject)
+                        .updateDefaultAssignment(defaultAssignId, changes);
+                });
+            }
+
+            async function doDefAssign() {
+                if (saving || !selectedDefTruckId || !selectedDefEmpId)
+                    return;
+                const em = employees.find(
+                    (e) => Number(e.id) === Number(selectedDefEmpId),
+                );
+                const t = trucks.find(
+                    (t) => Number(t.id) === Number(selectedDefTruckId),
+                );
+                const d = defaultAssignments.find(
+                    (x) => Number(x.truckId) === Number(selectedDefTruckId),
+                );
+                if (!d) return;
+
+                const crew = getDefaultCrew(selectedDefTruckId);
+                const onThisTruck =
+                    crew.driverId === Number(em.id) ||
+                    crew.helperIds.includes(Number(em.id));
+                if (onThisTruck) {
+                    doDefRemove(selectedDefEmpId, em.role);
+                    return;
+                }
+
+                if (em.role === "Helper" && crew.helperIds.length >= 2) {
+                    showToast(
+                        `${t.plate} already has 2 default helpers.`,
+                        "error",
+                    );
+                    return;
+                }
+                if (
+                    em.role === "Driver" &&
+                    crew.driverId &&
+                    !confirm(
+                        `${t.plate} already has default driver ${employees.find((e) => Number(e.id) === Number(crew.driverId))?.nick}. Replace?`,
+                    )
+                )
+                    return;
+
+                const existing = getDefEmpAssignment(em.id);
+                if (
+                    existing &&
+                    !confirm(
+                        `${em.nick} is already the default ${existing.type.toLowerCase()} for ${trucks.find((tt) => Number(tt.id) === Number(existing.truckId))?.plate}. Move to ${t.plate}?`,
+                    )
+                )
+                    return;
+
+                saving = true;
+                setSyncing(true);
+                try {
+                    if (existing) {
+                        const ed = defaultAssignments.find(
+                            (x) =>
+                                Number(x.truckId) ===
+                                Number(existing.truckId),
+                        );
+                        const exChanges =
+                            existing.type === "Driver"
+                                ? { defaultDriverId: null }
+                                : {
+                                      defaultHelperIds: (
+                                          ed.defaultHelperIds || []
+                                      ).filter(
+                                          (id) =>
+                                              Number(id) !== Number(em.id),
+                                      ),
+                                  };
+                        const r1 = await callUpdateDefault(ed.id, exChanges);
+                        if (!r1.success) throw new Error(r1.error);
+                        Object.assign(ed, exChanges);
+                    }
+
+                    const changes =
+                        em.role === "Driver"
+                            ? { defaultDriverId: Number(em.id) }
+                            : {
+                                  defaultHelperIds: [
+                                      ...crew.helperIds,
+                                      Number(em.id),
+                                  ],
+                              };
+                    const r2 = await callUpdateDefault(d.id, changes);
+                    if (!r2.success) throw new Error(r2.error);
+                    Object.assign(d, changes);
+
+                    showToast(`${em.nick} → ${t.plate} (default)`, "success");
+                    selectedDefEmpId = null;
+                    renderDefaults();
+                    renderDefEmpList();
+                    renderDefDetail();
+                } catch (e) {
+                    showToast("Error: " + e.message, "error");
+                } finally {
+                    saving = false;
+                    setSyncing(false);
+                }
+            }
+
+            function doDefRemove(empId, type) {
+                if (
+                    !confirm(
+                        `Remove this ${type.toLowerCase()} from the default crew?`,
+                    )
+                )
+                    return;
+                const d = defaultAssignments.find((x) =>
+                    type === "Driver"
+                        ? Number(x.defaultDriverId) === Number(empId)
+                        : (x.defaultHelperIds || [])
+                              .map(Number)
+                              .includes(Number(empId)),
+                );
+                if (!d) return;
+                const changes =
+                    type === "Driver"
+                        ? { defaultDriverId: null }
+                        : {
+                              defaultHelperIds: (
+                                  d.defaultHelperIds || []
+                              ).filter(
+                                  (id) => Number(id) !== Number(empId),
+                              ),
+                          };
+
+                saving = true;
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        saving = false;
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Remove failed: " + r.error, "error");
+                            return;
+                        }
+                        Object.assign(d, changes);
+                        showToast("Removed.", "success");
+                        if (selectedDefEmpId == empId)
+                            selectedDefEmpId = null;
+                        renderDefaults();
+                        renderDefEmpList();
+                        renderDefDetail();
+                    })
+                    .withFailureHandler((e) => {
+                        saving = false;
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateDefaultAssignment(d.id, changes);
+            }
+
+            // ── ROSTER HELPERS ────────────────────────────────────────
+            function getRosterCrew(truckId) {
+                return (rosterAssignments || []).filter(
+                    (a) =>
+                        a.truckId !== null &&
+                        Number(a.truckId) === Number(truckId),
+                );
+            }
+            function getEmpAssignment(empId) {
+                return (rosterAssignments || []).find(
+                    (a) =>
+                        a.truckId !== null &&
+                        Number(a.employeeId) === Number(empId),
+                );
+            }
+            function crewStatus(truckId) {
+                const crew = getRosterCrew(truckId);
+                const hasD = crew.some((a) => a.type === "Driver");
+                const hasH = crew.some((a) => a.type === "Helper");
+                if (hasD && hasH) return "full";
+                if (hasD || hasH) return "partial";
+                return "empty";
+            }
+            function getTodaysCrew(truckId) {
+                const crew = getRosterCrew(truckId);
+                const driver = crew.find((a) => a.type === "Driver");
+                const helpers = crew.filter((a) => a.type === "Helper");
+                return {
+                    driverId: driver ? Number(driver.employeeId) : null,
+                    helperIds: helpers.map((h) => Number(h.employeeId)),
+                };
+            }
+            function goToTodaysRoster(truckId) {
+                switchPanel("dispatch");
+                if (!todayRosterExpanded) toggleTodayRoster();
+                selectRosterTruck(truckId);
+                document
+                    .getElementById("today-roster-section")
+                    .scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }
+        </script>

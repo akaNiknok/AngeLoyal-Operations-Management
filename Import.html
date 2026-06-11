@@ -1,0 +1,284 @@
+<script>
+            // ── IMPORT ────────────────────────────────────────────────
+            let parsedXlsxData = null;
+
+            function handleDragOver(e) {
+                e.preventDefault();
+                document.getElementById("drop-zone").classList.add("drag-over");
+            }
+            function handleDragLeave() {
+                document
+                    .getElementById("drop-zone")
+                    .classList.remove("drag-over");
+            }
+            function handleDrop(e) {
+                e.preventDefault();
+                handleDragLeave();
+                const f = e.dataTransfer.files[0];
+                if (f) processFile(f);
+            }
+            function handleFileSelect(e) {
+                const f = e.target.files[0];
+                if (f) processFile(f);
+            }
+
+            function processFile(file) {
+                if (!xlsxReady) {
+                    showToast(
+                        "File parser still loading — try again in a second.",
+                        "warning",
+                    );
+                    return;
+                }
+                document.getElementById("import-filename").textContent =
+                    file.name;
+                document.getElementById("import-file-info").style.display = "";
+
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    try {
+                        const wb = XLSX.read(e.target.result, {
+                            type: "array",
+                        });
+                        const ws = wb.Sheets[wb.SheetNames[0]];
+                        const raw = XLSX.utils.sheet_to_json(ws, {
+                            header: 1,
+                            defval: "",
+                        });
+                        parsedXlsxData = raw;
+                        importRows = parseRebiscoFile(raw);
+                        importExcluded = new Set();
+                        renderImportPreview();
+                        document.getElementById("btn-run-import").disabled =
+                            importRows.length === 0;
+                    } catch (err) {
+                        showToast(
+                            "Could not read file: " + err.message,
+                            "error",
+                        );
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            }
+
+            /**
+             * Parses the raw Rebisco route file rows into structured trip objects.
+             * The Rebisco file has a fixed header row; we find it by looking for "FREIGHT ORDER".
+             */
+            function parseRebiscoFile(raw) {
+                // Find header row
+                let headerIdx = -1;
+                let headers = [];
+                for (let i = 0; i < Math.min(raw.length, 20); i++) {
+                    const row = raw[i].map((c) =>
+                        String(c).trim().toUpperCase(),
+                    );
+                    if (
+                        row.some(
+                            (c) =>
+                                c.includes("FREIGHT ORDER") ||
+                                c.includes("FO NO"),
+                        )
+                    ) {
+                        headerIdx = i;
+                        headers = raw[i].map((c) =>
+                            String(c).trim().toUpperCase(),
+                        );
+                        break;
+                    }
+                }
+                if (headerIdx === -1) {
+                    showToast(
+                        'Could not find header row (looking for "FREIGHT ORDER" column).',
+                        "error",
+                    );
+                    return [];
+                }
+
+                // Column index helpers — tries multiple possible column names
+                const col = (...names) => {
+                    for (const n of names) {
+                        const idx = headers.findIndex((h) => h.includes(n));
+                        if (idx !== -1) return idx;
+                    }
+                    return -1;
+                };
+
+                const ciFO = col("FREIGHT ORDER", "FO NO", "FO NUMBER");
+                const ciOutlet = col(
+                    "OUTLET",
+                    "STORE NAME",
+                    "DELIVERY POINT",
+                    "DESTINATION",
+                );
+                const ciArea = col("AREA", "PROVINCE", "REGION", "CITY");
+                const ciQty = col("QTY", "QUANTITY", "CASES", "CARTONS", "PCS");
+                const ciCBM = col("CBM");
+                const ciRestriction = col(
+                    "RESTRICTION",
+                    "TRUCK TYPE",
+                    "VEHICLE",
+                );
+                const ciTier = col("TIER");
+                const ciAddress = col("ADDRESS", "DELIVERY ADDRESS");
+
+                const result = [];
+                for (let i = headerIdx + 1; i < raw.length; i++) {
+                    const row = raw[i];
+                    if (
+                        !row ||
+                        row.every(
+                            (c) => c === "" || c === null || c === undefined,
+                        )
+                    )
+                        continue;
+                    const fo = String(row[ciFO] ?? "").trim();
+                    const outletName = String(row[ciOutlet] ?? "").trim();
+                    if (!fo && !outletName) continue;
+
+                    result.push({
+                        _rowIdx: i,
+                        foNumber: fo,
+                        outletName: outletName,
+                        area:
+                            ciArea >= 0 ? String(row[ciArea] || "").trim() : "",
+                        address:
+                            ciAddress >= 0
+                                ? String(row[ciAddress] || "").trim()
+                                : "",
+                        quantity:
+                            ciQty >= 0 ? Number(row[ciQty]) || null : null,
+                        cbm: ciCBM >= 0 ? Number(row[ciCBM]) || null : null,
+                        restrictions:
+                            ciRestriction >= 0
+                                ? String(row[ciRestriction] || "").trim()
+                                : "",
+                        tier: ciTier >= 0 ? Number(row[ciTier]) || null : null,
+                    });
+                }
+                return result;
+            }
+
+            function renderImportPreview() {
+                const toolbar = document.getElementById("preview-toolbar");
+                const wrap = document.getElementById("import-preview-table");
+
+                if (importRows.length === 0) {
+                    toolbar.style.display = "none";
+                    wrap.innerHTML = `<div class="empty-import"><div style="font-size:28px">⚠</div><div style="font-size:13px;font-weight:500;color:var(--muted)">No data rows found</div><div style="font-size:12px;color:var(--hint);text-align:center">Check that the file has a "FREIGHT ORDER" column header.</div></div>`;
+                    return;
+                }
+
+                toolbar.style.display = "";
+                const included = importRows.length - importExcluded.size;
+                document.getElementById("preview-count").innerHTML =
+                    `<strong>${included}</strong> of ${importRows.length} rows will be imported`;
+
+                wrap.innerHTML = `
+    <table class="preview-table">
+      <thead><tr>
+        <th style="width:100px">FO #</th>
+        <th style="width:210px">Outlet</th>
+        <th style="width:90px">Area</th>
+        <th style="width:55px;text-align:right">Qty</th>
+        <th style="width:55px">Type</th>
+        <th style="width:60px"></th>
+      </tr></thead>
+      <tbody>
+        ${importRows
+            .map((r, i) => {
+                const exc = importExcluded.has(i);
+                return `<tr class="${exc ? "excluded" : ""}">
+            <td style="font-family:'DM Mono',monospace;font-size:11px">${esc(r.foNumber) || "—"}</td>
+            <td>${esc(r.outletName) || "—"}</td>
+            <td style="font-size:11px;color:var(--muted)">${esc(r.area) || "—"}</td>
+            <td style="font-family:'DM Mono',monospace;text-align:right">${r.quantity || "—"}</td>
+            <td style="font-size:11px">${esc(r.restrictions) || "—"}</td>
+            <td><button class="row-toggle-btn" onclick="toggleRow(${i})">${exc ? "Include" : "Exclude"}</button></td>
+          </tr>`;
+            })
+            .join("")}
+      </tbody>
+    </table>`;
+            }
+
+            function toggleRow(idx) {
+                if (importExcluded.has(idx)) importExcluded.delete(idx);
+                else importExcluded.add(idx);
+                renderImportPreview();
+                document.getElementById("btn-run-import").disabled =
+                    importRows.length - importExcluded.size === 0;
+            }
+
+            function toggleAllRows(include) {
+                if (include) importExcluded.clear();
+                else importRows.forEach((_, i) => importExcluded.add(i));
+                renderImportPreview();
+                document.getElementById("btn-run-import").disabled = !include;
+            }
+
+            function runImport() {
+                if (!canEdit()) {
+                    showToast("Your role cannot import trips.", "warning");
+                    return;
+                }
+                const dateVal = document.getElementById("import-date").value;
+                const prefixId = Number(
+                    document.getElementById("import-prefix").value,
+                );
+                if (!dateVal) {
+                    showToast("Select a trip date first.", "warning");
+                    return;
+                }
+                if (!prefixId) {
+                    showToast("Select a waybill prefix.", "warning");
+                    return;
+                }
+
+                const rowsToImport = importRows.filter(
+                    (_, i) => !importExcluded.has(i),
+                );
+                if (rowsToImport.length === 0) {
+                    showToast("No rows selected.", "warning");
+                    return;
+                }
+
+                setLoading(`Importing ${rowsToImport.length} trips…`);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        hideLoading();
+                        if (!r.success) {
+                            showToast("Import failed: " + r.errors[0], "error");
+                            return;
+                        }
+                        const msg = `Imported ${r.imported} trips.${r.skipped > 0 ? " " + r.skipped + " skipped." : ""}`;
+                        showToast(msg, r.skipped > 0 ? "warning" : "success");
+                        if (r.errors.length)
+                            console.warn("Import errors:", r.errors);
+                        clearImport();
+                        // Switch to dispatch for the imported date
+                        document.getElementById("dispatch-date").value =
+                            dateVal;
+                        switchPanel("dispatch");
+                    })
+                    .withFailureHandler((e) => {
+                        hideLoading();
+                        showToast("Import error: " + e.message, "error");
+                    })
+                    .importRouteFile(isoToMDY(dateVal), prefixId, rowsToImport);
+            }
+
+            function clearImport() {
+                importRows = [];
+                importExcluded = new Set();
+                parsedXlsxData = null;
+                document.getElementById("file-input").value = "";
+                document.getElementById("import-file-info").style.display =
+                    "none";
+                document.getElementById("btn-run-import").disabled = true;
+                document.getElementById("preview-toolbar").style.display =
+                    "none";
+                document.getElementById("import-preview-table").innerHTML =
+                    `<div class="empty-import"><div style="font-size:32px">📤</div><div style="font-size:13px;font-weight:500;color:var(--muted)">No file loaded</div><div style="font-size:12px;text-align:center;max-width:260px;color:var(--hint)">Upload the Rebisco route Excel file to preview and review rows before importing.</div></div>`;
+            }
+        </script>

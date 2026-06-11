@@ -1,0 +1,224 @@
+<script>
+            // ── XLSX PARSER (SheetJS CDN) ──────────────────────────────
+            // Loaded async; import won't work until it's ready.
+            const xlsxScript = document.createElement("script");
+            xlsxScript.src =
+                "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+            xlsxScript.onload = () => {
+                xlsxReady = true;
+            };
+            document.head.appendChild(xlsxScript);
+            let xlsxReady = false;
+
+            // ── GLOBAL STATE ──────────────────────────────────────────
+            let currentUser = { email: "", displayName: "", role: null };
+            let employees = [];
+            let trucks = [];
+            let rosterAssignments = [];
+            let waybillPrefixes = [];
+            let outlets = [];
+            let defaultAssignments = [];
+
+            // Dispatch state
+            let dispatchData = null; // { trips, date }
+            let selectedTripId = null;
+            let statusFilter = "all";
+            let saving = false;
+            let todayRosterExpanded = false;
+
+            // Roster state
+            let selectedRosterTruckId = null;
+            let selectedRosterEmpId = null;
+            let empFilter = "all";
+
+            // Import state
+            let importRows = []; // parsed from xlsx
+            let importExcluded = new Set(); // indices excluded by dispatcher
+
+            // Default assignments edit state
+            let selectedDefTruckId = null;
+            let selectedDefEmpId = null;
+            let defEmpFilter = "all";
+
+            // ── BOOT ──────────────────────────────────────────────────
+            window.addEventListener("load", bootApp);
+
+            function bootApp() {
+                // Set today's date on all date inputs
+                const today = todayStr();
+                document.getElementById("dispatch-date").value = today;
+                document.getElementById("import-date").value = today;
+                document.getElementById("at-date").value = today;
+
+                setLoading("Loading data…");
+                google.script.run
+                    .withSuccessHandler((boot) => {
+                        currentUser = boot.session;
+                        employees = boot.employees || [];
+                        trucks = boot.trucks || [];
+                        rosterAssignments = boot.rosterAssignments || [];
+                        waybillPrefixes = boot.waybillPrefixes || [];
+                        outlets = boot.outlets || [];
+                        defaultAssignments = boot.defaultAssignments || [];
+
+                        applyRoleToUI(currentUser.role);
+                        populatePrefixSelects();
+                        hideLoading();
+                        onMasterDataReady();
+                    })
+                    .withFailureHandler((err) => {
+                        hideLoading();
+                        showToast(
+                            "Could not load app data: " + err.message,
+                            "error",
+                        );
+                    })
+                    .getBootData();
+            }
+
+            function onMasterDataReady() {
+                renderTruckList();
+                renderEmpList();
+                renderUnassignedCrewStat();
+                renderDefaults();
+                renderDefEmpList();
+                renderDefDetail();
+                renderOutlets();
+                populateAddTripSelects();
+                loadDispatch();
+            }
+
+            // ── RBAC ──────────────────────────────────────────────────
+            function applyRoleToUI(role) {
+                const userBadge = document.getElementById("user-role-badge");
+                const userEmail = document.getElementById("user-email");
+                userEmail.textContent =
+                    currentUser.displayName || currentUser.email;
+                userBadge.textContent = role || "No access";
+                userBadge.className = `user-role-badge role-${(role || "viewer").toLowerCase()}`;
+
+                // Show admin-only nav items
+                if (role === "Admin") {
+                    document
+                        .querySelectorAll(".admin-only")
+                        .forEach((el) => (el.style.display = ""));
+                }
+            }
+
+            function canEdit() {
+                return (
+                    currentUser.role === "Admin" ||
+                    currentUser.role === "Dispatcher"
+                );
+            }
+
+            // ── PANEL NAVIGATION ──────────────────────────────────────
+            function switchPanel(name) {
+                document
+                    .querySelectorAll(".panel")
+                    .forEach((p) => p.classList.remove("active"));
+                document
+                    .querySelectorAll(".nav-btn")
+                    .forEach((b) => b.classList.remove("active"));
+                document
+                    .getElementById("panel-" + name)
+                    .classList.add("active");
+                document.getElementById("nav-" + name).classList.add("active");
+
+                if (name === "dispatch") {
+                    loadDispatch();
+                    renderTruckList();
+                    renderEmpList();
+                }
+                if (name === "roster") {
+                    renderDefaults();
+                    renderDefEmpList();
+                    renderDefDetail();
+                }
+                if (name === "outlets") renderOutlets();
+            }
+
+            // ── MODAL HELPERS ──────────────────────────────────────────
+            function openModal(id) {
+                document.getElementById(id).classList.add("open");
+            }
+            function closeModal(id) {
+                document.getElementById(id).classList.remove("open");
+            }
+
+            // ── UTILITY HELPERS ───────────────────────────────────────
+            function statusChipClass(status) {
+                const map = {
+                    Scheduled: "sc-scheduled",
+                    Delivered: "sc-delivered",
+                    Undelivered: "sc-undelivered",
+                    "Foul Trip - No Redeliver": "sc-fouln",
+                    "Foul Trip - For Redeliver": "sc-foutr",
+                    Redeliver: "sc-redeliver",
+                    "Two-Day Trip": "sc-twoday",
+                };
+                return map[status] || "sc-scheduled";
+            }
+            function shortStatus(status) {
+                const map = {
+                    Scheduled: "Scheduled",
+                    Delivered: "Delivered",
+                    Undelivered: "Undelivered",
+                    "Foul Trip - No Redeliver": "Foul – No RD",
+                    "Foul Trip - For Redeliver": "Foul – For RD",
+                    Redeliver: "Redeliver",
+                    "Two-Day Trip": "Two-Day",
+                };
+                return map[status] || status;
+            }
+
+            function indexById(arr) {
+                const m = {};
+                (arr || []).forEach((item) => {
+                    if (item.id != null) m[item.id] = item;
+                });
+                return m;
+            }
+            function esc(s) {
+                return String(s || "")
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;");
+            }
+            function todayStr() {
+                const d = new Date();
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            }
+            function isoToMDY(iso) {
+                if (!iso) return "";
+                const [y, m, d] = iso.split("-");
+                return `${Number(m)}/${Number(d)}/${y}`;
+            }
+
+            function setSyncing(on) {
+                document
+                    .getElementById("sync-dot")
+                    .classList.toggle("loading", on);
+                document.getElementById("sync-text").textContent = on
+                    ? "Syncing…"
+                    : "Synced";
+            }
+            function setLoading(msg) {
+                document.getElementById("loading-text").textContent =
+                    msg || "Loading…";
+                document.getElementById("loading").style.display = "";
+            }
+            function hideLoading() {
+                document.getElementById("loading").style.display = "none";
+            }
+
+            let toastTimer;
+            function showToast(msg, type) {
+                const t = document.getElementById("toast");
+                t.textContent = msg;
+                t.className = `toast show ${type || ""}`;
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+            }
+        </script>
