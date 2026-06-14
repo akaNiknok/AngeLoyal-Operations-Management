@@ -233,7 +233,7 @@
 
     <div class="field-label">Helper(s)</div>
     <div class="assign-row" style="margin-bottom:10px">
-      <select id="sb-helper">${helperOptions(trip.helperIds)}</select>
+      <select id="sb-helper" multiple size="3" onchange="enforceHelperCap(this)">${helperOptions(trip.helperIds)}</select>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:10px 0">
@@ -282,9 +282,10 @@
                             `<option value="${p.id}" ${suggested.startsWith(p.prefix) ? "selected" : ""}>${esc(p.prefix)} — ${esc(p.companyName)}</option>`,
                     )
                     .join("");
+                const canConfirm = canEdit() && !!trip.suggestedWaybillId;
                 return `<div class="wb-confirm-row">
     <input type="text" id="sb-wb-number" value="${esc(suggested)}" placeholder="e.g. AY-10761" style="font-family:'DM Mono',monospace;font-size:12px">
-    <button class="btn btn-ghost btn-sm" onclick="confirmWaybillFromSidebar(${trip.id})" ${canEdit() ? "" : "disabled"}>Confirm</button>
+    <button class="btn btn-ghost btn-sm" onclick="confirmWaybillFromSidebar(${trip.id})" ${canConfirm ? "" : "disabled"}>Confirm</button>
   </div>
   <div style="font-size:10px;color:var(--hint);margin-top:3px">${suggested ? "Suggested — edit if needed, then confirm to lock." : "No waybill suggested yet."}</div>`;
             }
@@ -343,14 +344,22 @@
 
             function helperOptions(selectedIds) {
                 const selSet = new Set((selectedIds || []).map(Number));
-                const opts = employees
+                return employees
                     .filter((e) => e.role === "Helper" && e.active !== false)
                     .map(
                         (e) =>
                             `<option value="${e.id}" ${selSet.has(Number(e.id)) ? "selected" : ""}>${esc(e.nick)}</option>`,
                     )
                     .join("");
-                return `<option value="">— None —</option>${opts}`;
+            }
+
+            // Trips carry at most 2 helpers — drop the oldest extra selection.
+            function enforceHelperCap(sel) {
+                const selected = Array.from(sel.selectedOptions);
+                if (selected.length > 2) {
+                    selected[0].selected = false;
+                    showToast("A trip can have at most 2 helpers.", "warning");
+                }
             }
 
             function handleSbTruckChange() {
@@ -380,9 +389,11 @@
                     Number(document.getElementById("sb-truck").value) || null;
                 const newDriverId =
                     Number(document.getElementById("sb-driver").value) || null;
-                const newHelperId =
-                    Number(document.getElementById("sb-helper").value) || null;
-                const newHelperIds = newHelperId ? [newHelperId] : [];
+                const newHelperIds = Array.from(
+                    document.getElementById("sb-helper").selectedOptions,
+                )
+                    .map((o) => Number(o.value))
+                    .filter(Boolean);
                 const newRemarks = document.getElementById("sb-remarks").value;
                 const activeStatusEl = document.querySelector(
                     ".status-option.active",
@@ -493,6 +504,13 @@
                     (t) => t.id === tripId,
                 );
                 if (!trip) return;
+                if (!trip.suggestedWaybillId) {
+                    showToast(
+                        "No waybill to confirm for this trip yet.",
+                        "warning",
+                    );
+                    return;
+                }
 
                 setSyncing(true);
                 google.script.run

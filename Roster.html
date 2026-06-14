@@ -886,6 +886,10 @@
                                 Number(x.truckId) ===
                                 Number(existing.truckId),
                         );
+                        if (!ed)
+                            throw new Error(
+                                "Could not find the existing default assignment to update.",
+                            );
                         const exChanges =
                             existing.type === "Driver"
                                 ? { defaultDriverId: null }

@@ -168,7 +168,7 @@ function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason
   const truckId        = _numOrNull(_val(originalRow, headers, 'Truck ID'));
   const driverId       = _numOrNull(_val(originalRow, headers, 'Driver ID'));
   const rawHelpers     = _val(originalRow, headers, 'Helper IDs');
-  const helperIds      = rawHelpers ? String(rawHelpers).split(',').map(s => s.trim()).filter(Boolean) : [];
+  const helperIds      = rawHelpers ? String(rawHelpers).split(',').map(s => _numOrNull(s.trim())).filter(n => n !== null) : [];
   const billingCat     = _val(originalRow, headers, 'Truck Billing Category');
   const billingDate    = _val(originalRow, headers, 'Billing Date')
                         || _val(originalRow, headers, 'Trip Date');
