@@ -1188,14 +1188,6 @@
                 flex-wrap: wrap;
             }
 
-            /* ── OUTLETS PANEL ── */
-            #panel-outlets {
-                flex-direction: column;
-            }
-            .outlets-table-wrap {
-                flex: 1;
-                overflow: auto;
-            }
             table.data-table {
                 width: 100%;
                 border-collapse: collapse;
@@ -1271,6 +1263,36 @@
             }
             table.data-table tbody tr.row-selected {
                 background: var(--blue-bg);
+            }
+
+            /* ── ADMIN MASTER-DETAIL PANELS (Outlets, Trucks, Employees, Billing Categories) ── */
+            .admin-split {
+                display: flex;
+                flex-direction: row;
+                flex: 1;
+                overflow: hidden;
+            }
+            .admin-list-wrap {
+                flex: 1;
+                overflow: auto;
+            }
+            .admin-detail-col {
+                width: 300px;
+                flex-shrink: 0;
+                border-left: 1px solid var(--border);
+                display: flex;
+                flex-direction: column;
+                background: var(--surface);
+            }
+            .detail-footer {
+                padding: 10px 12px;
+                border-top: 1px solid var(--border);
+                display: flex;
+                gap: 6px;
+                flex-shrink: 0;
+            }
+            .detail-footer .btn {
+                flex: 1;
             }
 
             /* ── LOADING OVERLAY ── */
@@ -1488,6 +1510,15 @@
                     border-bottom: 1px solid var(--border);
                     max-height: 300px;
                     overflow-y: auto;
+                }
+                .admin-split {
+                    flex-direction: column;
+                }
+                .admin-detail-col {
+                    width: 100%;
+                    border-left: none;
+                    border-top: 1px solid var(--border);
+                    max-height: 300px;
                 }
             }
             @media (prefers-reduced-motion: reduce) {

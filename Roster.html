@@ -322,44 +322,94 @@
                 );
                 document.getElementById("outlets-count").textContent =
                     `${filtered.length} outlets`;
-                const isAdmin = currentUser.role === "Admin";
                 tbody.innerHTML = filtered
-                    .map(
-                        (o) => `<tr>
+                    .map((o) => {
+                        const selCls =
+                            selectedOutletId === o.id ? " row-selected" : "";
+                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectOutlet(${o.id})">
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${o.id}</td>
     <td style="font-weight:500">${esc(o.outletName)}</td>
-    <td>${esc(o.area) || "—"}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(o.address) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(o.area) || "—"}</td>
     <td><span class="status-chip" style="background:var(--bg);color:var(--muted)">${esc(o.customerGroup) || "—"}</span></td>
-    <td style="font-size:11px;color:var(--muted)">${esc(o.notes) || ""}</td>
-    <td>${isAdmin ? `<span class="edit-link" onclick="editOutletInline(${o.id})">Edit</span>` : "—"}</td>
-  </tr>`,
-                    )
+  </tr>`;
+                    })
                     .join("");
             }
 
-            function editOutletInline(id) {
-                const outlet = outlets.find((o) => o.id === id);
-                if (!outlet) return;
-                const row = document
-                    .getElementById("outlets-tbody")
-                    .querySelectorAll("tr")[outlets.indexOf(outlet)];
-                if (!row) return;
-                const cells = row.querySelectorAll("td");
-                // Simple inline edit for area, group, notes (most-changed fields)
-                cells[2].innerHTML = `<input type="text" value="${esc(outlet.area || "")}" id="oe-area-${id}" style="width:100px">`;
-                cells[4].innerHTML = `<input type="text" value="${esc(outlet.customerGroup || "")}" id="oe-group-${id}" style="width:80px">`;
-                cells[5].innerHTML = `<input type="text" value="${esc(outlet.notes || "")}" id="oe-notes-${id}" style="width:130px">`;
-                cells[6].innerHTML = `<span class="edit-link" onclick="saveOutletInline(${id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="renderOutlets()">Cancel</span>`;
+            function selectOutlet(id) {
+                selectedOutletId = Number(id);
+                renderOutlets();
+                renderOutletDetail();
             }
 
-            function saveOutletInline(id) {
-                const area =
-                    document.getElementById(`oe-area-${id}`)?.value || "";
-                const group =
-                    document.getElementById(`oe-group-${id}`)?.value || "";
-                const notes =
-                    document.getElementById(`oe-notes-${id}`)?.value || "";
+            function renderOutletDetail() {
+                const body = document.getElementById("outlet-detail-body");
+                const footer = document.getElementById(
+                    "outlet-detail-footer",
+                );
+
+                if (!selectedOutletId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🏬</div><div class="sub">Select an outlet to view details</div></div>`;
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                    return;
+                }
+                const o = outlets.find(
+                    (o) => Number(o.id) === Number(selectedOutletId),
+                );
+                if (!o) {
+                    selectedOutletId = null;
+                    renderOutletDetail();
+                    return;
+                }
+                const isAdmin = currentUser.role === "Admin";
+                const dis = isAdmin ? "" : "disabled";
+
+                body.innerHTML = `
+      <div class="form-row">
+        <label class="form-label">Outlet Name</label>
+        <input type="text" id="od-name" value="${esc(o.outletName)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Area</label>
+        <input type="text" id="od-area" value="${esc(o.area)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Address</label>
+        <input type="text" id="od-address" value="${esc(o.address)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Customer Group</label>
+        <input type="text" id="od-group" value="${esc(o.customerGroup)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Notes</label>
+        <textarea id="od-notes" ${dis}>${esc(o.notes)}</textarea>
+      </div>`;
+
+                if (isAdmin) {
+                    footer.style.display = "";
+                    footer.innerHTML = `<button class="btn btn-primary btn-sm" onclick="saveOutletDetail()">Save changes</button>`;
+                } else {
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                }
+            }
+
+            function saveOutletDetail() {
+                const id = selectedOutletId;
+                const outletName = document
+                    .getElementById("od-name")
+                    .value.trim();
+                const area = document.getElementById("od-area").value;
+                const address = document.getElementById("od-address").value;
+                const customerGroup =
+                    document.getElementById("od-group").value;
+                const notes = document.getElementById("od-notes").value;
+                if (!outletName) {
+                    showToast("Outlet name is required.", "error");
+                    return;
+                }
                 setSyncing(true);
                 google.script.run
                     .withSuccessHandler((r) => {
@@ -368,20 +418,82 @@
                             showToast("Save failed: " + r.error, "error");
                             return;
                         }
-                        showToast("Outlet updated.", "success");
                         const o = outlets.find((o) => o.id === id);
-                        if (o) {
-                            o.area = area;
-                            o.customerGroup = group;
-                            o.notes = notes;
-                        }
+                        if (o)
+                            Object.assign(o, {
+                                outletName,
+                                area,
+                                address,
+                                customerGroup,
+                                notes,
+                            });
+                        showToast("Outlet updated.", "success");
                         renderOutlets();
                     })
                     .withFailureHandler((e) => {
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
                     })
-                    .updateOutlet(id, { area, customerGroup: group, notes });
+                    .updateOutlet(id, {
+                        outletName,
+                        area,
+                        address,
+                        customerGroup,
+                        notes,
+                    });
+            }
+
+            function openAddOutletModal() {
+                document.getElementById("no-name").value = "";
+                document.getElementById("no-area").value = "";
+                document.getElementById("no-address").value = "";
+                document.getElementById("no-group").value = "";
+                document.getElementById("no-notes").value = "";
+                openModal("modal-add-outlet");
+            }
+
+            function submitAddOutlet() {
+                const outletName = document
+                    .getElementById("no-name")
+                    .value.trim();
+                const area = document.getElementById("no-area").value.trim();
+                const address = document
+                    .getElementById("no-address")
+                    .value.trim();
+                const customerGroup = document
+                    .getElementById("no-group")
+                    .value.trim();
+                const notes = document
+                    .getElementById("no-notes")
+                    .value.trim();
+                if (!outletName) {
+                    showToast("Outlet name is required.", "error");
+                    return;
+                }
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Add failed: " + r.error, "error");
+                            return;
+                        }
+                        outlets.push(r.outlet);
+                        closeModal("modal-add-outlet");
+                        showToast(`${r.outlet.outletName} added.`, "success");
+                        renderOutlets();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .createOutlet({
+                        outletName,
+                        area,
+                        address,
+                        customerGroup,
+                        notes,
+                    });
             }
 
             // ── DEFAULT ASSIGNMENTS ────────────────────────────────────

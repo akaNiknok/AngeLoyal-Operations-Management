@@ -597,9 +597,40 @@ function updateDefaultAssignment(defaultAssignId, changes) {
 // ============================================================
 
 /**
+ * Creates a new outlet record.
+ * @param {Object} data  { outletName, area, address, customerGroup, notes }
+ * @returns {{ success: boolean, outlet: Object } | { success: false, error: string }}
+ */
+function createOutlet(data) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const outletName = String(data.outletName || '').trim();
+    if (!outletName) throw new Error('Outlet name is required.');
+
+    const area          = String(data.area          || '').trim();
+    const address       = String(data.address       || '').trim();
+    const customerGroup = String(data.customerGroup || '').trim();
+    const notes         = String(data.notes         || '').trim();
+
+    const sheet  = _getSheet(SHEET_OUTLETS);
+    const nextId = _nextRowId(sheet);
+    sheet.appendRow([nextId, outletName, area, address, customerGroup, notes, new Date()]);
+
+    _auditLog('OUTLET_CREATE', SHEET_OUTLETS, nextId, '', outletName);
+
+    return {
+      success: true,
+      outlet: { id: nextId, outletName, area, address, customerGroup, notes },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
  * Updates an outlet record.
  * @param {number} outletId
- * @param {Object} changes  Any of { area, address, customerGroup, notes }
+ * @param {Object} changes  Any of { outletName, area, address, customerGroup, notes }
  * @returns {{ success: boolean } | { success: false, error: string }}
  */
 function updateOutlet(outletId, changes) {
@@ -614,6 +645,7 @@ function updateOutlet(outletId, changes) {
 
     const row    = rows[rowIdx];
     const oldVal = {
+      outletName:    _val(row, headers, 'Outlet Name'),
       area:          _val(row, headers, 'Area'),
       address:       _val(row, headers, 'Address'),
       customerGroup: _val(row, headers, 'Customer Group'),
@@ -621,6 +653,11 @@ function updateOutlet(outletId, changes) {
     };
 
     const updates = {};
+    if (changes.outletName !== undefined) {
+      const outletName = String(changes.outletName).trim();
+      if (!outletName) throw new Error('Outlet name is required.');
+      updates['Outlet Name'] = outletName;
+    }
     if (changes.area          !== undefined) updates['Area']           = changes.area;
     if (changes.address       !== undefined) updates['Address']        = changes.address;
     if (changes.customerGroup !== undefined) updates['Customer Group'] = changes.customerGroup;

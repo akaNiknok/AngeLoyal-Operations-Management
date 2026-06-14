@@ -628,22 +628,44 @@
                         style="width: 220px"
                     />
                     <span class="tb-label" id="outlets-count"></span>
+                    <div class="tb-spacer"></div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="openAddOutletModal()"
+                    >
+                        + Add outlet
+                    </button>
                 </div>
-                <div class="outlets-table-wrap">
-                    <table class="data-table" id="outlets-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 40px">ID</th>
-                                <th style="width: 260px">Outlet Name</th>
-                                <th style="width: 120px">Area</th>
-                                <th style="width: 180px">Address</th>
-                                <th style="width: 100px">Group</th>
-                                <th>Notes</th>
-                                <th style="width: 60px"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="outlets-tbody"></tbody>
-                    </table>
+                <div class="admin-split">
+                    <div class="admin-list-wrap">
+                        <table class="data-table" id="outlets-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th>Outlet Name</th>
+                                    <th style="width: 130px">Area</th>
+                                    <th style="width: 90px">Group</th>
+                                </tr>
+                            </thead>
+                            <tbody id="outlets-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="admin-detail-col">
+                        <div class="col-head">Outlet detail</div>
+                        <div class="detail-body" id="outlet-detail-body">
+                            <div class="empty-board" style="padding: 24px 0">
+                                <div class="icon">🏬</div>
+                                <div class="sub">
+                                    Select an outlet to view details
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class="detail-footer"
+                            id="outlet-detail-footer"
+                            style="display: none"
+                        ></div>
+                    </div>
                 </div>
             </div>
 
@@ -679,21 +701,36 @@
                         + Add truck
                     </button>
                 </div>
-                <div class="outlets-table-wrap">
-                    <table class="data-table" id="trucks-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 40px">ID</th>
-                                <th style="width: 120px">Plate</th>
-                                <th style="width: 140px">Brand</th>
-                                <th>Type</th>
-                                <th style="width: 100px">Billing Cat.</th>
-                                <th style="width: 80px">Status</th>
-                                <th style="width: 110px"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="trucks-tbody"></tbody>
-                    </table>
+                <div class="admin-split">
+                    <div class="admin-list-wrap">
+                        <table class="data-table" id="trucks-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th style="width: 120px">Plate</th>
+                                    <th>Type</th>
+                                    <th style="width: 90px">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trucks-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="admin-detail-col">
+                        <div class="col-head">Truck detail</div>
+                        <div class="detail-body" id="truck-detail-body">
+                            <div class="empty-board" style="padding: 24px 0">
+                                <div class="icon">🚚</div>
+                                <div class="sub">
+                                    Select a truck to view details
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class="detail-footer"
+                            id="truck-detail-footer"
+                            style="display: none"
+                        ></div>
+                    </div>
                 </div>
             </div>
 
@@ -729,22 +766,36 @@
                         + Add employee
                     </button>
                 </div>
-                <div class="outlets-table-wrap">
-                    <table class="data-table" id="employees-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 40px">ID</th>
-                                <th>Nickname</th>
-                                <th>First Name</th>
-                                <th>Middle Name</th>
-                                <th>Last Name</th>
-                                <th style="width: 90px">Role</th>
-                                <th style="width: 80px">Status</th>
-                                <th style="width: 110px"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="employees-tbody"></tbody>
-                    </table>
+                <div class="admin-split">
+                    <div class="admin-list-wrap">
+                        <table class="data-table" id="employees-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th>Nickname</th>
+                                    <th style="width: 90px">Role</th>
+                                    <th style="width: 90px">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="employees-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="admin-detail-col">
+                        <div class="col-head">Employee detail</div>
+                        <div class="detail-body" id="employee-detail-body">
+                            <div class="empty-board" style="padding: 24px 0">
+                                <div class="icon">🧑</div>
+                                <div class="sub">
+                                    Select an employee to view details
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class="detail-footer"
+                            id="employee-detail-footer"
+                            style="display: none"
+                        ></div>
+                    </div>
                 </div>
             </div>
 
@@ -773,18 +824,38 @@
                         + Add category
                     </button>
                 </div>
-                <div class="outlets-table-wrap">
-                    <table class="data-table" id="billing-categories-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 40px">ID</th>
-                                <th>Name</th>
-                                <th style="width: 80px">Status</th>
-                                <th style="width: 110px"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="billing-categories-tbody"></tbody>
-                    </table>
+                <div class="admin-split">
+                    <div class="admin-list-wrap">
+                        <table class="data-table" id="billing-categories-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th>Name</th>
+                                    <th style="width: 90px">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="billing-categories-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="admin-detail-col">
+                        <div class="col-head">Category detail</div>
+                        <div
+                            class="detail-body"
+                            id="billing-category-detail-body"
+                        >
+                            <div class="empty-board" style="padding: 24px 0">
+                                <div class="icon">🏷️</div>
+                                <div class="sub">
+                                    Select a category to view details
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class="detail-footer"
+                            id="billing-category-detail-footer"
+                            style="display: none"
+                        ></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -858,6 +929,72 @@
                     </button>
                     <button class="btn btn-primary" onclick="submitAddTrip()">
                         Add trip
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Outlet Modal -->
+        <div class="modal-backdrop" id="modal-add-outlet">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Add outlet</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-add-outlet')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">Outlet Name</label>
+                        <input
+                            type="text"
+                            id="no-name"
+                            placeholder="e.g. PUREGOLD PRICE CLUB TANZA CAVI"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Area</label>
+                        <input
+                            type="text"
+                            id="no-area"
+                            placeholder="e.g. Tanza"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Address</label>
+                        <input type="text" id="no-address" />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Customer Group</label>
+                        <input
+                            type="text"
+                            id="no-group"
+                            placeholder="e.g. PG"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Notes</label>
+                        <textarea
+                            id="no-notes"
+                            placeholder="Any special delivery notes…"
+                        ></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-add-outlet')"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        onclick="submitAddOutlet()"
+                    >
+                        Add outlet
                     </button>
                 </div>
             </div>

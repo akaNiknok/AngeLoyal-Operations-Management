@@ -7,8 +7,6 @@
             }
 
             // ── TRUCKS ADMIN ──────────────────────────────────────────
-            let editingTruckId = null;
-
             function renderTrucksAdmin() {
                 const q = (
                     document.getElementById("trucks-search").value || ""
@@ -17,7 +15,6 @@
                     "trucks-show-inactive",
                 ).checked;
                 const tbody = document.getElementById("trucks-tbody");
-                const isAdmin = currentUser.role === "Admin";
 
                 const filtered = trucks.filter((t) => {
                     if (!showInactive && t.active === false) return false;
@@ -33,45 +30,88 @@
 
                 tbody.innerHTML = filtered
                     .map((t) => {
-                        if (editingTruckId === t.id) {
-                            return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
-    <td><input type="text" value="${esc(t.plate)}" id="te-plate-${t.id}" style="width:100px"></td>
-    <td><input type="text" value="${esc(t.brand)}" id="te-brand-${t.id}" style="width:110px"></td>
-    <td><input type="text" value="${esc(t.type)}" id="te-type-${t.id}" style="width:100%"></td>
-    <td><select id="te-billing-category-${t.id}">${billingCategoryOptions(t.billingCategory)}</select></td>
-    <td>${statusChip(t.active)}</td>
-    <td><span class="edit-link" onclick="saveTruckInline(${t.id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="editingTruckId=null;renderTrucksAdmin()">Cancel</span></td>
-  </tr>`;
-                        }
-                        return `<tr>
+                        const selCls =
+                            selectedTruckAdminId === t.id
+                                ? " row-selected"
+                                : "";
+                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectTruckAdmin(${t.id})">
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
     <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(t.plate)}</td>
-    <td>${esc(t.brand) || "—"}</td>
     <td style="font-size:11px;color:var(--muted)">${esc(t.type) || "—"}</td>
-    <td><span class="status-chip" style="background:var(--bg);color:var(--muted)">${esc(t.billingCategory) || "—"}</span></td>
     <td>${statusChip(t.active)}</td>
-    <td>${isAdmin ? `<span class="edit-link" onclick="editTruckInline(${t.id})">Edit</span> <span class="edit-link" style="color:var(--red)" onclick="toggleTruckActive(${t.id})">${t.active === false ? "Restore" : "Remove"}</span>` : "—"}</td>
   </tr>`;
                     })
                     .join("");
             }
 
-            function editTruckInline(id) {
-                editingTruckId = id;
+            function selectTruckAdmin(id) {
+                selectedTruckAdminId = Number(id);
                 renderTrucksAdmin();
+                renderTruckDetail();
             }
 
-            function saveTruckInline(id) {
-                const plate =
-                    document.getElementById(`te-plate-${id}`)?.value || "";
-                const brand =
-                    document.getElementById(`te-brand-${id}`)?.value || "";
-                const type =
-                    document.getElementById(`te-type-${id}`)?.value || "";
-                const billingCategory =
-                    document.getElementById(`te-billing-category-${id}`)
-                        ?.value || "";
+            function renderTruckDetail() {
+                const body = document.getElementById("truck-detail-body");
+                const footer = document.getElementById(
+                    "truck-detail-footer",
+                );
+
+                if (!selectedTruckAdminId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🚚</div><div class="sub">Select a truck to view details</div></div>`;
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                    return;
+                }
+                const t = trucks.find(
+                    (t) => Number(t.id) === Number(selectedTruckAdminId),
+                );
+                if (!t) {
+                    selectedTruckAdminId = null;
+                    renderTruckDetail();
+                    return;
+                }
+                const isAdmin = currentUser.role === "Admin";
+                const dis = isAdmin ? "" : "disabled";
+
+                body.innerHTML = `
+      <div class="form-row">
+        <label class="form-label">Plate Number</label>
+        <input type="text" id="td-plate" value="${esc(t.plate)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Brand</label>
+        <input type="text" id="td-brand" value="${esc(t.brand)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Type</label>
+        <input type="text" id="td-type" value="${esc(t.type)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Billing Category</label>
+        <select id="td-billing-category" ${dis}>${billingCategoryOptions(t.billingCategory)}</select>
+      </div>
+      <div class="section-lbl">Status</div>
+      <div>${statusChip(t.active)}</div>`;
+
+                if (isAdmin) {
+                    footer.style.display = "";
+                    footer.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="saveTruckDetail()">Save changes</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleTruckActive(${t.id})">${t.active === false ? "Restore" : "Remove"}</button>`;
+                } else {
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                }
+            }
+
+            function saveTruckDetail() {
+                const id = selectedTruckAdminId;
+                const plate = document.getElementById("td-plate").value;
+                const brand = document.getElementById("td-brand").value;
+                const type = document.getElementById("td-type").value;
+                const billingCategory = document.getElementById(
+                    "td-billing-category",
+                ).value;
                 if (!plate.trim()) {
                     showToast("Plate number is required.", "error");
                     return;
@@ -86,9 +126,9 @@
                         }
                         const t = trucks.find((t) => t.id === id);
                         if (t) Object.assign(t, r.truck);
-                        editingTruckId = null;
                         showToast("Truck updated.", "success");
                         renderTrucksAdmin();
+                        renderTruckDetail();
                         renderTruckList();
                         renderDefaults();
                     })
@@ -121,6 +161,7 @@
                             "success",
                         );
                         renderTrucksAdmin();
+                        renderTruckDetail();
                         renderTruckList();
                         renderDefaults();
                     })
@@ -176,8 +217,6 @@
             }
 
             // ── EMPLOYEES ADMIN ───────────────────────────────────────
-            let editingEmployeeId = null;
-
             function renderEmployeesAdmin() {
                 const q = (
                     document.getElementById("employees-search").value || ""
@@ -186,7 +225,6 @@
                     "employees-show-inactive",
                 ).checked;
                 const tbody = document.getElementById("employees-tbody");
-                const isAdmin = currentUser.role === "Admin";
 
                 const filtered = employees.filter((e) => {
                     if (!showInactive && e.active === false) return false;
@@ -202,53 +240,95 @@
 
                 tbody.innerHTML = filtered
                     .map((e) => {
-                        if (editingEmployeeId === e.id) {
-                            return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
-    <td><input type="text" value="${esc(e.nick)}" id="ee-nick-${e.id}" style="width:90px"></td>
-    <td><input type="text" value="${esc(e.firstName)}" id="ee-first-${e.id}" style="width:100px"></td>
-    <td><input type="text" value="${esc(e.middleName)}" id="ee-middle-${e.id}" style="width:100px"></td>
-    <td><input type="text" value="${esc(e.lastName)}" id="ee-last-${e.id}" style="width:100px"></td>
-    <td>
-      <select id="ee-role-${e.id}">
-        <option value="Driver" ${e.role === "Driver" ? "selected" : ""}>Driver</option>
-        <option value="Helper" ${e.role === "Helper" ? "selected" : ""}>Helper</option>
-      </select>
-    </td>
-    <td>${statusChip(e.active)}</td>
-    <td><span class="edit-link" onclick="saveEmployeeInline(${e.id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="editingEmployeeId=null;renderEmployeesAdmin()">Cancel</span></td>
-  </tr>`;
-                        }
-                        return `<tr>
+                        const selCls =
+                            selectedEmployeeAdminId === e.id
+                                ? " row-selected"
+                                : "";
+                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectEmployeeAdmin(${e.id})">
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
     <td style="font-weight:500">${esc(e.nick)}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(e.firstName) || "—"}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(e.middleName) || "—"}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(e.lastName) || "—"}</td>
     <td><span class="badge ${e.role === "Driver" ? "badge-driver" : "badge-helper"}">${esc(e.role)}</span></td>
     <td>${statusChip(e.active)}</td>
-    <td>${isAdmin ? `<span class="edit-link" onclick="editEmployeeInline(${e.id})">Edit</span> <span class="edit-link" style="color:var(--red)" onclick="toggleEmployeeActive(${e.id})">${e.active === false ? "Restore" : "Remove"}</span>` : "—"}</td>
   </tr>`;
                     })
                     .join("");
             }
 
-            function editEmployeeInline(id) {
-                editingEmployeeId = id;
+            function selectEmployeeAdmin(id) {
+                selectedEmployeeAdminId = Number(id);
                 renderEmployeesAdmin();
+                renderEmployeeDetail();
             }
 
-            function saveEmployeeInline(id) {
-                const nick =
-                    document.getElementById(`ee-nick-${id}`)?.value || "";
-                const firstName =
-                    document.getElementById(`ee-first-${id}`)?.value || "";
+            function renderEmployeeDetail() {
+                const body = document.getElementById("employee-detail-body");
+                const footer = document.getElementById(
+                    "employee-detail-footer",
+                );
+
+                if (!selectedEmployeeAdminId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🧑</div><div class="sub">Select an employee to view details</div></div>`;
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                    return;
+                }
+                const em = employees.find(
+                    (e) => Number(e.id) === Number(selectedEmployeeAdminId),
+                );
+                if (!em) {
+                    selectedEmployeeAdminId = null;
+                    renderEmployeeDetail();
+                    return;
+                }
+                const isAdmin = currentUser.role === "Admin";
+                const dis = isAdmin ? "" : "disabled";
+
+                body.innerHTML = `
+      <div class="form-row">
+        <label class="form-label">Nickname</label>
+        <input type="text" id="ed-nick" value="${esc(em.nick)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">First Name</label>
+        <input type="text" id="ed-first" value="${esc(em.firstName)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Middle Name</label>
+        <input type="text" id="ed-middle" value="${esc(em.middleName)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Last Name</label>
+        <input type="text" id="ed-last" value="${esc(em.lastName)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Role</label>
+        <select id="ed-role" ${dis}>
+          <option value="Driver" ${em.role === "Driver" ? "selected" : ""}>Driver</option>
+          <option value="Helper" ${em.role === "Helper" ? "selected" : ""}>Helper</option>
+        </select>
+      </div>
+      <div class="section-lbl">Status</div>
+      <div>${statusChip(em.active)}</div>`;
+
+                if (isAdmin) {
+                    footer.style.display = "";
+                    footer.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="saveEmployeeDetail()">Save changes</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleEmployeeActive(${em.id})">${em.active === false ? "Restore" : "Remove"}</button>`;
+                } else {
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                }
+            }
+
+            function saveEmployeeDetail() {
+                const id = selectedEmployeeAdminId;
+                const nick = document.getElementById("ed-nick").value;
+                const firstName = document.getElementById("ed-first").value;
                 const middleName =
-                    document.getElementById(`ee-middle-${id}`)?.value || "";
-                const lastName =
-                    document.getElementById(`ee-last-${id}`)?.value || "";
-                const role =
-                    document.getElementById(`ee-role-${id}`)?.value || "";
+                    document.getElementById("ed-middle").value;
+                const lastName = document.getElementById("ed-last").value;
+                const role = document.getElementById("ed-role").value;
                 if (!nick.trim()) {
                     showToast("Nickname is required.", "error");
                     return;
@@ -270,9 +350,9 @@
                                 lastName,
                                 role,
                             });
-                        editingEmployeeId = null;
                         showToast("Employee updated.", "success");
                         renderEmployeesAdmin();
+                        renderEmployeeDetail();
                         renderEmpList();
                         renderDefEmpList();
                     })
@@ -311,6 +391,7 @@
                             "success",
                         );
                         renderEmployeesAdmin();
+                        renderEmployeeDetail();
                         renderEmpList();
                         renderDefEmpList();
                         renderUnassignedCrewStat();
@@ -377,8 +458,6 @@
             }
 
             // ── BILLING CATEGORIES ADMIN ─────────────────────────────
-            let editingBillingCategoryId = null;
-
             function renderBillingCategoriesAdmin() {
                 const showInactive = document.getElementById(
                     "billing-categories-show-inactive",
@@ -386,7 +465,6 @@
                 const tbody = document.getElementById(
                     "billing-categories-tbody",
                 );
-                const isAdmin = currentUser.role === "Admin";
 
                 const filtered = billingCategories.filter(
                     (c) => showInactive || c.active !== false,
@@ -397,32 +475,73 @@
 
                 tbody.innerHTML = filtered
                     .map((c) => {
-                        if (editingBillingCategoryId === c.id) {
-                            return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${c.id}</td>
-    <td><input type="text" value="${esc(c.name)}" id="bce-name-${c.id}" style="width:120px"></td>
-    <td>${statusChip(c.active)}</td>
-    <td><span class="edit-link" onclick="saveBillingCategoryInline(${c.id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="editingBillingCategoryId=null;renderBillingCategoriesAdmin()">Cancel</span></td>
-  </tr>`;
-                        }
-                        return `<tr>
+                        const selCls =
+                            selectedBillingCategoryId === c.id
+                                ? " row-selected"
+                                : "";
+                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectBillingCategory(${c.id})">
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${c.id}</td>
     <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(c.name)}</td>
     <td>${statusChip(c.active)}</td>
-    <td>${isAdmin ? `<span class="edit-link" onclick="editBillingCategoryInline(${c.id})">Edit</span> <span class="edit-link" style="color:var(--red)" onclick="toggleBillingCategoryActive(${c.id})">${c.active === false ? "Restore" : "Remove"}</span>` : "—"}</td>
   </tr>`;
                     })
                     .join("");
             }
 
-            function editBillingCategoryInline(id) {
-                editingBillingCategoryId = id;
+            function selectBillingCategory(id) {
+                selectedBillingCategoryId = Number(id);
                 renderBillingCategoriesAdmin();
+                renderBillingCategoryDetail();
             }
 
-            function saveBillingCategoryInline(id) {
-                const name =
-                    document.getElementById(`bce-name-${id}`)?.value || "";
+            function renderBillingCategoryDetail() {
+                const body = document.getElementById(
+                    "billing-category-detail-body",
+                );
+                const footer = document.getElementById(
+                    "billing-category-detail-footer",
+                );
+
+                if (!selectedBillingCategoryId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🏷️</div><div class="sub">Select a category to view details</div></div>`;
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                    return;
+                }
+                const c = billingCategories.find(
+                    (c) =>
+                        Number(c.id) === Number(selectedBillingCategoryId),
+                );
+                if (!c) {
+                    selectedBillingCategoryId = null;
+                    renderBillingCategoryDetail();
+                    return;
+                }
+                const isAdmin = currentUser.role === "Admin";
+                const dis = isAdmin ? "" : "disabled";
+
+                body.innerHTML = `
+      <div class="form-row">
+        <label class="form-label">Name</label>
+        <input type="text" id="bcd-name" value="${esc(c.name)}" ${dis}>
+      </div>
+      <div class="section-lbl">Status</div>
+      <div>${statusChip(c.active)}</div>`;
+
+                if (isAdmin) {
+                    footer.style.display = "";
+                    footer.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="saveBillingCategoryDetail()">Save changes</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleBillingCategoryActive(${c.id})">${c.active === false ? "Restore" : "Remove"}</button>`;
+                } else {
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                }
+            }
+
+            function saveBillingCategoryDetail() {
+                const id = selectedBillingCategoryId;
+                const name = document.getElementById("bcd-name").value;
                 if (!name.trim()) {
                     showToast("Name is required.", "error");
                     return;
@@ -446,9 +565,9 @@
                                         r.billingCategory.name;
                             });
                         }
-                        editingBillingCategoryId = null;
                         showToast("Billing category updated.", "success");
                         renderBillingCategoriesAdmin();
+                        renderBillingCategoryDetail();
                         renderTrucksAdmin();
                     })
                     .withFailureHandler((e) => {
@@ -480,6 +599,7 @@
                             "success",
                         );
                         renderBillingCategoriesAdmin();
+                        renderBillingCategoryDetail();
                     })
                     .withFailureHandler((e) => {
                         setSyncing(false);
