@@ -1,7 +1,6 @@
 // ============================================================
 //  AngeLoyal OMS — DataReaders.gs
-//  Read-only sheet accessors. No writes except the batch
-//  Billing Category backfill in getTrucks().
+//  Read-only sheet accessors.
 // ============================================================
 
 
@@ -16,7 +15,8 @@
  *
  * @returns {{ session: Object, employees: Object[], trucks: Object[],
  *             rosterAssignments: Object[], waybillPrefixes: Object[],
- *             outlets: Object[], defaultAssignments: Object[] }}
+ *             outlets: Object[], defaultAssignments: Object[],
+ *             billingCategories: Object[] }}
  */
 function getBootData() {
   return {
@@ -27,6 +27,7 @@ function getBootData() {
     waybillPrefixes:    getWaybillPrefixes(),
     outlets:            getOutlets(),
     defaultAssignments: getDefaultAssignments(),
+    billingCategories:  getBillingCategories(),
   };
 }
 
@@ -56,68 +57,42 @@ function getEmployees() {
 }
 
 /**
- * Returns all active trucks, with their billing category resolved from Truck Type Map.
- * Also backfills the Billing Category column in the Trucks sheet if empty —
- * via a single batch setValues() covering the whole column, not per-row.
+ * Returns all trucks.
  * @returns {Object[]} Array of { id, plate, brand, type, billingCategory, active }
  */
 function getTrucks() {
-  const typeMap = _buildTruckTypeMap();
   const sheet   = _getSheet(SHEET_TRUCKS);
   const rows    = sheet.getDataRange().getValues();
   const headers = rows[0].map(h => h.toString().trim());
 
-  const result = [];
-  const billingCatColIdx = headers.indexOf('Billing Category');
-  let needsBackfill = false;
-  const colValues = [];
-
-  rows.slice(1).forEach(row => {
+  return rows.slice(1).map(row => {
     const id = _numOrNull(_val(row, headers, 'ID'));
-    if (id === null || id === '') {
-      if (billingCatColIdx !== -1) colValues.push([row[billingCatColIdx] || '']);
-      return;
-    }
+    if (id === null) return null;
 
-    const type            = _val(row, headers, 'Type') || '';
-    const billingCategory = typeMap[type] || _val(row, headers, 'Billing Category') || '';
-    const active          = _val(row, headers, 'Active') !== false;
-
-    if (billingCatColIdx !== -1) {
-      if (billingCategory && !row[billingCatColIdx]) needsBackfill = true;
-      colValues.push([billingCategory || row[billingCatColIdx] || '']);
-    }
-
-    result.push({
+    return {
       id:              id,
       plate:           _val(row, headers, 'Plate Number') || '(no plate)',
       brand:           _val(row, headers, 'Brand'),
-      type:            type,
-      billingCategory: billingCategory,
-      active:          active,
-    });
-  });
-
-  if (needsBackfill && billingCatColIdx !== -1 && colValues.length > 0) {
-    sheet.getRange(2, billingCatColIdx + 1, colValues.length, 1).setValues(colValues);
-  }
-
-  return result;
+      type:            _val(row, headers, 'Type'),
+      billingCategory: _val(row, headers, 'Billing Category') || '',
+      active:          _val(row, headers, 'Active') !== false,
+    };
+  }).filter(t => t !== null);
 }
 
 /**
- * Returns all truck type map entries.
- * @returns {Object[]} Array of { id, fullModelName, billingCategory }
+ * Returns all billing category entries.
+ * @returns {Object[]} Array of { id, name, active }
  */
-function getTruckTypeMap() {
-  const sheet   = _getSheet(SHEET_TRUCK_TYPE_MAP);
+function getBillingCategories() {
+  const sheet   = _getSheet(SHEET_BILLING_CATEGORIES);
   const rows    = sheet.getDataRange().getValues();
   const headers = rows[0].map(h => h.toString().trim());
 
   return rows.slice(1).map(row => ({
-    id:              _numOrNull(_val(row, headers, 'ID')),
-    fullModelName:   _val(row, headers, 'Full Model Name'),
-    billingCategory: _val(row, headers, 'Billing Category'),
+    id:     _numOrNull(_val(row, headers, 'ID')),
+    name:   _val(row, headers, 'Name'),
+    active: _val(row, headers, 'Active') !== false,
   })).filter(r => r.id !== null);
 }
 

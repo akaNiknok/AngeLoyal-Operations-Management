@@ -7,7 +7,7 @@ The AngeLoyal Order Management System (OMS) relies on a structured collection of
 | \# | Sheet Name | Group | Access / Type |
 | :---- | :---- | :---- | :---- |
 | 1 | Users | Config | Administrative Setup |
-| 2 | Truck Type Map | Config | Administrative Setup |
+| 2 | Billing Categories | Config | Administrative Setup |
 | 3 | Waybill Prefixes | Config | Administrative Setup |
 | 4 | Employees | People & Trucks | Master Records |
 | 5 | Trucks | People & Trucks | Master Records |
@@ -43,34 +43,30 @@ Maps Google account emails to specific system roles to manage access control.
 | Flag trip status | ✓ | ✓ | — | — |
 | Confirm waybill numbers | ✓ | ✓ | — | — |
 | Edit Outlets, Default Assignments | ✓ | — | — | — |
-| Edit Truck Type Map, Waybill Prefixes | ✓ | — | — | — |
+| Edit Billing Categories, Waybill Prefixes | ✓ | — | — | — |
 | Edit Users sheet | ✓ | — | — | — |
 | View Audit Log | ✓ | — | — | — |
 
-### **Sheet 2: Truck Type Map**
+### **Sheet 2: Billing Categories**
 
-Maps verbose truck model designations to unified billing categories. This allows administrators to introduce new vehicle models without modifying system code.
+Maintains the list of valid billing classifications that Admins can assign to trucks (e.g., 10W, 6W, 4W, L300). Admins can add new categories or rename/deactivate existing ones as the fleet's billing structure evolves.
 
 | Column | Type | Notes |
 | :---- | :---- | :---- |
 | ID | Number | Auto-incrementing primary key |
-| Full Model Name | String | Exact string matching the Brand \+ Type from the Trucks sheet (e.g., NMR 85 H 6W CLOSED VAN) |
-| Billing Category | String | Standardization values: 10W, 6W, 4W, L300 |
+| Name | String | Billing category code, e.g. 10W, 6W, 4W, L300 |
+| Active | Boolean | Inactive categories are hidden from the "Add/Edit Truck" dropdown but remain valid for trucks still using them |
 
-#### **Active Reference Data**
+#### **Initial seed:**
 
-| Full Model Name | Billing Category |
+| Name | Active |
 | :---- | :---- |
-| 12W WING VAN | 10W |
-| NMR 85 H 6W CLOSED VAN | 6W |
-| ELF 6W CLOSED VAN | 6W |
-| ELF 6 HEELER CLOSED VAN | 6W |
-| TRAVIZ CLOSED VAN | 6W |
-| CANTER FE 73 CLOSE VAN | 6W |
-| 6W | 6W |
-| L300 FB BODY | L300 |
+| 10W | TRUE |
+| 6W | TRUE |
+| 4W | TRUE |
+| L300 | TRUE |
 
-**System Behavior:** The application matches the Trucks sheet's vehicle properties against this table. If no matching model name is found, the associated trip is automatically flagged for manual review during billing cycles.
+**System Behavior:** Admins select a truck's Billing Category directly when creating or editing a truck record (Sheet 5). Renaming a category here cascades to every Trucks row currently set to the old name, so existing trucks stay matched to the renamed category.
 
 ### **Sheet 3: Waybill Prefixes**
 
@@ -116,7 +112,7 @@ Maintains the authoritative fleet registry, combining physical specifications wi
 | Brand | String | Vehicle manufacturer (e.g., Isuzu, Mitsubishi) |
 | Type | String | Detailed model/body designation |
 | Status | String | Active / Inactive—inactive trucks are hidden from dispatch options |
-| Billing Category | String | Computed by the backend via Truck Type Map lookup. Saved directly here for query performance. |
+| Billing Category | String | Selected manually by Admins from the Billing Categories list (Sheet 2) at truck creation; editable afterward via the Trucks admin panel |
 
 ### **Sheet 6: Default Assignments**
 
@@ -285,9 +281,11 @@ The global ledger recording all administrative, operational, and data state modi
 * OUTLET\_EDIT — Administrative updates to existing outlet records  
 * DEFAULT\_ASSIGN\_CHANGE — Adjustments to a vehicle's standard crew configuration  
 * TRUCK\_CREATE — New vehicle added to the Trucks master record  
-* TRUCK\_EDIT — Administrative updates to an existing truck record (including Active/Inactive toggling)  
+* TRUCK\_EDIT — Administrative updates to an existing truck record (including Active/Inactive toggling and Billing Category changes)  
 * EMPLOYEE\_CREATE — New personnel added to the Employees master record  
-* EMPLOYEE\_EDIT — Administrative updates to an existing employee record (including Active/Inactive toggling)
+* EMPLOYEE\_EDIT — Administrative updates to an existing employee record (including Active/Inactive toggling)  
+* BILLING\_CATEGORY\_CREATE — New entry added to the Billing Categories list  
+* BILLING\_CATEGORY\_EDIT — Administrative updates to a billing category (rename, Active/Inactive toggling)
 
 ## **Structural Implementation Conventions**
 
@@ -310,7 +308,7 @@ To handle fluid crew sizes (ranging from 0 to 3 helpers per vehicle) without add
 
 ### **Snapshotting Vehicle Billing Classes**
 
-Vehicle billing classifications are stamped directly onto individual trip lines when they are dispatched. This historical snapshot protects past financial summaries from altering if an administrator subsequently changes entries within the master Truck Type Map.
+Vehicle billing classifications are stamped directly onto individual trip lines when they are dispatched. This historical snapshot protects past financial summaries from altering if an administrator subsequently changes a truck's Billing Category or renames an entry in the Billing Categories list.
 
 ### **Independent Route Frequency Tracking**
 

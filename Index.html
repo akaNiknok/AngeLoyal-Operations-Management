@@ -73,6 +73,13 @@
                     >
                         Employees
                     </button>
+                    <button
+                        class="nav-btn admin-only"
+                        id="nav-billing-categories"
+                        onclick="switchPanel('billing-categories')"
+                    >
+                        Billing Categories
+                    </button>
                 </nav>
 
                 <div class="header-right">
@@ -740,6 +747,46 @@
                     </table>
                 </div>
             </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: BILLING CATEGORIES (admin)
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-billing-categories">
+                <div class="toolbar">
+                    <span class="tb-label" id="billing-categories-count"></span>
+                    <label
+                        class="tb-label"
+                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                    >
+                        <input
+                            type="checkbox"
+                            id="billing-categories-show-inactive"
+                            onchange="renderBillingCategoriesAdmin()"
+                        />
+                        Show inactive
+                    </label>
+                    <div class="tb-spacer"></div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="openAddBillingCategoryModal()"
+                    >
+                        + Add category
+                    </button>
+                </div>
+                <div class="outlets-table-wrap">
+                    <table class="data-table" id="billing-categories-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px">ID</th>
+                                <th>Name</th>
+                                <th style="width: 80px">Status</th>
+                                <th style="width: 110px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="billing-categories-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
         <!-- /.app -->
 
@@ -852,10 +899,10 @@
                             id="nt-type"
                             placeholder="e.g. 12W WING VAN"
                         />
-                        <span class="form-hint"
-                            >Must match a Truck Type Map entry to
-                            auto-resolve the billing category.</span
-                        >
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Billing Category</label>
+                        <select id="nt-billing-category"></select>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -925,6 +972,45 @@
                         onclick="submitAddEmployee()"
                     >
                         Add employee
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Billing Category Modal -->
+        <div class="modal-backdrop" id="modal-add-billing-category">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Add billing category</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-add-billing-category')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">Name</label>
+                        <input
+                            type="text"
+                            id="nbc-name"
+                            placeholder="e.g. 6W"
+                        />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-add-billing-category')"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        onclick="submitAddBillingCategory()"
+                    >
+                        Add category
                     </button>
                 </div>
             </div>

@@ -293,44 +293,52 @@ function _appendRouteFrequency(tripId, tripDate, driverId, outletId) {
 
 
 // ============================================================
-//  INTERNAL HELPERS — Truck Type Map
+//  INTERNAL HELPERS — Billing Categories
 // ============================================================
 
 /**
- * Builds a { fullModelName → billingCategory } lookup from the Truck Type Map sheet.
- * @returns {Object}
- */
-function _buildTruckTypeMap() {
-  const sheet   = _getSheet(SHEET_TRUCK_TYPE_MAP);
-  const rows    = sheet.getDataRange().getValues();
-  const headers = rows[0].map(h => h.toString().trim());
-
-  const map = {};
-  rows.slice(1).forEach(row => {
-    const name = _val(row, headers, 'Full Model Name');
-    const cat  = _val(row, headers, 'Billing Category');
-    if (name) map[name.trim()] = cat || '';
-  });
-  return map;
-}
-
-/**
- * Resolves the billing category for a given truck ID.
+ * Resolves the billing category for a given truck ID by reading it
+ * directly from the Trucks sheet.
  * @param {number} truckId
  * @returns {string}
  */
 function _resolveBillingCategory(truckId) {
   if (!truckId) return '';
-  const typeMap = _buildTruckTypeMap();
   const sheet   = _getSheet(SHEET_TRUCKS);
   const rows    = sheet.getDataRange().getValues();
   const headers = rows[0].map(h => h.toString().trim());
 
   for (let i = 1; i < rows.length; i++) {
     if (Number(_val(rows[i], headers, 'ID')) === Number(truckId)) {
-      const type = _val(rows[i], headers, 'Type') || '';
-      return typeMap[type] || _val(rows[i], headers, 'Billing Category') || '';
+      return _val(rows[i], headers, 'Billing Category') || '';
     }
   }
   return '';
+}
+
+/**
+ * Updates the Billing Category column on every Trucks row currently set to
+ * oldName so it reads newName instead. Called when an Admin renames a
+ * Billing Categories entry, keeping existing truck records in sync.
+ *
+ * @param {string} oldName
+ * @param {string} newName
+ */
+function _renameTruckBillingCategory(oldName, newName) {
+  const sheet   = _getSheet(SHEET_TRUCKS);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+  const colIdx  = headers.indexOf('Billing Category');
+  if (colIdx === -1 || rows.length < 2) return;
+
+  let changed = false;
+  const colValues = rows.slice(1).map(row => {
+    const val = String(row[colIdx]).trim() === oldName ? newName : row[colIdx];
+    if (val !== row[colIdx]) changed = true;
+    return [val];
+  });
+
+  if (changed) {
+    sheet.getRange(2, colIdx + 1, colValues.length, 1).setValues(colValues);
+  }
 }

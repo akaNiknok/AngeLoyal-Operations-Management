@@ -643,12 +643,12 @@ function updateOutlet(outletId, changes) {
 // ============================================================
 
 /**
- * Creates a new truck record. Billing category is resolved from the
- * Truck Type Map based on the Type field, same lookup as getTrucks().
+ * Creates a new truck record. Billing category is selected directly by
+ * the Admin from the Billing Categories list (not auto-resolved).
  * Also appends a blank Default Assignments row so the truck shows up
  * in the Truck Roster panel immediately.
  *
- * @param {Object} data  { plate, brand, type }
+ * @param {Object} data  { plate, brand, type, billingCategory }
  * @returns {{ success: boolean, truck: Object, defaultAssignment: Object } | { success: false, error: string }}
  */
 function createTruck(data) {
@@ -665,10 +665,9 @@ function createTruck(data) {
       String(_val(row, headers, 'Plate Number')).trim().toLowerCase() === plate.toLowerCase());
     if (dup) throw new Error(`A truck with plate "${plate}" already exists.`);
 
-    const brand = String(data.brand || '').trim();
-    const type  = String(data.type  || '').trim();
-    const typeMap          = _buildTruckTypeMap();
-    const billingCategory  = typeMap[type] || '';
+    const brand           = String(data.brand || '').trim();
+    const type            = String(data.type  || '').trim();
+    const billingCategory = String(data.billingCategory || '').trim();
 
     const nextId = _nextRowId(sheet);
     sheet.appendRow([nextId, plate, brand, type, true, billingCategory]);
@@ -678,7 +677,7 @@ function createTruck(data) {
     const nextDefId = _nextRowId(defSheet);
     defSheet.appendRow([nextDefId, nextId, '', '', '']);
 
-    _auditLog('TRUCK_CREATE', SHEET_TRUCKS, nextId, '', JSON.stringify({ plate, brand, type }));
+    _auditLog('TRUCK_CREATE', SHEET_TRUCKS, nextId, '', JSON.stringify({ plate, brand, type, billingCategory }));
 
     return {
       success: true,
@@ -691,12 +690,11 @@ function createTruck(data) {
 }
 
 /**
- * Updates a truck record. If `type` changes and matches an entry in the
- * Truck Type Map, the Billing Category is recomputed; otherwise it is
- * left untouched.
+ * Updates a truck record, including a direct Admin-selected change to
+ * its Billing Category.
  *
  * @param {number} truckId
- * @param {Object} changes  Any of { plate, brand, type, active }
+ * @param {Object} changes  Any of { plate, brand, type, billingCategory, active }
  * @returns {{ success: boolean, truck: Object } | { success: false, error: string }}
  */
 function updateTruck(truckId, changes) {
@@ -711,10 +709,11 @@ function updateTruck(truckId, changes) {
 
     const row    = rows[rowIdx];
     const oldVal = {
-      plate:  _val(row, headers, 'Plate Number'),
-      brand:  _val(row, headers, 'Brand'),
-      type:   _val(row, headers, 'Type'),
-      active: _val(row, headers, 'Active'),
+      plate:           _val(row, headers, 'Plate Number'),
+      brand:           _val(row, headers, 'Brand'),
+      type:            _val(row, headers, 'Type'),
+      billingCategory: _val(row, headers, 'Billing Category'),
+      active:          _val(row, headers, 'Active'),
     };
 
     const updates = {};
@@ -727,12 +726,8 @@ function updateTruck(truckId, changes) {
       updates['Plate Number'] = plate;
     }
     if (changes.brand !== undefined) updates['Brand'] = String(changes.brand).trim();
-    if (changes.type !== undefined) {
-      const type = String(changes.type).trim();
-      updates['Type'] = type;
-      const resolved = _buildTruckTypeMap()[type];
-      if (resolved) updates['Billing Category'] = resolved;
-    }
+    if (changes.type !== undefined) updates['Type'] = String(changes.type).trim();
+    if (changes.billingCategory !== undefined) updates['Billing Category'] = String(changes.billingCategory).trim();
     if (changes.active !== undefined) updates['Active'] = !!changes.active;
 
     if (Object.keys(updates).length > 0) {
@@ -750,6 +745,101 @@ function updateTruck(truckId, changes) {
         type:            _val(row, headers, 'Type'),
         billingCategory: _val(row, headers, 'Billing Category'),
         active:          _val(row, headers, 'Active') !== false,
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ============================================================
+//  DATA WRITERS — Billing Categories (Admin only)
+// ============================================================
+
+/**
+ * Creates a new billing category.
+ * @param {Object} data  { name }
+ * @returns {{ success: boolean, billingCategory: Object } | { success: false, error: string }}
+ */
+function createBillingCategory(data) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const name = String(data.name || '').trim();
+    if (!name) throw new Error('Name is required.');
+
+    const sheet   = _getSheet(SHEET_BILLING_CATEGORIES);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const dup = rows.slice(1).some(row =>
+      String(_val(row, headers, 'Name')).trim().toLowerCase() === name.toLowerCase());
+    if (dup) throw new Error(`A billing category named "${name}" already exists.`);
+
+    const nextId = _nextRowId(sheet);
+    sheet.appendRow([nextId, name, true]);
+
+    _auditLog('BILLING_CATEGORY_CREATE', SHEET_BILLING_CATEGORIES, nextId, '', name);
+
+    return { success: true, billingCategory: { id: nextId, name, active: true } };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Updates a billing category. Renaming cascades to every Trucks row
+ * currently using the old name, so existing trucks stay matched.
+ *
+ * @param {number} categoryId
+ * @param {Object} changes  Any of { name, active }
+ * @returns {{ success: boolean, billingCategory: Object } | { success: false, error: string }}
+ */
+function updateBillingCategory(categoryId, changes) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const sheet   = _getSheet(SHEET_BILLING_CATEGORIES);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const rowIdx = _findRowById(rows, headers, categoryId);
+    if (rowIdx === -1) throw new Error(`Billing category ID ${categoryId} not found.`);
+
+    const row    = rows[rowIdx];
+    const oldVal = {
+      name:   _val(row, headers, 'Name'),
+      active: _val(row, headers, 'Active'),
+    };
+
+    const updates = {};
+    let renamedFrom = null;
+    if (changes.name !== undefined) {
+      const name = String(changes.name).trim();
+      if (!name) throw new Error('Name is required.');
+      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
+        && String(_val(r, headers, 'Name')).trim().toLowerCase() === name.toLowerCase());
+      if (dup) throw new Error(`A billing category named "${name}" already exists.`);
+      if (name !== String(oldVal.name)) renamedFrom = String(oldVal.name);
+      updates['Name'] = name;
+    }
+    if (changes.active !== undefined) updates['Active'] = !!changes.active;
+
+    if (Object.keys(updates).length > 0) {
+      _writeRowFields(sheet, row, rowIdx, headers, updates);
+    }
+
+    if (renamedFrom) {
+      _renameTruckBillingCategory(renamedFrom, updates['Name']);
+    }
+
+    _auditLog('BILLING_CATEGORY_EDIT', SHEET_BILLING_CATEGORIES, categoryId, JSON.stringify(oldVal), JSON.stringify(changes));
+
+    return {
+      success: true,
+      billingCategory: {
+        id:     categoryId,
+        name:   _val(row, headers, 'Name'),
+        active: _val(row, headers, 'Active') !== false,
       },
     };
   } catch (e) {

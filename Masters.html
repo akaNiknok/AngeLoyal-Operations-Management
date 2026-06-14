@@ -39,7 +39,7 @@
     <td><input type="text" value="${esc(t.plate)}" id="te-plate-${t.id}" style="width:100px"></td>
     <td><input type="text" value="${esc(t.brand)}" id="te-brand-${t.id}" style="width:110px"></td>
     <td><input type="text" value="${esc(t.type)}" id="te-type-${t.id}" style="width:100%"></td>
-    <td style="font-size:11px;color:var(--muted)">${esc(t.billingCategory) || "—"}</td>
+    <td><select id="te-billing-category-${t.id}">${billingCategoryOptions(t.billingCategory)}</select></td>
     <td>${statusChip(t.active)}</td>
     <td><span class="edit-link" onclick="saveTruckInline(${t.id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="editingTruckId=null;renderTrucksAdmin()">Cancel</span></td>
   </tr>`;
@@ -69,6 +69,9 @@
                     document.getElementById(`te-brand-${id}`)?.value || "";
                 const type =
                     document.getElementById(`te-type-${id}`)?.value || "";
+                const billingCategory =
+                    document.getElementById(`te-billing-category-${id}`)
+                        ?.value || "";
                 if (!plate.trim()) {
                     showToast("Plate number is required.", "error");
                     return;
@@ -93,7 +96,7 @@
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
                     })
-                    .updateTruck(id, { plate, brand, type });
+                    .updateTruck(id, { plate, brand, type, billingCategory });
             }
 
             function toggleTruckActive(id) {
@@ -132,6 +135,8 @@
                 document.getElementById("nt-plate").value = "";
                 document.getElementById("nt-brand").value = "";
                 document.getElementById("nt-type").value = "";
+                document.getElementById("nt-billing-category").innerHTML =
+                    billingCategoryOptions("");
                 openModal("modal-add-truck");
             }
 
@@ -139,6 +144,9 @@
                 const plate = document.getElementById("nt-plate").value.trim();
                 const brand = document.getElementById("nt-brand").value.trim();
                 const type = document.getElementById("nt-type").value.trim();
+                const billingCategory = document.getElementById(
+                    "nt-billing-category",
+                ).value;
                 if (!plate) {
                     showToast("Plate number is required.", "error");
                     return;
@@ -164,7 +172,7 @@
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
                     })
-                    .createTruck({ plate, brand, type });
+                    .createTruck({ plate, brand, type, billingCategory });
             }
 
             // ── EMPLOYEES ADMIN ───────────────────────────────────────
@@ -366,5 +374,151 @@
                         lastName,
                         role,
                     });
+            }
+
+            // ── BILLING CATEGORIES ADMIN ─────────────────────────────
+            let editingBillingCategoryId = null;
+
+            function renderBillingCategoriesAdmin() {
+                const showInactive = document.getElementById(
+                    "billing-categories-show-inactive",
+                ).checked;
+                const tbody = document.getElementById(
+                    "billing-categories-tbody",
+                );
+                const isAdmin = currentUser.role === "Admin";
+
+                const filtered = billingCategories.filter(
+                    (c) => showInactive || c.active !== false,
+                );
+                document.getElementById(
+                    "billing-categories-count",
+                ).textContent = `${filtered.length} categories`;
+
+                tbody.innerHTML = filtered
+                    .map((c) => {
+                        if (editingBillingCategoryId === c.id) {
+                            return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${c.id}</td>
+    <td><input type="text" value="${esc(c.name)}" id="bce-name-${c.id}" style="width:120px"></td>
+    <td>${statusChip(c.active)}</td>
+    <td><span class="edit-link" onclick="saveBillingCategoryInline(${c.id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="editingBillingCategoryId=null;renderBillingCategoriesAdmin()">Cancel</span></td>
+  </tr>`;
+                        }
+                        return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${c.id}</td>
+    <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(c.name)}</td>
+    <td>${statusChip(c.active)}</td>
+    <td>${isAdmin ? `<span class="edit-link" onclick="editBillingCategoryInline(${c.id})">Edit</span> <span class="edit-link" style="color:var(--red)" onclick="toggleBillingCategoryActive(${c.id})">${c.active === false ? "Restore" : "Remove"}</span>` : "—"}</td>
+  </tr>`;
+                    })
+                    .join("");
+            }
+
+            function editBillingCategoryInline(id) {
+                editingBillingCategoryId = id;
+                renderBillingCategoriesAdmin();
+            }
+
+            function saveBillingCategoryInline(id) {
+                const name =
+                    document.getElementById(`bce-name-${id}`)?.value || "";
+                if (!name.trim()) {
+                    showToast("Name is required.", "error");
+                    return;
+                }
+                const bc = billingCategories.find((c) => c.id === id);
+                const oldName = bc ? bc.name : null;
+
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        if (bc) Object.assign(bc, r.billingCategory);
+                        if (oldName && oldName !== r.billingCategory.name) {
+                            trucks.forEach((t) => {
+                                if (t.billingCategory === oldName)
+                                    t.billingCategory =
+                                        r.billingCategory.name;
+                            });
+                        }
+                        editingBillingCategoryId = null;
+                        showToast("Billing category updated.", "success");
+                        renderBillingCategoriesAdmin();
+                        renderTrucksAdmin();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateBillingCategory(id, { name });
+            }
+
+            function toggleBillingCategoryActive(id) {
+                const c = billingCategories.find((c) => c.id === id);
+                if (!c) return;
+                const makeActive = c.active === false;
+                const verb = makeActive ? "restore" : "remove";
+                if (!confirm(`Are you sure you want to ${verb} ${c.name}?`))
+                    return;
+
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        Object.assign(c, r.billingCategory);
+                        showToast(
+                            `${c.name} ${makeActive ? "restored" : "removed"}.`,
+                            "success",
+                        );
+                        renderBillingCategoriesAdmin();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateBillingCategory(id, { active: makeActive });
+            }
+
+            function openAddBillingCategoryModal() {
+                document.getElementById("nbc-name").value = "";
+                openModal("modal-add-billing-category");
+            }
+
+            function submitAddBillingCategory() {
+                const name = document.getElementById("nbc-name").value.trim();
+                if (!name) {
+                    showToast("Name is required.", "error");
+                    return;
+                }
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Add failed: " + r.error, "error");
+                            return;
+                        }
+                        billingCategories.push(r.billingCategory);
+                        closeModal("modal-add-billing-category");
+                        showToast(
+                            `${r.billingCategory.name} added.`,
+                            "success",
+                        );
+                        renderBillingCategoriesAdmin();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .createBillingCategory({ name });
             }
         </script>

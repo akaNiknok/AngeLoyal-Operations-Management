@@ -18,6 +18,7 @@
             let waybillPrefixes = [];
             let outlets = [];
             let defaultAssignments = [];
+            let billingCategories = [];
 
             // Dispatch state
             let dispatchData = null; // { trips, date }
@@ -60,6 +61,7 @@
                         waybillPrefixes = boot.waybillPrefixes || [];
                         outlets = boot.outlets || [];
                         defaultAssignments = boot.defaultAssignments || [];
+                        billingCategories = boot.billingCategories || [];
 
                         applyRoleToUI(currentUser.role);
                         populatePrefixSelects();
@@ -138,6 +140,7 @@
                 if (name === "outlets") renderOutlets();
                 if (name === "trucks") renderTrucksAdmin();
                 if (name === "employees") renderEmployeesAdmin();
+                if (name === "billing-categories") renderBillingCategoriesAdmin();
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────
@@ -172,6 +175,27 @@
                     "Two-Day Trip": "Two-Day",
                 };
                 return map[status] || status;
+            }
+
+            // Builds <option> tags for a Billing Category <select>, from the
+            // active billingCategories list. If `selected` is set but isn't
+            // in the active list (e.g. an inactive/legacy category still
+            // assigned to a truck), it's added as an extra option so it
+            // isn't silently dropped on save.
+            function billingCategoryOptions(selected) {
+                const names = billingCategories
+                    .filter((c) => c.active !== false)
+                    .map((c) => c.name);
+                if (selected && !names.includes(selected)) names.push(selected);
+
+                let html = `<option value="">—</option>`;
+                html += names
+                    .map(
+                        (name) =>
+                            `<option value="${esc(name)}" ${name === selected ? "selected" : ""}>${esc(name)}</option>`,
+                    )
+                    .join("");
+                return html;
             }
 
             function indexById(arr) {
