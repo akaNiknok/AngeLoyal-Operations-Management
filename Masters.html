@@ -247,7 +247,7 @@
                         return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectEmployeeAdmin(${e.id})">
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
     <td style="font-weight:500">${esc(e.nick)}</td>
-    <td><span class="badge ${e.role === "Driver" ? "badge-driver" : "badge-helper"}">${esc(e.role)}</span></td>
+    <td><span class="badge ${roleBadgeClass(e.role)}">${esc(e.role)}</span></td>
     <td>${statusChip(e.active)}</td>
   </tr>`;
                     })
@@ -305,6 +305,7 @@
         <select id="ed-role" ${dis}>
           <option value="Driver" ${em.role === "Driver" ? "selected" : ""}>Driver</option>
           <option value="Helper" ${em.role === "Helper" ? "selected" : ""}>Helper</option>
+          <option value="Driver-Helper" ${em.role === "Driver-Helper" ? "selected" : ""}>Driver-Helper</option>
         </select>
       </div>
       <div class="section-lbl">Status</div>

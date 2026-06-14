@@ -333,7 +333,12 @@
 
             function driverOptions(selectedId) {
                 const opts = employees
-                    .filter((e) => e.role === "Driver" && e.active !== false)
+                    .filter(
+                        (e) =>
+                            (e.role === "Driver" ||
+                                e.role === "Driver-Helper") &&
+                            e.active !== false,
+                    )
                     .map(
                         (e) =>
                             `<option value="${e.id}" ${Number(e.id) === Number(selectedId) ? "selected" : ""}>${esc(e.nick)}</option>`,
@@ -345,7 +350,12 @@
             function helperOptions(selectedIds) {
                 const selSet = new Set((selectedIds || []).map(Number));
                 return employees
-                    .filter((e) => e.role === "Helper" && e.active !== false)
+                    .filter(
+                        (e) =>
+                            (e.role === "Helper" ||
+                                e.role === "Driver-Helper") &&
+                            e.active !== false,
+                    )
                     .map(
                         (e) =>
                             `<option value="${e.id}" ${selSet.has(Number(e.id)) ? "selected" : ""}>${esc(e.nick)}</option>`,
@@ -609,7 +619,9 @@
                         employees
                             .filter(
                                 (e) =>
-                                    e.role === "Driver" && e.active !== false,
+                                    (e.role === "Driver" ||
+                                        e.role === "Driver-Helper") &&
+                                    e.active !== false,
                             )
                             .map(
                                 (e) =>

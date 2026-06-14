@@ -213,6 +213,16 @@
                 });
                 return m;
             }
+            function roleBadgeClass(role) {
+                if (role === "Driver") return "badge-driver";
+                if (role === "Driver-Helper") return "badge-driver-helper";
+                return "badge-helper";
+            }
+            function roleBadgeAbbr(role) {
+                if (role === "Driver") return "D";
+                if (role === "Driver-Helper") return "DH";
+                return "H";
+            }
             function esc(s) {
                 return String(s || "")
                     .replace(/&/g, "&amp;")
