@@ -283,7 +283,11 @@ The global ledger recording all administrative, operational, and data state modi
 * WAYBILL\_OVERRIDE — Manual adjustment of a system-suggested waybill number  
 * OUTLET\_CREATE — Auto-populating a new destination via route file import  
 * OUTLET\_EDIT — Administrative updates to existing outlet records  
-* DEFAULT\_ASSIGN\_CHANGE — Adjustments to a vehicle's standard crew configuration
+* DEFAULT\_ASSIGN\_CHANGE — Adjustments to a vehicle's standard crew configuration  
+* TRUCK\_CREATE — New vehicle added to the Trucks master record  
+* TRUCK\_EDIT — Administrative updates to an existing truck record (including Active/Inactive toggling)  
+* EMPLOYEE\_CREATE — New personnel added to the Employees master record  
+* EMPLOYEE\_EDIT — Administrative updates to an existing employee record (including Active/Inactive toggling)
 
 ## **Structural Implementation Conventions**
 

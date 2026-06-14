@@ -59,6 +59,20 @@
                     >
                         Outlets
                     </button>
+                    <button
+                        class="nav-btn admin-only"
+                        id="nav-trucks"
+                        onclick="switchPanel('trucks')"
+                    >
+                        Trucks
+                    </button>
+                    <button
+                        class="nav-btn admin-only"
+                        id="nav-employees"
+                        onclick="switchPanel('employees')"
+                    >
+                        Employees
+                    </button>
                 </nav>
 
                 <div class="header-right">
@@ -625,6 +639,107 @@
                     </table>
                 </div>
             </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: TRUCKS (admin)
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-trucks">
+                <div class="toolbar">
+                    <input
+                        type="text"
+                        id="trucks-search"
+                        placeholder="Search plate, brand or type…"
+                        oninput="renderTrucksAdmin()"
+                        style="width: 220px"
+                    />
+                    <span class="tb-label" id="trucks-count"></span>
+                    <label
+                        class="tb-label"
+                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                    >
+                        <input
+                            type="checkbox"
+                            id="trucks-show-inactive"
+                            onchange="renderTrucksAdmin()"
+                        />
+                        Show inactive
+                    </label>
+                    <div class="tb-spacer"></div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="openAddTruckModal()"
+                    >
+                        + Add truck
+                    </button>
+                </div>
+                <div class="outlets-table-wrap">
+                    <table class="data-table" id="trucks-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px">ID</th>
+                                <th style="width: 120px">Plate</th>
+                                <th style="width: 140px">Brand</th>
+                                <th>Type</th>
+                                <th style="width: 100px">Billing Cat.</th>
+                                <th style="width: 80px">Status</th>
+                                <th style="width: 110px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="trucks-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: EMPLOYEES (admin)
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-employees">
+                <div class="toolbar">
+                    <input
+                        type="text"
+                        id="employees-search"
+                        placeholder="Search name…"
+                        oninput="renderEmployeesAdmin()"
+                        style="width: 220px"
+                    />
+                    <span class="tb-label" id="employees-count"></span>
+                    <label
+                        class="tb-label"
+                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                    >
+                        <input
+                            type="checkbox"
+                            id="employees-show-inactive"
+                            onchange="renderEmployeesAdmin()"
+                        />
+                        Show inactive
+                    </label>
+                    <div class="tb-spacer"></div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="openAddEmployeeModal()"
+                    >
+                        + Add employee
+                    </button>
+                </div>
+                <div class="outlets-table-wrap">
+                    <table class="data-table" id="employees-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px">ID</th>
+                                <th>Nickname</th>
+                                <th>First Name</th>
+                                <th>Middle Name</th>
+                                <th>Last Name</th>
+                                <th style="width: 90px">Role</th>
+                                <th style="width: 80px">Status</th>
+                                <th style="width: 110px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="employees-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
         <!-- /.app -->
 
@@ -701,6 +816,120 @@
             </div>
         </div>
 
+        <!-- Add Truck Modal -->
+        <div class="modal-backdrop" id="modal-add-truck">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Add truck</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-add-truck')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">Plate Number</label>
+                        <input
+                            type="text"
+                            id="nt-plate"
+                            placeholder="e.g. CBR5244"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Brand</label>
+                        <input
+                            type="text"
+                            id="nt-brand"
+                            placeholder="e.g. ISUZU"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Type</label>
+                        <input
+                            type="text"
+                            id="nt-type"
+                            placeholder="e.g. 12W WING VAN"
+                        />
+                        <span class="form-hint"
+                            >Must match a Truck Type Map entry to
+                            auto-resolve the billing category.</span
+                        >
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-add-truck')"
+                    >
+                        Cancel
+                    </button>
+                    <button class="btn btn-primary" onclick="submitAddTruck()">
+                        Add truck
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Employee Modal -->
+        <div class="modal-backdrop" id="modal-add-employee">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Add employee</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-add-employee')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">Nickname</label>
+                        <input
+                            type="text"
+                            id="ne-nick"
+                            placeholder="e.g. Reniel"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">First Name</label>
+                        <input type="text" id="ne-first" />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Middle Name</label>
+                        <input type="text" id="ne-middle" />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Last Name</label>
+                        <input type="text" id="ne-last" />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Role</label>
+                        <select id="ne-role">
+                            <option value="Driver">Driver</option>
+                            <option value="Helper">Helper</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-add-employee')"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        onclick="submitAddEmployee()"
+                    >
+                        Add employee
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="toast" id="toast"></div>
 
         <!-- ══ JAVASCRIPT ══ -->
@@ -708,5 +937,6 @@
         <?!= include('Dispatch'); ?>
         <?!= include('Import'); ?>
         <?!= include('Roster'); ?>
+        <?!= include('Masters'); ?>
     </body>
 </html>

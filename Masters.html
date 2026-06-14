@@ -1,0 +1,370 @@
+<script>
+            // ── SHARED HELPERS ──────────────────────────────────────────
+            function statusChip(active) {
+                return active === false
+                    ? `<span class="status-chip" style="background:var(--red-bg);color:var(--red)">Inactive</span>`
+                    : `<span class="status-chip" style="background:var(--green-bg);color:var(--green)">Active</span>`;
+            }
+
+            // ── TRUCKS ADMIN ──────────────────────────────────────────
+            let editingTruckId = null;
+
+            function renderTrucksAdmin() {
+                const q = (
+                    document.getElementById("trucks-search").value || ""
+                ).toLowerCase();
+                const showInactive = document.getElementById(
+                    "trucks-show-inactive",
+                ).checked;
+                const tbody = document.getElementById("trucks-tbody");
+                const isAdmin = currentUser.role === "Admin";
+
+                const filtered = trucks.filter((t) => {
+                    if (!showInactive && t.active === false) return false;
+                    return (
+                        !q ||
+                        (t.plate || "").toLowerCase().includes(q) ||
+                        (t.brand || "").toLowerCase().includes(q) ||
+                        (t.type || "").toLowerCase().includes(q)
+                    );
+                });
+                document.getElementById("trucks-count").textContent =
+                    `${filtered.length} trucks`;
+
+                tbody.innerHTML = filtered
+                    .map((t) => {
+                        if (editingTruckId === t.id) {
+                            return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
+    <td><input type="text" value="${esc(t.plate)}" id="te-plate-${t.id}" style="width:100px"></td>
+    <td><input type="text" value="${esc(t.brand)}" id="te-brand-${t.id}" style="width:110px"></td>
+    <td><input type="text" value="${esc(t.type)}" id="te-type-${t.id}" style="width:100%"></td>
+    <td style="font-size:11px;color:var(--muted)">${esc(t.billingCategory) || "—"}</td>
+    <td>${statusChip(t.active)}</td>
+    <td><span class="edit-link" onclick="saveTruckInline(${t.id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="editingTruckId=null;renderTrucksAdmin()">Cancel</span></td>
+  </tr>`;
+                        }
+                        return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
+    <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(t.plate)}</td>
+    <td>${esc(t.brand) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(t.type) || "—"}</td>
+    <td><span class="status-chip" style="background:var(--bg);color:var(--muted)">${esc(t.billingCategory) || "—"}</span></td>
+    <td>${statusChip(t.active)}</td>
+    <td>${isAdmin ? `<span class="edit-link" onclick="editTruckInline(${t.id})">Edit</span> <span class="edit-link" style="color:var(--red)" onclick="toggleTruckActive(${t.id})">${t.active === false ? "Restore" : "Remove"}</span>` : "—"}</td>
+  </tr>`;
+                    })
+                    .join("");
+            }
+
+            function editTruckInline(id) {
+                editingTruckId = id;
+                renderTrucksAdmin();
+            }
+
+            function saveTruckInline(id) {
+                const plate =
+                    document.getElementById(`te-plate-${id}`)?.value || "";
+                const brand =
+                    document.getElementById(`te-brand-${id}`)?.value || "";
+                const type =
+                    document.getElementById(`te-type-${id}`)?.value || "";
+                if (!plate.trim()) {
+                    showToast("Plate number is required.", "error");
+                    return;
+                }
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        const t = trucks.find((t) => t.id === id);
+                        if (t) Object.assign(t, r.truck);
+                        editingTruckId = null;
+                        showToast("Truck updated.", "success");
+                        renderTrucksAdmin();
+                        renderTruckList();
+                        renderDefaults();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateTruck(id, { plate, brand, type });
+            }
+
+            function toggleTruckActive(id) {
+                const t = trucks.find((t) => t.id === id);
+                if (!t) return;
+                const makeActive = t.active === false;
+                const verb = makeActive ? "restore" : "remove";
+                if (!confirm(`Are you sure you want to ${verb} ${t.plate}?`))
+                    return;
+
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        Object.assign(t, r.truck);
+                        showToast(
+                            `${t.plate} ${makeActive ? "restored" : "removed"}.`,
+                            "success",
+                        );
+                        renderTrucksAdmin();
+                        renderTruckList();
+                        renderDefaults();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateTruck(id, { active: makeActive });
+            }
+
+            function openAddTruckModal() {
+                document.getElementById("nt-plate").value = "";
+                document.getElementById("nt-brand").value = "";
+                document.getElementById("nt-type").value = "";
+                openModal("modal-add-truck");
+            }
+
+            function submitAddTruck() {
+                const plate = document.getElementById("nt-plate").value.trim();
+                const brand = document.getElementById("nt-brand").value.trim();
+                const type = document.getElementById("nt-type").value.trim();
+                if (!plate) {
+                    showToast("Plate number is required.", "error");
+                    return;
+                }
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Add failed: " + r.error, "error");
+                            return;
+                        }
+                        trucks.push(r.truck);
+                        if (r.defaultAssignment)
+                            defaultAssignments.push(r.defaultAssignment);
+                        closeModal("modal-add-truck");
+                        showToast(`${r.truck.plate} added.`, "success");
+                        renderTrucksAdmin();
+                        renderTruckList();
+                        renderDefaults();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .createTruck({ plate, brand, type });
+            }
+
+            // ── EMPLOYEES ADMIN ───────────────────────────────────────
+            let editingEmployeeId = null;
+
+            function renderEmployeesAdmin() {
+                const q = (
+                    document.getElementById("employees-search").value || ""
+                ).toLowerCase();
+                const showInactive = document.getElementById(
+                    "employees-show-inactive",
+                ).checked;
+                const tbody = document.getElementById("employees-tbody");
+                const isAdmin = currentUser.role === "Admin";
+
+                const filtered = employees.filter((e) => {
+                    if (!showInactive && e.active === false) return false;
+                    return (
+                        !q ||
+                        (e.nick || "").toLowerCase().includes(q) ||
+                        (e.firstName || "").toLowerCase().includes(q) ||
+                        (e.lastName || "").toLowerCase().includes(q)
+                    );
+                });
+                document.getElementById("employees-count").textContent =
+                    `${filtered.length} employees`;
+
+                tbody.innerHTML = filtered
+                    .map((e) => {
+                        if (editingEmployeeId === e.id) {
+                            return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
+    <td><input type="text" value="${esc(e.nick)}" id="ee-nick-${e.id}" style="width:90px"></td>
+    <td><input type="text" value="${esc(e.firstName)}" id="ee-first-${e.id}" style="width:100px"></td>
+    <td><input type="text" value="${esc(e.middleName)}" id="ee-middle-${e.id}" style="width:100px"></td>
+    <td><input type="text" value="${esc(e.lastName)}" id="ee-last-${e.id}" style="width:100px"></td>
+    <td>
+      <select id="ee-role-${e.id}">
+        <option value="Driver" ${e.role === "Driver" ? "selected" : ""}>Driver</option>
+        <option value="Helper" ${e.role === "Helper" ? "selected" : ""}>Helper</option>
+      </select>
+    </td>
+    <td>${statusChip(e.active)}</td>
+    <td><span class="edit-link" onclick="saveEmployeeInline(${e.id})">Save</span> <span class="edit-link" style="color:var(--hint)" onclick="editingEmployeeId=null;renderEmployeesAdmin()">Cancel</span></td>
+  </tr>`;
+                        }
+                        return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
+    <td style="font-weight:500">${esc(e.nick)}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(e.firstName) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(e.middleName) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(e.lastName) || "—"}</td>
+    <td><span class="badge ${e.role === "Driver" ? "badge-driver" : "badge-helper"}">${esc(e.role)}</span></td>
+    <td>${statusChip(e.active)}</td>
+    <td>${isAdmin ? `<span class="edit-link" onclick="editEmployeeInline(${e.id})">Edit</span> <span class="edit-link" style="color:var(--red)" onclick="toggleEmployeeActive(${e.id})">${e.active === false ? "Restore" : "Remove"}</span>` : "—"}</td>
+  </tr>`;
+                    })
+                    .join("");
+            }
+
+            function editEmployeeInline(id) {
+                editingEmployeeId = id;
+                renderEmployeesAdmin();
+            }
+
+            function saveEmployeeInline(id) {
+                const nick =
+                    document.getElementById(`ee-nick-${id}`)?.value || "";
+                const firstName =
+                    document.getElementById(`ee-first-${id}`)?.value || "";
+                const middleName =
+                    document.getElementById(`ee-middle-${id}`)?.value || "";
+                const lastName =
+                    document.getElementById(`ee-last-${id}`)?.value || "";
+                const role =
+                    document.getElementById(`ee-role-${id}`)?.value || "";
+                if (!nick.trim()) {
+                    showToast("Nickname is required.", "error");
+                    return;
+                }
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        const em = employees.find((e) => e.id === id);
+                        if (em)
+                            Object.assign(em, {
+                                nick,
+                                firstName,
+                                middleName,
+                                lastName,
+                                role,
+                            });
+                        editingEmployeeId = null;
+                        showToast("Employee updated.", "success");
+                        renderEmployeesAdmin();
+                        renderEmpList();
+                        renderDefEmpList();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateEmployee(id, {
+                        nick,
+                        firstName,
+                        middleName,
+                        lastName,
+                        role,
+                    });
+            }
+
+            function toggleEmployeeActive(id) {
+                const em = employees.find((e) => e.id === id);
+                if (!em) return;
+                const makeActive = em.active === false;
+                const verb = makeActive ? "restore" : "remove";
+                if (!confirm(`Are you sure you want to ${verb} ${em.nick}?`))
+                    return;
+
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        em.active = makeActive;
+                        showToast(
+                            `${em.nick} ${makeActive ? "restored" : "removed"}.`,
+                            "success",
+                        );
+                        renderEmployeesAdmin();
+                        renderEmpList();
+                        renderDefEmpList();
+                        renderUnassignedCrewStat();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateEmployee(id, { active: makeActive });
+            }
+
+            function openAddEmployeeModal() {
+                document.getElementById("ne-nick").value = "";
+                document.getElementById("ne-first").value = "";
+                document.getElementById("ne-middle").value = "";
+                document.getElementById("ne-last").value = "";
+                document.getElementById("ne-role").value = "Driver";
+                openModal("modal-add-employee");
+            }
+
+            function submitAddEmployee() {
+                const nick = document.getElementById("ne-nick").value.trim();
+                const firstName = document
+                    .getElementById("ne-first")
+                    .value.trim();
+                const middleName = document
+                    .getElementById("ne-middle")
+                    .value.trim();
+                const lastName = document
+                    .getElementById("ne-last")
+                    .value.trim();
+                const role = document.getElementById("ne-role").value;
+                if (!nick) {
+                    showToast("Nickname is required.", "error");
+                    return;
+                }
+                setSyncing(true);
+                google.script.run
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Add failed: " + r.error, "error");
+                            return;
+                        }
+                        employees.push(r.employee);
+                        closeModal("modal-add-employee");
+                        showToast(`${r.employee.nick} added.`, "success");
+                        renderEmployeesAdmin();
+                        renderEmpList();
+                        renderDefEmpList();
+                        renderUnassignedCrewStat();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .createEmployee({
+                        nick,
+                        firstName,
+                        middleName,
+                        lastName,
+                        role,
+                    });
+            }
+        </script>

@@ -101,7 +101,7 @@
                 if (role === "Admin") {
                     document
                         .querySelectorAll(".admin-only")
-                        .forEach((el) => (el.style.display = ""));
+                        .forEach((el) => el.classList.remove("admin-only"));
                 }
             }
 
@@ -136,6 +136,8 @@
                     renderDefDetail();
                 }
                 if (name === "outlets") renderOutlets();
+                if (name === "trucks") renderTrucksAdmin();
+                if (name === "employees") renderEmployeesAdmin();
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────

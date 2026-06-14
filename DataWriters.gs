@@ -639,6 +639,213 @@ function updateOutlet(outletId, changes) {
 
 
 // ============================================================
+//  DATA WRITERS — Trucks (Admin only)
+// ============================================================
+
+/**
+ * Creates a new truck record. Billing category is resolved from the
+ * Truck Type Map based on the Type field, same lookup as getTrucks().
+ * Also appends a blank Default Assignments row so the truck shows up
+ * in the Truck Roster panel immediately.
+ *
+ * @param {Object} data  { plate, brand, type }
+ * @returns {{ success: boolean, truck: Object, defaultAssignment: Object } | { success: false, error: string }}
+ */
+function createTruck(data) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const plate = String(data.plate || '').trim();
+    if (!plate) throw new Error('Plate number is required.');
+
+    const sheet   = _getSheet(SHEET_TRUCKS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const dup = rows.slice(1).some(row =>
+      String(_val(row, headers, 'Plate Number')).trim().toLowerCase() === plate.toLowerCase());
+    if (dup) throw new Error(`A truck with plate "${plate}" already exists.`);
+
+    const brand = String(data.brand || '').trim();
+    const type  = String(data.type  || '').trim();
+    const typeMap          = _buildTruckTypeMap();
+    const billingCategory  = typeMap[type] || '';
+
+    const nextId = _nextRowId(sheet);
+    sheet.appendRow([nextId, plate, brand, type, true, billingCategory]);
+
+    // Seed a blank Default Assignments row for this truck
+    const defSheet  = _getSheet(SHEET_DEFAULT_ASSIGN);
+    const nextDefId = _nextRowId(defSheet);
+    defSheet.appendRow([nextDefId, nextId, '', '', '']);
+
+    _auditLog('TRUCK_CREATE', SHEET_TRUCKS, nextId, '', JSON.stringify({ plate, brand, type }));
+
+    return {
+      success: true,
+      truck: { id: nextId, plate, brand, type, billingCategory, active: true },
+      defaultAssignment: { id: nextDefId, truckId: nextId, defaultDriverId: null, defaultHelperIds: [], notes: '' },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Updates a truck record. If `type` changes and matches an entry in the
+ * Truck Type Map, the Billing Category is recomputed; otherwise it is
+ * left untouched.
+ *
+ * @param {number} truckId
+ * @param {Object} changes  Any of { plate, brand, type, active }
+ * @returns {{ success: boolean, truck: Object } | { success: false, error: string }}
+ */
+function updateTruck(truckId, changes) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const sheet   = _getSheet(SHEET_TRUCKS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const rowIdx = _findRowById(rows, headers, truckId);
+    if (rowIdx === -1) throw new Error(`Truck ID ${truckId} not found.`);
+
+    const row    = rows[rowIdx];
+    const oldVal = {
+      plate:  _val(row, headers, 'Plate Number'),
+      brand:  _val(row, headers, 'Brand'),
+      type:   _val(row, headers, 'Type'),
+      active: _val(row, headers, 'Active'),
+    };
+
+    const updates = {};
+    if (changes.plate !== undefined) {
+      const plate = String(changes.plate).trim();
+      if (!plate) throw new Error('Plate number is required.');
+      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
+        && String(_val(r, headers, 'Plate Number')).trim().toLowerCase() === plate.toLowerCase());
+      if (dup) throw new Error(`A truck with plate "${plate}" already exists.`);
+      updates['Plate Number'] = plate;
+    }
+    if (changes.brand !== undefined) updates['Brand'] = String(changes.brand).trim();
+    if (changes.type !== undefined) {
+      const type = String(changes.type).trim();
+      updates['Type'] = type;
+      const resolved = _buildTruckTypeMap()[type];
+      if (resolved) updates['Billing Category'] = resolved;
+    }
+    if (changes.active !== undefined) updates['Active'] = !!changes.active;
+
+    if (Object.keys(updates).length > 0) {
+      _writeRowFields(sheet, row, rowIdx, headers, updates);
+    }
+
+    _auditLog('TRUCK_EDIT', SHEET_TRUCKS, truckId, JSON.stringify(oldVal), JSON.stringify(changes));
+
+    return {
+      success: true,
+      truck: {
+        id:              truckId,
+        plate:           _val(row, headers, 'Plate Number'),
+        brand:           _val(row, headers, 'Brand'),
+        type:            _val(row, headers, 'Type'),
+        billingCategory: _val(row, headers, 'Billing Category'),
+        active:          _val(row, headers, 'Active') !== false,
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ============================================================
+//  DATA WRITERS — Employees (Admin only)
+// ============================================================
+
+/**
+ * Creates a new employee record.
+ * @param {Object} data  { nick, firstName, middleName, lastName, role }
+ * @returns {{ success: boolean, employee: Object } | { success: false, error: string }}
+ */
+function createEmployee(data) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const nick = String(data.nick || '').trim();
+    if (!nick) throw new Error('Nickname is required.');
+    const role = String(data.role || '').trim();
+    if (!role) throw new Error('Role is required.');
+
+    const firstName  = String(data.firstName  || '').trim();
+    const middleName = String(data.middleName || '').trim();
+    const lastName   = String(data.lastName   || '').trim();
+
+    const sheet  = _getSheet(SHEET_EMPLOYEES);
+    const nextId = _nextRowId(sheet);
+    sheet.appendRow([nextId, nick, firstName, middleName, lastName, role, true]);
+
+    _auditLog('EMPLOYEE_CREATE', SHEET_EMPLOYEES, nextId, '', JSON.stringify({ nick, role }));
+
+    return {
+      success: true,
+      employee: { id: nextId, nick, firstName, middleName, lastName, role, active: true },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Updates an employee record.
+ * @param {number} employeeId
+ * @param {Object} changes  Any of { nick, firstName, middleName, lastName, role, active }
+ * @returns {{ success: boolean } | { success: false, error: string }}
+ */
+function updateEmployee(employeeId, changes) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const sheet   = _getSheet(SHEET_EMPLOYEES);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const rowIdx = _findRowById(rows, headers, employeeId);
+    if (rowIdx === -1) throw new Error(`Employee ID ${employeeId} not found.`);
+
+    const row    = rows[rowIdx];
+    const oldVal = {
+      nick:   _val(row, headers, 'Nickname'),
+      role:   _val(row, headers, 'Role'),
+      active: _val(row, headers, 'Active'),
+    };
+
+    const updates = {};
+    if (changes.nick !== undefined) {
+      const nick = String(changes.nick).trim();
+      if (!nick) throw new Error('Nickname is required.');
+      updates['Nickname'] = nick;
+    }
+    if (changes.firstName  !== undefined) updates['First Name']  = String(changes.firstName).trim();
+    if (changes.middleName !== undefined) updates['Middle Name'] = String(changes.middleName).trim();
+    if (changes.lastName   !== undefined) updates['Last Name']   = String(changes.lastName).trim();
+    if (changes.role !== undefined) {
+      const role = String(changes.role).trim();
+      if (!role) throw new Error('Role is required.');
+      updates['Role'] = role;
+    }
+    if (changes.active !== undefined) updates['Active'] = !!changes.active;
+
+    if (Object.keys(updates).length > 0) {
+      _writeRowFields(sheet, row, rowIdx, headers, updates);
+    }
+
+    _auditLog('EMPLOYEE_EDIT', SHEET_EMPLOYEES, employeeId, JSON.stringify(oldVal), JSON.stringify(changes));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ============================================================
 //  DATA WRITERS — Truck Roster
 // ============================================================
 
