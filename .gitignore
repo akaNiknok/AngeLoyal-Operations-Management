@@ -1,3 +1,7 @@
+# Local-only backlog snapshot — source of truth is the GitHub Project.
+# Regenerate on demand with `npm run backlog:sync` (see CLAUDE.md).
+BACKLOG.md
+
 *.xlsx
 *.pdf
 node_modules/

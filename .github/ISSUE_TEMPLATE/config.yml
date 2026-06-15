@@ -1,0 +1,5 @@
+# Forces the friendly Bug Report form instead of a blank Markdown box,
+# so the QA tester always gets guided fields. Flip to true if the dev
+# wants to file freeform issues from the web UI (CLI issue creation is
+# unaffected either way).
+blank_issues_enabled: false
