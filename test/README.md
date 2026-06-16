@@ -45,6 +45,7 @@ Phase 1 (records, dispatch, waybills) is now broadly covered:
 | `import.test.js` | `importRouteFile` + delete | batch import, outlet dedup, crew pre-fill, sequential waybills, delete guard |
 | `masters.test.js` | master CRUD + roster | dedup/validation, billing-category rename cascade, append-only roster |
 | `readers.test.js` | read path | `getTrips` date filtering, dispatch-board join, route-frequency window, `getBootData` |
+| `edits.test.js` | edit paths + small readers | `updateOutlet`/`updateEmployee`/`updateDefaultAssignment`/`updateTruck`, `getSuggestedWaybillNumber`, `_resolveBillingCategory`, master-list readers |
 
 Phase 2 (billing & payroll) is not built yet — write its tests alongside the code.
 
@@ -65,6 +66,5 @@ Phase 2 (billing & payroll) is not built yet — write its tests alongside the c
 2. Set `userEmail` to a user whose role passes the writer's `_requirePermission`.
 3. Call `api.yourFunction(...)`, then `dump(ss, 'Sheet')` to assert on the result.
 
-Good next targets: `updateDefaultAssignment`, `updateOutlet`/`updateEmployee`
-edit paths, `getSuggestedWaybillNumber`, and — when Phase 2 lands — the billing
-and payroll math (write the tests alongside the code).
+Phase 1 is now broadly covered. The main remaining gap is **Phase 2 (billing
+and payroll)** — write those tests alongside the code as it lands.
