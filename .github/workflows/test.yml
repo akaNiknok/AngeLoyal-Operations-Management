@@ -1,0 +1,18 @@
+name: tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # The test harness has zero runtime dependencies (node:test + a vm shim),
+      # so there is nothing to install — just run it.
+      - run: npm test

@@ -83,7 +83,7 @@ npm run fetch-data         # snapshot live sheets → data/ (gitignored, real da
 
 - `.clasp.json` holds the (non-secret) Script ID. `.claspignore` keeps `Docs/` and sample files out of Apps Script.
 - `data/`, `.env`, `*.xlsx`, `*.pdf` are gitignored — they contain real operational data. `DEV_DUMP_TOKEN` (in `.env`) is a password-equivalent.
-- **There are no automated tests.** Verify by snapshotting live data (`npm run fetch-data`) and/or testing in a deployed copy. Don't assume; check.
+- **Automated tests** live in `test/` and run with `npm test` (Node's built-in `node:test` + a `vm` shim — no clasp, no live Sheet, no `npm install`). The harness loads the `.gs` bundle with in-memory fakes for `SpreadsheetApp`/`Session`/`Utilities`; see [`test/README.md`](test/README.md). Coverage so far is a first slice (Utils helpers, RBAC matrix, waybill numbering/confirmation, carry-over trips) — **most writers/readers are still untested.** For anything not covered, still verify by snapshotting live data (`npm run fetch-data`) and/or testing in a deployed copy. When you add backend logic, add a test next to it (especially Phase 2 billing/payroll math).
 
 ## Working agreements
 
