@@ -7,6 +7,19 @@
 const HEADERS = {
   Users: ['ID', 'Email', 'Display Name', 'Role', 'Active'],
 
+  Employees: ['ID', 'Nickname', 'First Name', 'Middle Name', 'Last Name', 'Role', 'Active'],
+
+  // createTruck appends [id, plate, brand, type, active, billingCategory]
+  Trucks: ['ID', 'Plate Number', 'Brand', 'Type', 'Active', 'Billing Category'],
+
+  'Billing Categories': ['ID', 'Name', 'Active'],
+
+  Outlets: ['ID', 'Outlet Name', 'Area', 'Address', 'Customer Group', 'Notes', 'Created At'],
+
+  'Default Assignments': ['ID', 'Truck ID', 'Default Driver ID', 'Default Helper IDs', 'Notes'],
+
+  'Employee-Truck Assignment': ['ID', 'Date', 'Employee ID', 'Truck ID', 'Type'],
+
   Trips: [
     'ID', 'Trip Date', 'Billing Date', 'FO Number', 'FO Split Suffix',
     'Outlet ID', 'Area', 'Quantity', 'CBM', 'Restrictions',
@@ -31,9 +44,9 @@ const HEADERS = {
   'Route Frequency Log': ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID'],
 };
 
-/** A Trips sheet with just the header row. */
-function emptyTrips() {
-  return [HEADERS.Trips.slice()];
+/** A sheet seeded with just its header row. */
+function emptySheet(name) {
+  return [HEADERS[name].slice()];
 }
 
 /** A Users sheet seeded with one active user per role plus an inactive admin. */
@@ -48,4 +61,13 @@ function usersSheet() {
   ];
 }
 
-module.exports = { HEADERS, emptyTrips, usersSheet };
+const EMAIL = {
+  Admin: 'admin@angeloyal.com',
+  Dispatcher: 'dispatch@angeloyal.com',
+  Payroll: 'payroll@angeloyal.com',
+  Viewer: 'viewer@angeloyal.com',
+  Inactive: 'former@angeloyal.com',
+  Unknown: 'nobody@angeloyal.com',
+};
+
+module.exports = { HEADERS, emptySheet, usersSheet, EMAIL };

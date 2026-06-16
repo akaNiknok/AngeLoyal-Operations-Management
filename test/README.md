@@ -31,7 +31,9 @@ api.confirmWaybill(7, null);
 const { headers, rows } = dump(ss, 'Waybills'); // inspect the result
 ```
 
-## What's covered (first slice)
+## What's covered
+
+Phase 1 (records, dispatch, waybills) is now broadly covered:
 
 | Suite | Area | Why it matters |
 | :-- | :-- | :-- |
@@ -39,6 +41,13 @@ const { headers, rows } = dump(ss, 'Waybills'); // inspect the result
 | `rbac.test.js` | `Code.gs` permission matrix | the server is the real access gate |
 | `waybills.test.js` | waybill numbering & confirmation | suffix rules, sequence guard, custom-number parsing, immutability |
 | `carryover.test.js` | carry-over trips | Billing-Date preservation, crew copy, parent linkage, `-R`/`-FT` waybills |
+| `trips.test.js` | `createTrip` / `saveTripChanges` | outlet resolve, billing snapshot, status→carry-over, route-frequency warning |
+| `import.test.js` | `importRouteFile` + delete | batch import, outlet dedup, crew pre-fill, sequential waybills, delete guard |
+| `masters.test.js` | master CRUD + roster | dedup/validation, billing-category rename cascade, append-only roster |
+| `readers.test.js` | read path | `getTrips` date filtering, dispatch-board join, route-frequency window, `getBootData` |
+| `edits.test.js` | edit paths + small readers | `updateOutlet`/`updateEmployee`/`updateDefaultAssignment`/`updateTruck`, `getSuggestedWaybillNumber`, `_resolveBillingCategory`, master-list readers |
+
+Phase 2 (billing & payroll) is not built yet — write its tests alongside the code.
 
 ## Fixtures & gotchas
 
@@ -57,6 +66,5 @@ const { headers, rows } = dump(ss, 'Waybills'); // inspect the result
 2. Set `userEmail` to a user whose role passes the writer's `_requirePermission`.
 3. Call `api.yourFunction(...)`, then `dump(ss, 'Sheet')` to assert on the result.
 
-Good next targets: import/outlet resolution (`importRouteFile`,
-`_resolveOrCreateOutlet`), billing-category rename cascade, and — when Phase 2
-lands — the billing and payroll math (write the tests alongside the code).
+Phase 1 is now broadly covered. The main remaining gap is **Phase 2 (billing
+and payroll)** — write those tests alongside the code as it lands.
