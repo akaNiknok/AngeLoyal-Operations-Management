@@ -80,6 +80,29 @@ npm run release         # push + redeploy the live web app
 > `npm run release` (or `npm run deploy` after pushing) to make changes
 > visible to actual users.
 
+## Git & PR workflow
+
+This is a solo project developed mostly through Claude Code, with **one feature
+branch per task** (e.g. `claude/<task>`). The merge convention is:
+
+- **Squash and merge** every PR. Each PR is one logical unit of work, so its
+  intermediate commits ("fix test", "address review") collapse into a single
+  clean commit on `main`. This keeps history linear and makes a whole feature
+  revertable with one `git revert`.
+- Use the **PR title** as the squash commit subject. Titles follow
+  Conventional Commits (`test:`, `feat:`, `fix:`, …) so `main` stays
+  changelog-friendly.
+- **Delete the head branch after merge** (GitHub can do this automatically).
+  Web/remote Claude branches are ephemeral anyway.
+- **Always start a new task from a fresh branch off the updated `main`.** After
+  a squash merge the old branch's commits no longer exist on `main`, so
+  continuing to build on a merged branch causes duplicate-diff conflicts.
+
+Recommended GitHub repo settings (**Settings → General → Pull Requests**):
+allow **only** squash merging (disable merge commits and rebase merging), set
+the squash message to "Pull request title and description", and enable
+"Automatically delete head branches".
+
 ## Notes
 
 - `.claspignore` restricts what gets pushed to `Code.gs`, `Index.html`, and
