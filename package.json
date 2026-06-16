@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "AngeLoyal Logistics - Operations Management System (Google Apps Script)",
   "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
     "login": "clasp login",
     "pull": "clasp pull",
     "push": "clasp push",
