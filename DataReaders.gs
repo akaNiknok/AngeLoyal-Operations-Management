@@ -19,8 +19,16 @@
  *             billingCategories: Object[] }}
  */
 function getBootData() {
+  const session = getUserSession();
+
+  // A verified Google account that isn't an authorized OMS user (role null)
+  // gets only its session — never master data. The client shows the gate.
+  if (!session.role) {
+    return { session: session };
+  }
+
   return {
-    session:            getUserSession(),
+    session:            session,
     employees:          getEmployees(),
     trucks:             getTrucks(),
     rosterAssignments:  getCurrentAssignments(),

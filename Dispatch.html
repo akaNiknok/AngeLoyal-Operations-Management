@@ -4,7 +4,7 @@
                 const dateVal = document.getElementById("dispatch-date").value;
                 if (!dateVal) return;
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((data) => {
                         dispatchData = data;
                         renderDispatch();
@@ -465,7 +465,7 @@
                     remarks: newRemarks,
                 };
 
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         saving = false;
                         setSyncing(false);
@@ -523,7 +523,7 @@
                 }
 
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         setSyncing(false);
                         if (!r.success) {
@@ -558,7 +558,7 @@
                 )
                     return;
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         setSyncing(false);
                         if (!r.success) {
@@ -680,7 +680,7 @@
                 };
 
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         setSyncing(false);
                         if (!r.success) {

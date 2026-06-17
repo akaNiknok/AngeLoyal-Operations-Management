@@ -81,6 +81,28 @@ test('email matching is case-insensitive', () => {
   assert.equal(rec.role, 'Admin');
 });
 
+test('Active is honored whether stored as a boolean or the string "TRUE"', () => {
+  // Live sheets often hold the string 'TRUE'/'FALSE' rather than native
+  // booleans (manual entry / CSV import). Both must resolve correctly, and
+  // stray whitespace around the email must not break the match.
+  const sheets = {
+    Users: [
+      ['ID', 'Email', 'Display Name', 'Role', 'Active'],
+      [1, '  string.admin@angeloyal.com ', 'Stringy Admin', 'Admin', 'TRUE'],
+      [2, 'string.former@angeloyal.com', 'Stringy Former', 'Admin', 'FALSE'],
+    ],
+  };
+
+  const active = makeEnv({ sheets, userEmail: 'string.admin@angeloyal.com' });
+  const rec = active.api._getCurrentUserRecord();
+  assert.ok(rec, 'string "TRUE" should count as active');
+  assert.equal(rec.role, 'Admin');
+  assert.equal(active.api.getUserSession().role, 'Admin');
+
+  const inactive = makeEnv({ sheets, userEmail: 'string.former@angeloyal.com' });
+  assert.equal(inactive.api._getCurrentUserRecord(), null, 'string "FALSE" is inactive');
+});
+
 test('getUserSession exposes the role for the client, and null for outsiders', () => {
   const { api: adminApi } = envAs(EMAIL.Admin);
   // Field-by-field (the session object is built inside the vm realm, so its

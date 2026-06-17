@@ -49,6 +49,18 @@ function _valDateTime(row, headers, colName) {
 }
 
 /**
+ * Coerces a sheet cell to a boolean. Google Sheets may return a native boolean
+ * (TRUE/FALSE checkbox) or the string 'TRUE'/'FALSE' depending on how the cell
+ * was entered, so compare both defensively (see CLAUDE.md boolean convention).
+ *
+ * @param {*} v
+ * @returns {boolean}
+ */
+function _isTrue(v) {
+  return v === true || String(v).trim().toUpperCase() === 'TRUE';
+}
+
+/**
  * Converts a value to a number or returns null if not numeric.
  * Guards against Google Sheets returning empty strings for blank numeric cells.
  *
