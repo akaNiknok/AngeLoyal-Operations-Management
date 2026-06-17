@@ -236,6 +236,8 @@ const RPC_ALLOWED = {
   updateTruck: true,
   createBillingCategory: true,
   updateBillingCategory: true,
+  createRouteTypeMapping: true,
+  updateRouteTypeMapping: true,
   createEmployee: true,
   updateEmployee: true,
   saveAssignment: true,

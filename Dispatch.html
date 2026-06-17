@@ -72,8 +72,23 @@
                 table.style.display = "";
 
                 const tbody = document.getElementById("dispatch-tbody");
+
+                // Alternating shade per FO so all trips of one Freight Order
+                // (even when split across several trucks/waybills) read as one
+                // visual group. Parity flips only when the FO changes between
+                // adjacent rows.
+                let foParity = 0;
+                let prevFoKey = null;
+                const foGroupCls = trips.map((t) => {
+                    const key = t.foNumber ? "fo-" + t.foNumber : "none-" + t.id;
+                    if (prevFoKey !== null && key !== prevFoKey)
+                        foParity ^= 1;
+                    prevFoKey = key;
+                    return "fo-grp-" + foParity;
+                });
+
                 tbody.innerHTML = trips
-                    .map((t) => {
+                    .map((t, i) => {
                         const sourceCls =
                             t.source === "Manual"
                                 ? "source-manual"
@@ -112,7 +127,7 @@
                             t.foNumber +
                             (t.foSplitSuffix ? "-" + t.foSplitSuffix : "");
 
-                        return `<tr class="${sourceCls} ${selCls}" onclick="selectTrip(${t.id})">
+                        return `<tr class="${sourceCls} ${selCls} ${foGroupCls[i]}" onclick="selectTrip(${t.id})">
       <td class="td-fo">${esc(foFull) || "—"}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
       <td class="td-area">${esc(t.area) || "—"}</td>

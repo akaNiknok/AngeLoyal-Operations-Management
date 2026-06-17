@@ -19,6 +19,7 @@
             let outlets = [];
             let defaultAssignments = [];
             let billingCategories = [];
+            let routeTypeMap = [];
 
             // Dispatch state
             let dispatchData = null; // { trips, date }
@@ -48,6 +49,7 @@
             let selectedTruckAdminId = null;
             let selectedEmployeeAdminId = null;
             let selectedBillingCategoryId = null;
+            let selectedRouteTypeMapId = null;
 
             // ── AUTH STATE ────────────────────────────────────────────
             // Session token from a verified Google sign-in (see Auth.gs). It is
@@ -196,6 +198,7 @@
                         outlets = boot.outlets || [];
                         defaultAssignments = boot.defaultAssignments || [];
                         billingCategories = boot.billingCategories || [];
+                        routeTypeMap = boot.routeTypeMap || [];
 
                         applyRoleToUI(currentUser.role);
                         hideLoading();
@@ -372,6 +375,7 @@
                 if (name === "trucks") renderTrucksAdmin();
                 if (name === "employees") renderEmployeesAdmin();
                 if (name === "billing-categories") renderBillingCategoriesAdmin();
+                if (name === "route-type-map") renderRouteTypeMapAdmin();
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────

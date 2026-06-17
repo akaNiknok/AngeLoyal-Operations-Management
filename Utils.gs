@@ -16,6 +16,29 @@ function _getSheet(name) {
 }
 
 /**
+ * Returns the sheet by name, creating and seeding it if it doesn't exist yet.
+ * Used for config sheets that ship with sensible defaults so a fresh deployment
+ * (or a Sheet that predates the feature) self-bootstraps instead of erroring.
+ *
+ * @param {string}   name      Sheet name.
+ * @param {string[]} headers   Header row (row 1) written when the sheet is new.
+ * @param {Array[]}  [seedRows] Optional data rows written under the header when new.
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet}
+ */
+function _getOrCreateSheet(name, headers, seedRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(name);
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (seedRows && seedRows.length) {
+    sheet.getRange(2, 1, seedRows.length, headers.length).setValues(seedRows);
+  }
+  return sheet;
+}
+
+/**
  * Gets the value at a named column header position in a row.
  * Returns '' if the column doesn't exist or the value is null/undefined.
  *

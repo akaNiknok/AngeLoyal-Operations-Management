@@ -642,4 +642,209 @@
                     })
                     .createBillingCategory({ name });
             }
+
+            // ── ROUTE TYPE MAP ADMIN ─────────────────────────────────
+            // Maps a Rebisco route-file truck-type column code (e.g. 4WC) to a
+            // billing category, so import can assign the correct truck type.
+            function renderRouteTypeMapAdmin() {
+                const showInactive = document.getElementById(
+                    "route-type-map-show-inactive",
+                ).checked;
+                const tbody = document.getElementById("route-type-map-tbody");
+
+                const filtered = routeTypeMap.filter(
+                    (m) => showInactive || m.active !== false,
+                );
+                document.getElementById(
+                    "route-type-map-count",
+                ).textContent = `${filtered.length} mappings`;
+
+                tbody.innerHTML = filtered
+                    .map((m) => {
+                        const selCls =
+                            selectedRouteTypeMapId === m.id
+                                ? " row-selected"
+                                : "";
+                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectRouteTypeMap(${m.id})">
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${m.id}</td>
+    <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(m.fileTypeCode)}</td>
+    <td style="font-family:'DM Mono',monospace">${esc(m.billingCategory)}</td>
+    <td>${statusChip(m.active)}</td>
+  </tr>`;
+                    })
+                    .join("");
+            }
+
+            function selectRouteTypeMap(id) {
+                selectedRouteTypeMapId = Number(id);
+                renderRouteTypeMapAdmin();
+                renderRouteTypeMapDetail();
+            }
+
+            function renderRouteTypeMapDetail() {
+                const body = document.getElementById(
+                    "route-type-map-detail-body",
+                );
+                const footer = document.getElementById(
+                    "route-type-map-detail-footer",
+                );
+
+                if (!selectedRouteTypeMapId) {
+                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🗺️</div><div class="sub">Select a mapping to view details</div></div>`;
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                    return;
+                }
+                const m = routeTypeMap.find(
+                    (m) => Number(m.id) === Number(selectedRouteTypeMapId),
+                );
+                if (!m) {
+                    selectedRouteTypeMapId = null;
+                    renderRouteTypeMapDetail();
+                    return;
+                }
+                const isAdmin = currentUser.role === "Admin";
+                const dis = isAdmin ? "" : "disabled";
+
+                body.innerHTML = `
+      <div class="form-row">
+        <label class="form-label">File type code</label>
+        <input type="text" id="rtmd-code" value="${esc(m.fileTypeCode)}" ${dis}>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Billing category</label>
+        <select id="rtmd-category" ${dis}>${billingCategoryOptions(m.billingCategory)}</select>
+      </div>
+      <div class="section-lbl">Status</div>
+      <div>${statusChip(m.active)}</div>`;
+
+                if (isAdmin) {
+                    footer.style.display = "";
+                    footer.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="saveRouteTypeMapDetail()">Save changes</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleRouteTypeMapActive(${m.id})">${m.active === false ? "Restore" : "Remove"}</button>`;
+                } else {
+                    footer.style.display = "none";
+                    footer.innerHTML = "";
+                }
+            }
+
+            function saveRouteTypeMapDetail() {
+                const id = selectedRouteTypeMapId;
+                const fileTypeCode = document
+                    .getElementById("rtmd-code")
+                    .value.trim();
+                const billingCategory =
+                    document.getElementById("rtmd-category").value;
+                if (!fileTypeCode) {
+                    showToast("File type code is required.", "error");
+                    return;
+                }
+                if (!billingCategory) {
+                    showToast("Billing category is required.", "error");
+                    return;
+                }
+                const m = routeTypeMap.find((x) => x.id === id);
+
+                setSyncing(true);
+                srv()
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        if (m) Object.assign(m, r.mapping);
+                        showToast("Mapping updated.", "success");
+                        renderRouteTypeMapAdmin();
+                        renderRouteTypeMapDetail();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateRouteTypeMapping(id, {
+                        fileTypeCode,
+                        billingCategory,
+                    });
+            }
+
+            function toggleRouteTypeMapActive(id) {
+                const m = routeTypeMap.find((x) => x.id === id);
+                if (!m) return;
+                const makeActive = m.active === false;
+                const verb = makeActive ? "restore" : "remove";
+                if (
+                    !confirm(
+                        `Are you sure you want to ${verb} the ${m.fileTypeCode} mapping?`,
+                    )
+                )
+                    return;
+
+                setSyncing(true);
+                srv()
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Save failed: " + r.error, "error");
+                            return;
+                        }
+                        Object.assign(m, r.mapping);
+                        showToast(
+                            `${m.fileTypeCode} ${makeActive ? "restored" : "removed"}.`,
+                            "success",
+                        );
+                        renderRouteTypeMapAdmin();
+                        renderRouteTypeMapDetail();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .updateRouteTypeMapping(id, { active: makeActive });
+            }
+
+            function openAddRouteTypeMapModal() {
+                document.getElementById("nrtm-code").value = "";
+                document.getElementById("nrtm-category").innerHTML =
+                    billingCategoryOptions("");
+                openModal("modal-add-route-type-map");
+            }
+
+            function submitAddRouteTypeMap() {
+                const fileTypeCode = document
+                    .getElementById("nrtm-code")
+                    .value.trim();
+                const billingCategory =
+                    document.getElementById("nrtm-category").value;
+                if (!fileTypeCode) {
+                    showToast("File type code is required.", "error");
+                    return;
+                }
+                if (!billingCategory) {
+                    showToast("Billing category is required.", "error");
+                    return;
+                }
+                setSyncing(true);
+                srv()
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Add failed: " + r.error, "error");
+                            return;
+                        }
+                        routeTypeMap.push(r.mapping);
+                        closeModal("modal-add-route-type-map");
+                        showToast(
+                            `${r.mapping.fileTypeCode} → ${r.mapping.billingCategory} added.`,
+                            "success",
+                        );
+                        renderRouteTypeMapAdmin();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .createRouteTypeMapping({ fileTypeCode, billingCategory });
+            }
         </script>

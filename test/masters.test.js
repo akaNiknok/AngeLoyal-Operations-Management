@@ -149,3 +149,47 @@ test('roster writes are gated by ASSIGN_CREW permission', () => {
   const { api } = makeEnv({ sheets, userEmail: EMAIL.Viewer });
   assert.throws(() => api.saveAssignment(1, 2, 'Driver'), /Access denied/);
 });
+
+// ---------------- Route Type Map ----------------
+
+test('getRouteTypeMap self-seeds the sheet with defaults when missing', () => {
+  const { api } = asAdmin(base());
+  const map = api.getRouteTypeMap();
+  const lookup = {};
+  map.forEach((m) => (lookup[m.fileTypeCode] = m.billingCategory));
+  assert.equal(lookup['4WC'], '6W');
+  assert.equal(lookup['6WC'], '6W');
+  assert.equal(lookup['10W'], '10W');
+  assert.equal(lookup['L300'], 'L300');
+});
+
+test('createRouteTypeMapping validates, dedupes, and is admin-gated', () => {
+  const { api } = asAdmin(base());
+  api.getRouteTypeMap(); // seed defaults
+
+  const blank = api.createRouteTypeMapping({ fileTypeCode: '', billingCategory: '6W' });
+  assert.equal(blank.success, false);
+
+  const dup = api.createRouteTypeMapping({ fileTypeCode: '4wc', billingCategory: '6W' });
+  assert.equal(dup.success, false);
+  assert.match(dup.error, /already exists/);
+
+  const ok = api.createRouteTypeMapping({ fileTypeCode: '8W', billingCategory: '10W' });
+  assert.equal(ok.success, true);
+  assert.equal(ok.mapping.fileTypeCode, '8W');
+
+  const viewer = makeEnv({ sheets: base(), userEmail: EMAIL.Viewer });
+  assert.throws(() => viewer.api.createRouteTypeMapping({ fileTypeCode: 'X', billingCategory: 'Y' }), /Access denied/);
+});
+
+test('updateRouteTypeMapping edits the category and feeds the import lookup', () => {
+  const { api } = asAdmin(base());
+  const map = api.getRouteTypeMap();
+  const fourWc = map.find((m) => m.fileTypeCode === '4WC');
+
+  const res = api.updateRouteTypeMapping(fourWc.id, { billingCategory: 'L300' });
+  assert.equal(res.success, true);
+
+  const lookup = api.getRouteTypeCategoryLookup();
+  assert.equal(lookup['4WC'], 'L300'); // change is reflected in the lookup
+});
