@@ -388,7 +388,7 @@ function importRouteFile(tripDate, prefixId, rowData) {
       if (outletNameToId[nameLower] !== undefined) return outletNameToId[nameLower];
       const id = nextOutletId++;
       outletNameToId[nameLower] = id;
-      newOutletRows.push([id, rd.outletName.trim(), rd.area || '', rd.address || '', '', '', nowStr]);
+      newOutletRows.push([id, rd.outletName.trim(), rd.area || '', rd.address || '', rd.customer || '', '', nowStr]);
       return id;
     };
 
@@ -401,7 +401,7 @@ function importRouteFile(tripDate, prefixId, rowData) {
     // --- Next IDs for the sheets we'll append to ---
     const tripsSheet     = _getSheet(SHEET_TRIPS);
     const waybillsSheet  = _getSheet(SHEET_WAYBILLS);
-    const routeFreqSheet = _getSheet(SHEET_ROUTE_FREQ);
+    const routeFreqSheet = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
     const auditSheet     = _getSheet(SHEET_AUDIT);
     let nextTripId      = _nextRowId(tripsSheet);
     let nextWaybillId   = _nextRowId(waybillsSheet);

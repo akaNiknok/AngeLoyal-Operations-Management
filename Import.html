@@ -120,6 +120,7 @@
                 const ciRestriction = col("RESTRICTION");
                 const ciTier = col("TIER");
                 const ciAddress = col("ADDRESS", "DELIVERY ADDRESS");
+                const ciCustomer = col("CUSTOMER GROUP", "CUSTOMER", "CUST", "CHAIN");
 
                 // Truck-type columns: each is a code (10W, 6WF, 6WC, 4WC,
                 // L300…) and the number under it is how many trucks of that
@@ -176,6 +177,10 @@
                                 ? String(row[ciRestriction] || "").trim()
                                 : "",
                         tier: ciTier >= 0 ? Number(row[ciTier]) || null : null,
+                        customer:
+                            ciCustomer >= 0
+                                ? String(row[ciCustomer] || "").trim()
+                                : "",
                         slots: slots,
                     });
                 }

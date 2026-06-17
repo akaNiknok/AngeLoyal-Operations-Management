@@ -283,7 +283,7 @@ function _resolveOrCreateOutlet(outletName, area, address) {
  */
 function _appendRouteFrequency(tripId, tripDate, driverId, outletId) {
   try {
-    const sheet  = _getSheet(SHEET_ROUTE_FREQ);
+    const sheet  = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
     const nextId = _nextRowId(sheet);
     sheet.appendRow([nextId, tripId, tripDate, driverId, outletId]);
   } catch (_) {
