@@ -51,6 +51,83 @@ project bound to the AngeLoyal Google Sheet.
    differences (scopes, sheet bindings, etc.) into the repo's copy, then
    delete `.clasp-tmp`.
 
+## Google Sign-In (OAuth) setup
+
+The web app runs `executeAs: USER_DEPLOYING` + `access: ANYONE_ANONYMOUS`, so
+the Google Sheet stays private (the script runs as the owner) but the platform
+can't tell the backend who a visitor is. Identity instead comes from a
+**server-side OAuth 2.0 sign-in** (see `Auth.gs` + the data-flow section in
+[`CLAUDE.md`](CLAUDE.md)). This is required because `Session.getActiveUser()`
+returns blank for anyone outside the owner's Workspace domain, and the in-iframe
+"Sign in with Google" (GIS) button is blocked by the sandbox's per-session
+`*.googleusercontent.com` origin.
+
+One-time configuration (in the **GCP project** linked to the Apps Script
+project — Apps Script editor → Project Settings → Google Cloud Platform):
+
+1. **APIs & Services → Credentials → Create OAuth client ID → Web application.**
+   (Don't reuse the auto-created "Apps Script" client — it usually won't accept
+   custom redirect URIs.)
+2. **Authorized redirect URIs** — add the web app URLs the flow redirects back
+   to. Use the live `/exec` URL; add `/dev` only for owner/editor testing:
+   - `https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec`
+   - `https://script.google.com/macros/s/<SCRIPT_ID>/dev`
+   (JavaScript origins are **not** used by this flow — leave them empty.)
+3. **OAuth consent screen** — scopes `openid email profile`. While in "Testing",
+   every sign-in account must be listed under **Audience → Test users**
+   (including non-owner / external-domain accounts). For an org rollout, either
+   publish to **Production** or, if AngeLoyal uses Google Workspace, set the app
+   to **Internal** so all domain users are allowed without test-user listing.
+4. **Script Properties** (Apps Script editor → Project Settings → Script
+   Properties) — these are read by `Auth.gs`; never put them in source:
+   - `OAUTH_CLIENT_ID` = the Web client's ID
+   - `OAUTH_CLIENT_SECRET` = the Web client's secret (used only server-side to
+     exchange the auth code)
+5. **Users sheet** — RBAC matches the signed-in email against the `Users` sheet
+   (`Email` + `Active` true → `Role`). A verified Google account not listed
+   there can sign in but sees the "Account not authorized" gate.
+
+> Workspace accounts get redirected through a domain-scoped URL
+> (`…/a/macros/<domain>/…/exec`). The code handles this by caching the exact
+> `redirect_uri` with the CSRF `state` and reusing it in the token exchange — so
+> the rewrite doesn't cause a `redirect_uri` mismatch. The **`/dev` URL only
+> works for script editors**; test non-owner accounts on the **`/exec`** URL.
+
+## Transferring ownership to AngeLoyal
+
+When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google
+account, the OAuth sign-in needs attention — most breakage on handoff is here:
+
+- **The OAuth client lives in the original owner's GCP project, not the script.**
+  Transferring the script does **not** transfer the OAuth client. Either move
+  the GCP project to AngeLoyal, or create a **new** OAuth Web client under
+  AngeLoyal's GCP and update the `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`
+  Script Properties.
+- **Script Properties travel with the script** (they're stored on it), so the
+  existing values persist through an ownership transfer — but they point at the
+  old GCP project's client. Decide per the bullet above whether to keep or
+  replace them.
+- **Redirect URIs** — if the script keeps the same Script/Deployment ID, the
+  `/exec` URL is unchanged and the registered redirect URI still works. If you
+  create a fresh deployment (new ID), register its new `/exec` URL on the OAuth
+  client and update the `deploy -i <id>` in [`package.json`](package.json) and
+  the URL in this doc.
+- **Consent screen** — if AngeLoyal has a Workspace domain, set the consent
+  screen to **Internal** so any `@angeloyal` account is allowed automatically
+  (no test-user list, no Google verification). Otherwise publish to Production
+  or keep the operators' accounts as test users.
+- **Re-point the tooling** — update `.clasp.json` (Script ID) and re-run
+  `npm run login` as the AngeLoyal owner; confirm the deployment ID in
+  `package.json`.
+- **Users sheet** — populate it with AngeLoyal staff emails + roles so they get
+  access instead of the unauthorized gate.
+
+> Optional simplification once AngeLoyal owns it: if **all** users are in a
+> single Google Workspace domain and the script is owned within that domain,
+> `Session.getActiveUser().getEmail()` would work for everyone and OAuth could
+> be retired. It's not necessary — the OAuth flow keeps working regardless — but
+> it's an option if you'd rather not maintain an OAuth client.
+
 ## Day-to-day workflow
 
 ```sh

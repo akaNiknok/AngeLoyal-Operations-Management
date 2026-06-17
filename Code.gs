@@ -45,13 +45,20 @@ const PERMISSIONS = {
   VIEW_AUDIT:             [ROLES.ADMIN],
 };
 
+// Identity for the current request, set by rpc()/login() (see Auth.gs) from a
+// verified Google sign-in. When set, it takes precedence over Session — that's
+// how RBAC identifies visitors who aren't in the owner's Workspace domain.
+var _REQUEST_EMAIL = null;
+
 /**
- * Returns the current user's email via Session.
- * Falls back to 'unknown' if the script runs without an authenticated session
- * (e.g. during manual testing in the Apps Script editor).
+ * Returns the current user's email. Prefers the rpc-scoped identity from a
+ * verified Google sign-in; otherwise falls back to Session.getActiveUser()
+ * (covers the Apps Script editor and the same-domain owner). Returns 'unknown'
+ * when no identity is available.
  * @returns {string}
  */
 function _getCurrentUserEmail() {
+  if (_REQUEST_EMAIL) return _REQUEST_EMAIL;
   try {
     return Session.getActiveUser().getEmail() || 'unknown';
   } catch (_) {
@@ -73,11 +80,12 @@ function _getCurrentUserRecord() {
     const rows  = sheet.getDataRange().getValues();
     const headers = rows[0].map(h => h.toString().trim());
 
+    const wantEmail = email.trim().toLowerCase();
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      const rowEmail  = String(_val(row, headers, 'Email')).trim().toLowerCase();
-      const rowActive = _val(row, headers, 'Active');
-      if (rowEmail === email.toLowerCase() && rowActive === true) {
+      const rowEmail = String(_val(row, headers, 'Email')).trim().toLowerCase();
+      // Active may come back as a native boolean or the string 'TRUE'.
+      if (rowEmail === wantEmail && _isTrue(_val(row, headers, 'Active'))) {
         return {
           id:          _val(row, headers, 'ID'),
           email:       rowEmail,
@@ -120,8 +128,9 @@ function _requirePermission(permission) {
 
 /**
  * Returns the current user's session info for the client UI.
- * Called on page load so the UI can show/hide features based on role.
- * @returns {{ email, displayName, role } | { email, displayName: 'Unknown', role: null }}
+ * Called after sign-in so the UI can show/hide features based on role.
+ * A verified visitor who isn't in the Users sheet gets role null.
+ * @returns {{ email, displayName, role }}
  */
 function getUserSession() {
   const user = _getCurrentUserRecord();
@@ -129,7 +138,8 @@ function getUserSession() {
     return { email: user.email, displayName: user.displayName, role: user.role };
   }
   const email = _getCurrentUserEmail();
-  return { email, displayName: email || 'Unknown', role: null };
+  const known = email && email !== 'unknown';
+  return { email: known ? email : '', displayName: known ? email : 'Not signed in', role: null };
 }
 
 
@@ -138,15 +148,25 @@ function getUserSession() {
 // ============================================================
 
 /**
- * Serves the web app HTML page.
- * Deploy as: Execute as ME, Who has access: Anyone in org (or Anyone with Google account).
+ * Serves the web app HTML page. Also handles the Google OAuth redirect: when
+ * Google sends the user back with ?code=&state=, we exchange it for a session
+ * here and inject the session token into the page so the client can adopt it.
+ * Deploy as: Execute as ME, access Anyone (with a Google account).
  */
 function doGet(e) {
-  if (e && e.parameter && e.parameter.action === 'devDump') {
-    return _devDump(e.parameter);
+  const params = (e && e.parameter) || {};
+  if (params.action === 'devDump') {
+    return _devDump(params);
   }
-  return HtmlService
-    .createTemplateFromFile('Index')
+
+  // OAuth callback → mint a session and hand its token to the client. On any
+  // failure (e.g. a reused code on refresh) bootToken stays '' and the client
+  // falls back to its stored session or the sign-in screen.
+  const bootToken = params.code ? (_handleOAuthCallback(params.code, params.state) || '') : '';
+
+  const template = HtmlService.createTemplateFromFile('Index');
+  template.bootToken = bootToken;
+  return template
     .evaluate()
     .setTitle('AngeLoyal OMS')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);

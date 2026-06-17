@@ -49,6 +49,80 @@
             let selectedEmployeeAdminId = null;
             let selectedBillingCategoryId = null;
 
+            // ── AUTH STATE ────────────────────────────────────────────
+            // Session token from a verified Google sign-in (see Auth.gs). It is
+            // sent with every backend call via srv() and persisted so a reload
+            // doesn't force a fresh sign-in. localStorage access is guarded —
+            // some sandboxed iframe contexts block it.
+            function storeGet(k) {
+                try {
+                    return localStorage.getItem(k);
+                } catch (_) {
+                    return null;
+                }
+            }
+            function storeSet(k, v) {
+                try {
+                    localStorage.setItem(k, v);
+                } catch (_) {}
+            }
+            function storeDel(k) {
+                try {
+                    localStorage.removeItem(k);
+                } catch (_) {}
+            }
+
+            let sessionToken = storeGet("oms_session") || null;
+
+            // ── SERVER GATEWAY ────────────────────────────────────────
+            // All authenticated backend calls go through rpc(sessionToken, fn,
+            // args). srv() mimics the google.script.run builder so call sites
+            // only swap the prefix: google.script.run.foo(a) → srv().foo(a).
+            function srv() {
+                let success = () => {};
+                let failure = (err) => {
+                    setSyncing(false);
+                    showToast(
+                        (err && err.message) || "Something went wrong",
+                        "error",
+                    );
+                };
+                let proxy;
+                const builder = {
+                    withSuccessHandler(fn) {
+                        success = fn;
+                        return proxy;
+                    },
+                    withFailureHandler(fn) {
+                        failure = fn;
+                        return proxy;
+                    },
+                };
+                proxy = new Proxy(builder, {
+                    get(target, prop) {
+                        if (prop in target) return target[prop];
+                        if (typeof prop !== "string") return undefined;
+                        // Any other property is treated as the backend fn name.
+                        return (...args) => {
+                            google.script.run
+                                .withSuccessHandler((res) => success(res))
+                                .withFailureHandler((err) => {
+                                    if (
+                                        err &&
+                                        /AUTH_REQUIRED/.test(err.message || "")
+                                    ) {
+                                        handleSessionExpired();
+                                        return;
+                                    }
+                                    failure(err);
+                                })
+                                .rpc(sessionToken, prop, args);
+                        };
+                    },
+                });
+                return proxy;
+            }
+
             // ── BOOT ──────────────────────────────────────────────────
             window.addEventListener("load", bootApp);
 
@@ -59,10 +133,62 @@
                 document.getElementById("import-date").value = today;
                 document.getElementById("at-date").value = today;
 
-                setLoading("Loading data…");
+                // A just-completed OAuth sign-in injects a fresh session token
+                // into the page (see doGet). Adopt it, then load the app.
+                const injected = (window.__OMS_BOOT_TOKEN || "").trim();
+                if (injected) {
+                    sessionToken = injected;
+                    storeSet("oms_session", sessionToken);
+                }
+
+                if (sessionToken) {
+                    loadAppData(); // resumes; AUTH_REQUIRED falls back to sign-in
+                } else {
+                    showSignIn();
+                }
+            }
+
+            // ── GOOGLE SIGN-IN (server-side redirect / OAuth code flow) ──
+            // The "Sign in with Google" link navigates the top window to Google
+            // (target="_top"); Google redirects back to the web app URL with a
+            // code, which doGet exchanges for a session. We fetch that link URL
+            // from the backend (it carries the OAuth client + a CSRF state).
+            function refreshSignInLink() {
                 google.script.run
+                    .withSuccessHandler((res) => {
+                        const link = document.getElementById("signin-link");
+                        if (!link) return;
+                        if (res && res.url) {
+                            link.href = res.url;
+                            link.classList.remove("disabled");
+                        } else {
+                            link.href = "#";
+                            link.classList.add("disabled");
+                            document.getElementById("auth-msg").textContent =
+                                "Sign-in isn't configured yet (missing OAuth client ID / secret in Script Properties).";
+                        }
+                    })
+                    .withFailureHandler(() => {
+                        const link = document.getElementById("signin-link");
+                        if (link) link.classList.add("disabled");
+                    })
+                    .getLoginUrl();
+            }
+
+            function handleSessionExpired() {
+                sessionToken = null;
+                storeDel("oms_session");
+                currentUser = { email: "", displayName: "", role: null };
+                hideLoading();
+                showSignIn("Your session expired. Please sign in again.");
+            }
+
+            // ── DATA LOAD (after sign-in) ─────────────────────────────
+            function loadAppData() {
+                setLoading("Loading data…");
+                srv()
                     .withSuccessHandler((boot) => {
-                        currentUser = boot.session;
+                        currentUser = boot.session || { role: null };
                         employees = boot.employees || [];
                         trucks = boot.trucks || [];
                         rosterAssignments = boot.rosterAssignments || [];
@@ -72,16 +198,24 @@
                         billingCategories = boot.billingCategories || [];
 
                         applyRoleToUI(currentUser.role);
-                        populatePrefixSelects();
                         hideLoading();
+
+                        // Signed in but not authorized → the gate is shown.
+                        if (!currentUser.role) return;
+
+                        populatePrefixSelects();
                         onMasterDataReady();
                     })
                     .withFailureHandler((err) => {
                         hideLoading();
-                        showToast(
-                            "Could not load app data: " + err.message,
-                            "error",
-                        );
+                        // AUTH_REQUIRED is handled inside srv(); others toast.
+                        if (!/AUTH_REQUIRED/.test(err.message || "")) {
+                            showToast(
+                                "Could not load app data: " +
+                                    (err.message || err),
+                                "error",
+                            );
+                        }
                     })
                     .getBootData();
             }
@@ -102,10 +236,21 @@
             function applyRoleToUI(role) {
                 const userBadge = document.getElementById("user-role-badge");
                 const userEmail = document.getElementById("user-email");
-                userEmail.textContent =
-                    currentUser.displayName || currentUser.email;
+                const name =
+                    currentUser.displayName ||
+                    currentUser.email ||
+                    "Not signed in";
+                userEmail.textContent = name;
                 userBadge.textContent = role || "No access";
                 userBadge.className = `user-role-badge role-${(role || "viewer").toLowerCase()}`;
+
+                // Populate the account dropdown identity.
+                document.getElementById("account-name").textContent = name;
+                document.getElementById("account-mail").textContent =
+                    currentUser.email || "Not signed in";
+                document.getElementById("account-avatar").textContent = (
+                    name.trim()[0] || "?"
+                ).toUpperCase();
 
                 // Show admin-only nav items
                 if (role === "Admin") {
@@ -113,7 +258,85 @@
                         .querySelectorAll(".admin-only")
                         .forEach((el) => el.classList.remove("admin-only"));
                 }
+
+                // A signed-in account with no role can't use the app — show the
+                // gate (with a way to sign out and try another account).
+                const overlay = document.getElementById("auth-overlay");
+                if (!role) {
+                    showSignIn();
+                } else {
+                    overlay.style.display = "none";
+                }
             }
+
+            // Shows the sign-in / not-authorized gate and refreshes the Google
+            // sign-in link. With a signed-in but unauthorized account, also
+            // offers sign-out so they can switch accounts.
+            function showSignIn(msg) {
+                const overlay = document.getElementById("auth-overlay");
+                const email = currentUser && currentUser.email;
+                document.getElementById("auth-title").textContent = email
+                    ? "Account not authorized"
+                    : "Sign in";
+                document.getElementById("auth-msg").textContent =
+                    msg ||
+                    (email
+                        ? `You're signed in as ${email}, but this account isn't authorized for AngeLoyal OMS. Sign out and use an authorized Google account, or ask an administrator for access.`
+                        : "Sign in with your Google account to use AngeLoyal OMS.");
+                document.getElementById("auth-signout").style.display = email
+                    ? ""
+                    : "none";
+                overlay.style.display = "";
+                hideLoading();
+                refreshSignInLink();
+            }
+
+            // ── ACCOUNT MENU (switch / sign out) ──────────────────────
+            // Sign-in is a top-level redirect to Google; sign-out drops our app
+            // session and shows the gate. The sign-in link uses
+            // prompt=select_account, so signing in again lets them switch.
+            function switchAccount() {
+                closeAccountMenu();
+                signOut(true);
+            }
+
+            function signOut(thenPrompt) {
+                const t = sessionToken;
+                sessionToken = null;
+                storeDel("oms_session");
+                currentUser = { email: "", displayName: "", role: null };
+                if (t) google.script.run.logout(t); // best-effort server cleanup
+                closeAccountMenu();
+                showSignIn(
+                    thenPrompt
+                        ? "Choose a Google account to continue."
+                        : "You've been signed out.",
+                );
+            }
+
+            function toggleAccountMenu(e) {
+                if (e) e.stopPropagation();
+                const dd = document.getElementById("account-dropdown");
+                const open = dd.classList.toggle("open");
+                document
+                    .getElementById("user-chip-btn")
+                    .setAttribute("aria-expanded", open ? "true" : "false");
+            }
+
+            function closeAccountMenu() {
+                document
+                    .getElementById("account-dropdown")
+                    .classList.remove("open");
+                document
+                    .getElementById("user-chip-btn")
+                    .setAttribute("aria-expanded", "false");
+            }
+
+            // Close the account menu when clicking anywhere outside it.
+            document.addEventListener("click", (e) => {
+                const menu = document.getElementById("account-menu");
+                if (menu && !menu.contains(e.target)) closeAccountMenu();
+            });
 
             function canEdit() {
                 return (

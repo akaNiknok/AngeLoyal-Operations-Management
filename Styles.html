@@ -176,6 +176,183 @@
                 color: var(--muted);
             }
 
+            /* ── ACCOUNT MENU ── */
+            .account-menu {
+                position: relative;
+            }
+            .account-menu .user-chip {
+                background: none;
+                border: 1px solid transparent;
+                cursor: pointer;
+                padding: 3px 6px;
+                border-radius: var(--radius-sm);
+                transition:
+                    background 0.12s,
+                    border-color 0.12s;
+            }
+            .account-menu .user-chip:hover {
+                background: var(--bg);
+                border-color: var(--border);
+            }
+            .account-caret {
+                font-size: 9px;
+                color: var(--hint);
+                margin-left: 1px;
+            }
+            .account-dropdown {
+                position: absolute;
+                top: calc(100% + 6px);
+                right: 0;
+                min-width: 230px;
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+                padding: 6px;
+                z-index: 50;
+                display: none;
+            }
+            .account-dropdown.open {
+                display: block;
+            }
+            .account-dropdown-head {
+                display: flex;
+                align-items: center;
+                gap: 9px;
+                padding: 6px 8px 8px;
+            }
+            .account-avatar {
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+                background: var(--text);
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 600;
+                font-size: 14px;
+                flex-shrink: 0;
+                text-transform: uppercase;
+            }
+            .account-id {
+                min-width: 0;
+            }
+            .account-name {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .account-mail {
+                font-size: 11px;
+                color: var(--muted);
+                font-family: "DM Mono", monospace;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .account-dropdown-sep {
+                height: 1px;
+                background: var(--border);
+                margin: 2px 0 4px;
+            }
+            .account-action {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                width: 100%;
+                padding: 7px 8px;
+                border: none;
+                background: none;
+                border-radius: var(--radius-sm);
+                font-family: "DM Sans", sans-serif;
+                font-size: 12px;
+                color: var(--text);
+                text-align: left;
+                text-decoration: none;
+                cursor: pointer;
+            }
+            .account-action:hover {
+                background: var(--bg);
+            }
+            .account-action-icon {
+                width: 16px;
+                text-align: center;
+                color: var(--muted);
+            }
+
+            /* ── AUTH GATE OVERLAY ── */
+            .auth-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(247, 246, 242, 0.96);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 900;
+                padding: 20px;
+            }
+            .auth-card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+                padding: 32px 28px;
+                max-width: 420px;
+                width: 100%;
+                text-align: center;
+            }
+            .auth-lock {
+                font-size: 32px;
+                margin-bottom: 10px;
+            }
+            .auth-title {
+                font-size: 17px;
+                font-weight: 600;
+                margin-bottom: 8px;
+            }
+            .auth-msg {
+                font-size: 13px;
+                color: var(--muted);
+                line-height: 1.55;
+                margin-bottom: 20px;
+            }
+            .auth-actions {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 12px;
+                min-height: 44px;
+            }
+            .btn-google {
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                background: var(--surface);
+                border: 1px solid var(--border-md);
+                color: var(--text);
+                font-weight: 500;
+                padding: 10px 18px;
+            }
+            .btn-google:hover {
+                background: var(--bg);
+            }
+            .btn-google .g-logo {
+                width: 18px;
+                height: 18px;
+                flex-shrink: 0;
+            }
+            .btn-google.disabled {
+                opacity: 0.5;
+                pointer-events: none;
+            }
+            .auth-actions .btn {
+                text-decoration: none;
+            }
+
             .sync-info {
                 display: flex;
                 align-items: center;

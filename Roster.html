@@ -291,7 +291,7 @@
 
                 saving = true;
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         saving = false;
                         setSyncing(false);
@@ -320,7 +320,7 @@
                     return;
                 saving = true;
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         saving = false;
                         setSyncing(false);
@@ -444,7 +444,7 @@
                     return;
                 }
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         setSyncing(false);
                         if (!r.success) {
@@ -504,7 +504,7 @@
                     return;
                 }
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         setSyncing(false);
                         if (!r.success) {
@@ -531,7 +531,7 @@
 
             // ── DEFAULT ASSIGNMENTS ────────────────────────────────────
             function loadDefaultAssignments() {
-                google.script.run
+                srv()
                     .withSuccessHandler((d) => {
                         defaultAssignments = d || [];
                         renderDefaults();
@@ -629,7 +629,7 @@
 
             function saveDefNotes(defaultAssignId, notes) {
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         setSyncing(false);
                         if (!r.success) {
@@ -891,7 +891,7 @@
 
             function callUpdateDefault(defaultAssignId, changes) {
                 return new Promise((resolve, reject) => {
-                    google.script.run
+                    srv()
                         .withSuccessHandler(resolve)
                         .withFailureHandler(reject)
                         .updateDefaultAssignment(defaultAssignId, changes);
@@ -1033,7 +1033,7 @@
 
                 saving = true;
                 setSyncing(true);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         saving = false;
                         setSyncing(false);

@@ -24,6 +24,7 @@ const ROOT = path.resolve(__dirname, '..');
 // the SHEET_* / ROLES / PERMISSIONS constants the others close over).
 const GS_FILES = [
   'Code.gs',
+  'Auth.gs',
   'Utils.gs',
   'DataReaders.gs',
   'DataWriters.gs',
@@ -200,13 +201,46 @@ function makeEnv(opts = {}) {
   const ss = new FakeSpreadsheet(opts.sheets || {});
   const email = opts.userEmail || 'unknown';
 
+  // In-memory CacheService (TTL ignored — tests don't exercise expiry).
+  const cacheStore = new Map();
+  // opts.fetch: (url, params) => { code, body } — simulates UrlFetchApp.
+  const fetchImpl = opts.fetch || (() => ({ code: 404, body: '' }));
+  let uuidSeq = 0;
+
   const sandbox = {
     SpreadsheetApp: { getActiveSpreadsheet: () => ss },
     Session: {
       getActiveUser: () => ({ getEmail: () => email }),
       getScriptTimeZone: () => opts.tz || 'Asia/Shanghai',
     },
-    Utilities: { formatDate },
+    CacheService: {
+      getScriptCache: () => ({
+        get: (k) => (cacheStore.has(k) ? cacheStore.get(k) : null),
+        put: (k, v) => cacheStore.set(k, v),
+        remove: (k) => cacheStore.delete(k),
+      }),
+    },
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: (k) => (opts.scriptProperties || {})[k] || null,
+      }),
+    },
+    UrlFetchApp: {
+      fetch: (url, params) => {
+        const r = fetchImpl(url, params);
+        return {
+          getResponseCode: () => r.code,
+          getContentText: () => r.body,
+        };
+      },
+    },
+    Utilities: {
+      formatDate,
+      getUuid: () => `uuid-${++uuidSeq}-0000-0000`,
+      base64DecodeWebSafe: (s) =>
+        Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
+      newBlob: (buf) => ({ getDataAsString: () => Buffer.from(buf).toString('utf8') }),
+    },
     // Share the host Date so `val instanceof Date` and `new Date()` inside the
     // bundle agree with Dates we seed into sheets from the test side (the vm
     // otherwise has its own Date realm, breaking instanceof across the boundary).
@@ -215,6 +249,11 @@ function makeEnv(opts = {}) {
       XFrameOptionsMode: { ALLOWALL: 'ALLOWALL' },
       createTemplateFromFile: () => ({ evaluate: () => ({}) }),
       createHtmlOutputFromFile: () => ({ getContent: () => '' }),
+    },
+    ScriptApp: {
+      getService: () => ({
+        getUrl: () => opts.appUrl || 'https://script.google.com/macros/s/EXEC/exec',
+      }),
     },
     console,
   };

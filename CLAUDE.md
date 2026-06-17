@@ -26,7 +26,8 @@ The project is contractually delivered in 3 phases. See [`BACKLOG.md`](BACKLOG.m
 
 | File | Responsibility |
 | :--- | :--- |
-| `Code.gs` | Entry point. Sheet-name constants, RBAC (`ROLES`, `PERMISSIONS`, `_requirePermission`), `doGet` web-app router, `include()` template helper. |
+| `Code.gs` | Entry point. Sheet-name constants, RBAC (`ROLES`, `PERMISSIONS`, `_requirePermission`), request-scoped identity (`_REQUEST_EMAIL`, `_getCurrentUserEmail`), `doGet` web-app router, `include()` template helper. |
+| `Auth.gs` | Google sign-in + session layer. `getLoginUrl()` builds the OAuth consent URL; `_handleOAuthCallback()` (driven by `doGet`) exchanges the code and reads the identity from the ID token (`_identityFromIdToken`); session tokens are minted/looked up in `CacheService` (`_createSession`/`logout`); and the **`rpc(sessionToken, fnName, args)` gateway** (allow-list `RPC_ALLOWED`) that every authenticated client call funnels through. `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` live in Script Properties. |
 | `Utils.gs` | Generic sheet/row helpers: `_getSheet`, `_val`, `_numOrNull`, date parsing/formatting, `_nextRowId`, `_findRowById`, `_writeRowFields`, `_indexById`. **Reuse these — don't hand-roll sheet access.** |
 | `DataReaders.gs` | Read-only accessors. `getBootData()` returns all master data in one round trip. `getDispatchBoardData()`, `getTrips()`, `getWaybillsForTrip()`, etc. |
 | `DataWriters.gs` | All sheet-mutating endpoints (`createTrip`, `saveTripChanges`, `confirmWaybill`, `importRouteFile`, `createOutlet/Truck/Employee/BillingCategory`, roster `saveAssignment`/`removeAssignment`, …). Largest file. |
@@ -48,9 +49,11 @@ The client calls the backend with `google.script.run.withSuccessHandler(...).fnN
 
 ### Data flow
 
-1. Page load → `doGet` serves `Index` → `bootApp()` calls `getBootData()` once for session + all master data → cached in `Core.html` globals.
-2. Dispatch board calls `getDispatchBoardData(date)`; display fields (outlet/driver/truck names) are **derived client-side** from cached master data via `indexById()` — the server intentionally does not re-send them.
-3. Writes go through `DataWriters.gs`, which enforce permissions, write to the sheet, and append to the Audit Log.
+1. Sign-in is a **server-side OAuth redirect flow** (not GIS — the sandbox iframe origin can't be registered). The "Sign in with Google" link (`getLoginUrl()`) navigates the top window to Google; Google redirects back to the web app URL with `?code=`, which `doGet` exchanges (`_handleOAuthCallback`) for a session, injecting the session token into the served page (`window.__OMS_BOOT_TOKEN`). `bootApp()` adopts it and stores it in `localStorage`; a stored token is reused on reload.
+2. Every authenticated client call goes through the client helper **`srv()`**, which mirrors the `google.script.run` builder but routes to the backend **`rpc(sessionToken, fnName, args)`** gateway. `rpc` resolves the session → sets `_REQUEST_EMAIL` → dispatches. `getLoginUrl`/`logout` are the only calls made with raw `google.script.run` (no session yet).
+3. After sign-in, `getBootData()` returns session + all master data (or **just the session** if the verified user has no role) → cached in `Core.html` globals.
+4. Dispatch board calls `getDispatchBoardData(date)`; display fields (outlet/driver/truck names) are **derived client-side** from cached master data via `indexById()` — the server intentionally does not re-send them.
+5. Writes go through `DataWriters.gs`, which enforce permissions, write to the sheet, and append to the Audit Log.
 
 ## Critical constraints & conventions
 
@@ -64,9 +67,10 @@ The client calls the backend with `google.script.run.withSuccessHandler(...).fnN
 - **Append-only logs**: Audit Log, Route Frequency Log, Employee-Truck Assignment. Don't mutate prior rows; derive current state by reducing to the latest row (e.g. `getCurrentAssignments()`).
 - **Waybills**: suggested (`Locked=FALSE`) → confirmed (`Locked=TRUE`, immutable). Confirmation bumps `Last Sequence Number` on the prefix. Suffixes: `-R` (redeliver), `-FT` (foul trip).
 - **RBAC**: roles are Admin / Dispatcher / Payroll / Viewer. Every sensitive writer must call `_requirePermission(...)`. The UI also hides controls, but **the server is the real gate** — never trust client-side gating alone.
+- **Identity**: the visitor's email comes from a **verified Google sign-in (server-side OAuth code flow)**, not `Session.getActiveUser()` (which is blank for anyone outside the deployer's Workspace domain under `executeAs: me` + anonymous access). `rpc()` sets `_REQUEST_EMAIL` from the session; `_getCurrentUserEmail()` prefers it and falls back to `Session` only for the editor/owner. New client-callable backend functions must be added to `RPC_ALLOWED` in `Auth.gs` or they're unreachable from the browser.
 - **Audit everything that mutates**: call `_auditLog(action, table, rowId, old, new)` with a vocabulary token from `Docs/Schema.md`. It's best-effort and never throws.
 - **Performance**: minimize `getDataRange().getValues()` round trips; batch writes with `setValues`/`_writeRowFields`/`_appendRows` rather than per-cell.
-- **Timezone**: `appsscript.json` is `Asia/Shanghai` (UTC+8 = PH time). Web app runs `executeAs: USER_DEPLOYING`, access `ANYONE_ANONYMOUS` (RBAC is enforced in-app against the Users sheet via the active user's email).
+- **Timezone**: `appsscript.json` is `Asia/Shanghai` (UTC+8 = PH time). Web app runs `executeAs: USER_DEPLOYING`, access `ANYONE_ANONYMOUS` — so the Sheet stays private (runs as the owner) while identity is established by Google OAuth sign-in (see **Identity** above) and matched against the Users sheet. Requires Script Properties `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` (an OAuth Web client) with the web app's `/exec` (and `/dev`) URLs registered as **Authorized redirect URIs**.
 
 ## Deploy & local workflow
 

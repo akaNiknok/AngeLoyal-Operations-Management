@@ -244,7 +244,7 @@
                 }
 
                 setLoading(`Importing ${rowsToImport.length} trips…`);
-                google.script.run
+                srv()
                     .withSuccessHandler((r) => {
                         hideLoading();
                         if (!r.success) {
