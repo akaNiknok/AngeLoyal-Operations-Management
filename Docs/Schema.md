@@ -18,6 +18,7 @@ The AngeLoyal Order Management System (OMS) relies on a structured collection of
 | 10 | Route Frequency Log | Dispatch | Append-Only Performance Log |
 | 11 | Waybills | Waybills | Append-Only Transaction Ledger |
 | 12 | Audit Log | Audit | System-Wide Activity Journal |
+| 13 | Route Type Map | Config | Administrative Setup (Self-Seeding) |
 
 ## **Group 1: Config Sheets**
 
@@ -67,6 +68,29 @@ Maintains the list of valid billing classifications that Admins can assign to tr
 | L300 | TRUE |
 
 **System Behavior:** Admins select a truck's Billing Category directly when creating or editing a truck record (Sheet 5). Renaming a category here cascades to every Trucks row currently set to the old name, so existing trucks stay matched to the renamed category.
+
+### **Sheet 13: Route Type Map**
+
+Maps the truck-type column codes that appear in a Rebisco route file (e.g. 6WF, 6WC, 4WC) to a truck **Billing Category** (Sheet 2). A route file lists how many trucks of each type an FO needs in dedicated per-type columns (10W, 6WF, 6WC, 4WC, L300…), separate from the client's "Restrictions" constraint. During import the system reads which type column carries the count, looks up its billing category here, and assigns a truck of that category. This sheet **self-seeds** with sensible defaults the first time it is read, so no manual setup is required; Admins can add/edit mappings via the Route Type Map admin panel as the route-file format evolves.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| File Type Code | String | Truck-type column header from the route file, e.g. 6WF, 6WC, 4WC |
+| Billing Category | String | Target billing category (Sheet 2) the code resolves to during import |
+| Active | Boolean | Inactive mappings are ignored during import and hidden from the admin list |
+
+#### **Initial seed:**
+
+| File Type Code | Billing Category | Active |
+| :---- | :---- | :---- |
+| 10W | 10W | TRUE |
+| 6WF | 6W | TRUE |
+| 6WC | 6W | TRUE |
+| 4WC | 6W | TRUE |
+| L300 | L300 | TRUE |
+
+**System Behavior:** Codes not found in the map fall back to using the code itself as the category name (so an unmapped code still attempts a match). A code that resolves to a category with no free truck leaves the trip's truck blank for the dispatcher, but the required category is still stamped onto the trip so the needed type stays visible.
 
 ### **Sheet 3: Waybill Prefixes**
 
@@ -285,7 +309,9 @@ The global ledger recording all administrative, operational, and data state modi
 * EMPLOYEE\_CREATE — New personnel added to the Employees master record  
 * EMPLOYEE\_EDIT — Administrative updates to an existing employee record (including Active/Inactive toggling)  
 * BILLING\_CATEGORY\_CREATE — New entry added to the Billing Categories list  
-* BILLING\_CATEGORY\_EDIT — Administrative updates to a billing category (rename, Active/Inactive toggling)
+* BILLING\_CATEGORY\_EDIT — Administrative updates to a billing category (rename, Active/Inactive toggling)  
+* ROUTE\_TYPE\_MAP\_CREATE — New route-file truck-type → billing-category mapping added  
+* ROUTE\_TYPE\_MAP\_EDIT — Administrative updates to a route type mapping (code, category, Active/Inactive toggling)
 
 ## **Structural Implementation Conventions**
 
@@ -309,6 +335,14 @@ To handle fluid crew sizes (ranging from 0 to 3 helpers per vehicle) without add
 ### **Snapshotting Vehicle Billing Classes**
 
 Vehicle billing classifications are stamped directly onto individual trip lines when they are dispatched. This historical snapshot protects past financial summaries from altering if an administrator subsequently changes a truck's Billing Category or renames an entry in the Billing Categories list.
+
+### **Route-File FO Grouping, Waybills & Truck Allocation**
+
+A Rebisco route file lists one delivery drop per row, but a single Freight Order (FO) can span several rows (one truck, multiple stops) and/or request several trucks (split load, via counts in the per-type columns). On import the rows are grouped by FO:
+
+* **Truck type** comes from the per-type count column (10W/6WF/6WC/4WC/L300), **not** the Restrictions column — those are distinct fields. A continuation row with no type count rides the FO's truck and inherits its type.
+* **One waybill per truck.** The FO's primary truck visits every outlet row of the FO, and those trips share one waybill number ("same FO = same waybill", surfaced on the dispatch board as an alternating row shade). Each additional truck on the FO gets its own waybill number. Shared waybill rows carry the same Sequence Number; confirmation bumps the prefix's Last Sequence Number to the max, so sharing is safe.
+* **Distribution without double-booking.** Trucks are drawn from the pool matching the resolved billing category, ordered by ID, skipping any already committed on that date. When the pool is exhausted the trip is left unassigned (with the required category recorded) rather than overloading one truck.
 
 ### **Independent Route Frequency Tracking**
 

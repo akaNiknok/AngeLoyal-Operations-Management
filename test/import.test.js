@@ -17,11 +17,13 @@ function importSheets(extra = {}) {
       Outlets: emptySheet('Outlets'),
       Trucks: [
         HEADERS.Trucks.slice(),
-        [3, 'ABC-123', 'Isuzu', '6W', true, '6W'], // matches restriction "6W"
+        [3, 'ABC-123', 'Isuzu', '6W', true, '6W'], // billing category 6W
+        [4, 'DEF-456', 'Isuzu', '6W', true, '6W'], // billing category 6W
       ],
       'Default Assignments': [
         HEADERS['Default Assignments'].slice(),
         [1, 3, 9, '21,22', ''], // truck 3 -> driver 9, helpers 21,22
+        [2, 4, 10, '', ''],     // truck 4 -> driver 10
       ],
       Trips: emptySheet('Trips'),
       Waybills: emptySheet('Waybills'),
@@ -37,10 +39,12 @@ function asDispatcher(sheets) {
   return makeEnv({ sheets, userEmail: EMAIL.Dispatcher });
 }
 
+// Truck type lives in the per-type "slots"; "restrictions" is the separate
+// client constraint column. Route Type Map (self-seeded) maps 6WC/4WC -> 6W.
 const ROWS = [
-  { foNumber: 'FO-1', outletName: 'Outlet Alpha', area: 'Cavite', restrictions: '6W', quantity: 10, cbm: 2, tier: 1 },
-  { foNumber: 'FO-2', outletName: 'Outlet Beta', area: 'Laguna', restrictions: '4W', quantity: 5, cbm: 1, tier: 2 },
-  { foNumber: 'FO-3', outletName: 'outlet alpha', area: 'Cavite', restrictions: '6W', quantity: 8, cbm: 1, tier: 1 },
+  { foNumber: 'FO-1', outletName: 'Outlet Alpha', area: 'Cavite', restrictions: '6W', quantity: 10, cbm: 2, tier: 1, slots: [{ type: '6WC', count: 1 }] },
+  { foNumber: 'FO-2', outletName: 'Outlet Beta', area: 'Laguna', restrictions: '4W', quantity: 5, cbm: 1, tier: 2, slots: [{ type: '4WC', count: 1 }] },
+  { foNumber: 'FO-3', outletName: 'outlet alpha', area: 'Cavite', restrictions: '6W', quantity: 8, cbm: 1, tier: 1, slots: [{ type: '6WC', count: 1 }] },
 ];
 
 test('importRouteFile imports every row and numbers waybills sequentially', () => {
@@ -73,27 +77,82 @@ test('importRouteFile seeds new outlets once and dedupes case-insensitively', ()
   assert.equal(alphaTrips[0]['Outlet ID'], alphaTrips[1]['Outlet ID']);
 });
 
-test('importRouteFile pre-fills truck/driver/helpers from defaults when restriction matches', () => {
+test('importRouteFile assigns the right truck type + default crew and distributes without double-booking', () => {
   const { api, ss } = asDispatcher(importSheets());
   api.importRouteFile('6/16/2026', 1, ROWS);
   const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
 
-  const sixW = trips.find((t) => t['FO Number'] === 'FO-1'); // restriction 6W -> truck 3
-  assert.equal(Number(sixW['Truck ID']), 3);
-  assert.equal(Number(sixW['Driver ID']), 9);
-  assert.equal(sixW['Helper IDs'], '21,22');
-  assert.equal(sixW['Truck Billing Category'], '6W');
-  assert.equal(sixW['Billing Date'], '6/16/2026'); // = trip date on import
+  // FO-1 (6WC -> 6W) takes the first free 6W truck.
+  const fo1 = trips.find((t) => t['FO Number'] === 'FO-1');
+  assert.equal(Number(fo1['Truck ID']), 3);
+  assert.equal(Number(fo1['Driver ID']), 9);
+  assert.equal(fo1['Helper IDs'], '21,22');
+  assert.equal(fo1['Truck Billing Category'], '6W');
+  assert.equal(fo1['Billing Date'], '6/16/2026'); // = trip date on import
 
-  const fourW = trips.find((t) => t['FO Number'] === 'FO-2'); // restriction 4W -> no truck
-  assert.equal(fourW['Truck ID'], '');
-  assert.equal(fourW['Driver ID'], '');
+  // FO-2 (4WC -> 6W) takes the next free 6W truck (not the same as FO-1).
+  const fo2 = trips.find((t) => t['FO Number'] === 'FO-2');
+  assert.equal(Number(fo2['Truck ID']), 4);
+  assert.equal(Number(fo2['Driver ID']), 10);
+  assert.equal(fo2['Truck Billing Category'], '6W');
+
+  // FO-3 (6WC -> 6W) finds no free 6W truck left -> unassigned, but the
+  // required category is still recorded so the dispatcher sees the type.
+  const fo3 = trips.find((t) => t['FO Number'] === 'FO-3');
+  assert.equal(fo3['Truck ID'], '');
+  assert.equal(fo3['Driver ID'], '');
+  assert.equal(fo3['Truck Billing Category'], '6W');
+});
+
+test('importRouteFile keeps Restrictions distinct from the resolved truck type', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  // Restriction column says "6W" but the truck-type column is 4WC (-> 6W).
+  api.importRouteFile('6/16/2026', 1, [
+    { foNumber: 'FO-R', outletName: 'Outlet R', restrictions: '6W', slots: [{ type: '4WC', count: 1 }] },
+  ]);
+  const trip = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r))[0];
+  assert.equal(trip['Restrictions'], '6W');             // client constraint, verbatim
+  assert.equal(trip['Truck Billing Category'], '6W');   // resolved truck type via map
+});
+
+test('importRouteFile shares one waybill across a truck\'s multiple outlet rows', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  // One FO, two outlet rows; the 2nd row has no type column (continuation),
+  // so it rides the same truck and shares the waybill number.
+  api.importRouteFile('6/16/2026', 1, [
+    { foNumber: 'FO-M', outletName: 'Stop One', slots: [{ type: '6WC', count: 1 }] },
+    { foNumber: 'FO-M', outletName: 'Stop Two', slots: [] },
+  ]);
+  const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
+  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+
+  assert.equal(trips.length, 2);
+  assert.equal(Number(trips[0]['Truck ID']), 3);
+  assert.equal(Number(trips[1]['Truck ID']), 3); // continuation inherits the truck
+  // Both trips share one waybill number/sequence.
+  assert.deepEqual(wbs.map((w) => w['Waybill Number']), ['AL-41', 'AL-41']);
+});
+
+test('importRouteFile creates one truck + one waybill per truck for a multi-truck FO', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  // One outlet, two trucks of the same type requested (count 2).
+  api.importRouteFile('6/16/2026', 1, [
+    { foNumber: 'FO-T', outletName: 'Big Outlet', slots: [{ type: '6WC', count: 2 }] },
+  ]);
+  const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
+  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+
+  assert.equal(trips.length, 2);
+  assert.deepEqual(trips.map((t) => Number(t['Truck ID'])).sort(), [3, 4]);
+  // Distinct waybill numbers — one per truck.
+  assert.deepEqual(wbs.map((w) => w['Waybill Number']), ['AL-41', 'AL-42']);
 });
 
 test('importRouteFile logs route frequency only for rows with a resolved driver', () => {
   const { api, ss } = asDispatcher(importSheets());
   api.importRouteFile('6/16/2026', 1, ROWS);
-  // Only the two 6W rows (FO-1, FO-3) get a driver -> 2 route-freq rows.
+  // FO-1 (truck 3 / driver 9) and FO-2 (truck 4 / driver 10) get a driver;
+  // FO-3 is unassigned -> 2 route-freq rows.
   assert.equal(dump(ss, 'Route Frequency Log').rows.length, 2);
 });
 

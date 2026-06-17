@@ -303,13 +303,21 @@ function confirmWaybill(waybillId, customNumber) {
  * All rows are imported; the dispatcher filters/deletes non-applicable ones in the UI.
  *
  * Expected rowData fields:
- *   foNumber, outletName, area, address, quantity, cbm, restrictions, tier
+ *   foNumber, outletName, area, address, quantity, cbm, restrictions, tier,
+ *   slots  — [{ type, count }] from the file's truck-type columns (e.g. 6WC×2).
  *
- * For each row:
- *   - Auto-seeds the Outlets sheet if the outlet is new.
- *   - Pre-fills driver/truck from Default Assignments.
- *   - Creates a suggested waybill.
- *   - Appends to Route Frequency Log if a default driver is known.
+ * Each row is a delivery drop. Rows are grouped by FO Number; one FO can span
+ * several outlet rows (one truck, multiple stops) and/or request several trucks
+ * (split load). For each FO:
+ *   - Truck slots are expanded (one per truck needed) and each slot's type code
+ *     is mapped to a Billing Category via the Route Type Map, then to the next
+ *     free truck of that category (no double-booking within the date).
+ *   - The primary truck visits every outlet row of the FO — those trips share
+ *     one waybill number ("same FO = same waybill"). Each additional truck rides
+ *     the FO's first outlet with its own waybill number ("one waybill per truck").
+ *   - Outlets are auto-seeded; default driver/helpers are pre-filled per truck.
+ *   - "Restrictions" stores the client's requested constraint (file column);
+ *     "Truck Billing Category" stores the required/assigned truck type.
  *
  * Unlike createTrip (used for single manual trips), this writes each affected
  * sheet in one batch at the end instead of once per row — needed because a
@@ -323,21 +331,43 @@ function confirmWaybill(waybillId, customNumber) {
 function importRouteFile(tripDate, prefixId, rowData) {
   _requirePermission('ADD_MANUAL_TRIP');
   try {
-    const defaults = getDefaultAssignments();    // [{truckId, defaultDriverId, defaultHelperIds}]
-    const trucks   = getTrucks();
+    const defaults       = getDefaultAssignments();
+    const trucks         = getTrucks();
+    const typeToCategory = getRouteTypeCategoryLookup();   // { FILECODE: 'Billing Category' }
 
-    // Build a lookup of restriction → list of trucks that match that billing category
-    // so we can pre-fill the most likely truck per row.
+    // Pool of available (active) trucks per uppercased billing category,
+    // ordered by ID so allocation is deterministic.
     const trucksByCategory = {};
-    trucks.forEach(t => {
-      const cat = t.billingCategory || '';
-      if (!trucksByCategory[cat]) trucksByCategory[cat] = [];
-      trucksByCategory[cat].push(t);
+    trucks.filter(t => t.active).forEach(t => {
+      const cat = String(t.billingCategory || '').toUpperCase();
+      (trucksByCategory[cat] = trucksByCategory[cat] || []).push(t);
     });
+    Object.keys(trucksByCategory).forEach(c => trucksByCategory[c].sort((a, b) => a.id - b.id));
 
-    // Build default assignment lookup by truckId
     const defaultByTruck = {};
     defaults.forEach(d => { defaultByTruck[d.truckId] = d; });
+
+    // Trucks already committed on this date (existing trips) — never double-book.
+    const usedTruckIds = {};
+    getTrips(tripDate, tripDate).forEach(t => { if (t.truckId) usedTruckIds[t.truckId] = true; });
+
+    // Resolve a file type code (e.g. "4WC") → billing category → next free truck.
+    // Returns { truck, category }; truck is null when none are free, but the
+    // required category is still reported for the trip's snapshot.
+    const allocateTruck = (typeCode) => {
+      const code     = String(typeCode || '').toUpperCase();
+      const category = code ? (typeToCategory[code] || code) : '';
+      const pool     = trucksByCategory[String(category).toUpperCase()] || [];
+      let chosen     = null;
+      for (let i = 0; i < pool.length; i++) {
+        if (!usedTruckIds[pool[i].id]) { chosen = pool[i]; break; }
+      }
+      if (chosen) usedTruckIds[chosen.id] = true;
+      return { truck: chosen, category: category };
+    };
+
+    const email  = _getCurrentUserEmail();
+    const nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
 
     // --- Outlets: read once, build a name → ID lookup we can extend in-memory ---
     const outletsSheet   = _getSheet(SHEET_OUTLETS);
@@ -352,8 +382,17 @@ function importRouteFile(tripDate, prefixId, rowData) {
     let nextOutletId = _nextRowId(outletsSheet);
     const newOutletRows = [];
 
-    // --- Waybill prefix: track the running sequence number in-memory so
-    //     every row in this import gets a unique suggested number ---
+    const resolveOutlet = (rd) => {
+      if (!rd.outletName) return '';
+      const nameLower = rd.outletName.trim().toLowerCase();
+      if (outletNameToId[nameLower] !== undefined) return outletNameToId[nameLower];
+      const id = nextOutletId++;
+      outletNameToId[nameLower] = id;
+      newOutletRows.push([id, rd.outletName.trim(), rd.area || '', rd.address || '', '', '', nowStr]);
+      return id;
+    };
+
+    // --- Waybill prefix: running sequence number, bumped once per waybill ---
     const prefixes = getWaybillPrefixes();
     const pref = prefixes.find(p => Number(p.id) === Number(prefixId));
     if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
@@ -374,117 +413,129 @@ function importRouteFile(tripDate, prefixId, rowData) {
     const newRouteFreqRows = [];
     const newAuditRows     = [];
 
-    const email  = _getCurrentUserEmail();
-    const nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
-
     let imported = 0;
     let skipped  = 0;
     const errors = [];
 
-    rowData.forEach((rd, idx) => {
+    // Creates one trip row + its suggested waybill row. Trips that share a
+    // truck (a truck's several stops on one FO) pass the same wbSeq/wbNumber.
+    const emitTrip = (rd, outletId, slotTruck, category, wbSeq, wbNumber) => {
+      const truckId   = slotTruck ? slotTruck.id : '';
+      const def       = slotTruck ? defaultByTruck[slotTruck.id] : null;
+      const driverId  = def ? def.defaultDriverId : '';
+      const helperIds = def ? def.defaultHelperIds : [];
+
+      const tripId = nextTripId++;
+      newTripRows.push([
+        tripId,
+        tripDate,
+        tripDate,                // Billing Date = Trip Date on import
+        rd.foNumber || '',
+        '',                      // FO Split Suffix
+        outletId,
+        rd.area     || '',
+        rd.quantity || '',
+        rd.cbm      || '',
+        rd.restrictions || '',   // client-requested constraint (file column)
+        truckId,
+        driverId,
+        Array.isArray(helperIds) ? helperIds.join(',') : (helperIds || ''),
+        category || '',          // required/assigned truck type
+        'Scheduled',
+        '',                      // Parent Trip ID
+        'Import',
+        rd.tier || '',
+        '',                      // Remarks
+        '',                      // Status Changed By
+        '',                      // Status Changed At
+        email,
+        nowStr,
+      ]);
+
+      const waybillId = nextWaybillId++;
+      newWaybillRows.push([
+        waybillId,
+        wbNumber,
+        prefixId,
+        wbSeq,
+        tripId,
+        rd.foNumber || '',
+        'Regular',
+        '',                      // Parent Waybill ID
+        'Suggested',
+        false,
+        '',                      // Confirmed By
+        '',                      // Confirmed At
+      ]);
+
+      if (driverId && outletId) {
+        newRouteFreqRows.push([nextRouteFreqId++, tripId, tripDate, driverId, outletId]);
+      }
+
+      newAuditRows.push([
+        nextAuditId++,
+        nowStr,
+        email || 'unknown',
+        'TRIP_CREATE',
+        '',
+        SHEET_TRIPS,
+        tripId,
+        '',
+        JSON.stringify({ foNumber: rd.foNumber || '', outletId, tripDate }),
+      ]);
+
+      imported++;
+    };
+
+    // --- Group rows by FO (first-seen order). Rows with no FO each stand alone. ---
+    const groups    = [];
+    const groupByFO = {};
+    rowData.forEach(rd => {
+      if (!rd.foNumber && !rd.outletName) { skipped++; return; }
+      const key = rd.foNumber || null;
+      if (key && groupByFO[key]) {
+        groupByFO[key].rows.push(rd);
+      } else {
+        const g = { foNumber: rd.foNumber || '', rows: [rd] };
+        groups.push(g);
+        if (key) groupByFO[key] = g;
+      }
+    });
+
+    groups.forEach(g => {
       try {
-        if (!rd.foNumber && !rd.outletName) { skipped++; return; }
+        // Expand truck slots: one entry per truck needed across the FO's rows.
+        const slotTypes = [];
+        g.rows.forEach(rd => (rd.slots || []).forEach(s => {
+          for (let k = 0; k < (s.count || 1); k++) slotTypes.push(s.type);
+        }));
+        // FOs with no type column still get one (possibly unassigned) slot so
+        // their outlet rows still produce trips and a waybill.
+        if (slotTypes.length === 0) slotTypes.push('');
 
-        // Resolve or create the outlet
-        let outletId = '';
-        if (rd.outletName) {
-          const nameLower = rd.outletName.trim().toLowerCase();
-          if (outletNameToId[nameLower] !== undefined) {
-            outletId = outletNameToId[nameLower];
-          } else {
-            outletId = nextOutletId++;
-            outletNameToId[nameLower] = outletId;
-            newOutletRows.push([
-              outletId,
-              rd.outletName.trim(),
-              rd.area    || '',
-              rd.address || '',
-              '',   // Customer Group
-              '',   // Notes
-              nowStr,
-            ]);
-          }
+        // Allocate a truck + a waybill (sequence) for every slot.
+        const slots = slotTypes.map(type => {
+          const a = allocateTruck(type);
+          nextSeq += 1;
+          return { truck: a.truck, category: a.category, wbSeq: nextSeq, wbNumber: `${pref.prefix}-${nextSeq}` };
+        });
+
+        const primary = slots[0];
+
+        // Primary truck visits every outlet row — those trips share its waybill.
+        g.rows.forEach(rd => {
+          const outletId = resolveOutlet(rd);
+          emitTrip(rd, outletId, primary.truck, primary.category, primary.wbSeq, primary.wbNumber);
+        });
+
+        // Additional trucks (split load) ride the first outlet, each its own waybill.
+        const firstRow      = g.rows[0];
+        const firstOutletId = resolveOutlet(firstRow);
+        for (let s = 1; s < slots.length; s++) {
+          emitTrip(firstRow, firstOutletId, slots[s].truck, slots[s].category, slots[s].wbSeq, slots[s].wbNumber);
         }
-
-        // Try to match a truck to the restriction hint (e.g. "6W", "4W", "L300")
-        // If no match, leave truck/driver blank for dispatcher to fill
-        const restriction      = (rd.restrictions || '').trim().toUpperCase();
-        const matchedTrucks    = trucksByCategory[restriction] || [];
-        const candidateTruck   = matchedTrucks[0] || null;
-        const candidateDefault = candidateTruck ? defaultByTruck[candidateTruck.id] : null;
-
-        const truckId    = candidateTruck   ? candidateTruck.id                 : '';
-        const driverId   = candidateDefault ? candidateDefault.defaultDriverId  : '';
-        const helperIds  = candidateDefault ? candidateDefault.defaultHelperIds : [];
-        const billingCat = candidateTruck   ? candidateTruck.billingCategory    : '';
-
-        // Trip row
-        const tripId = nextTripId++;
-        newTripRows.push([
-          tripId,
-          tripDate,
-          tripDate,                // Billing Date = Trip Date on import
-          rd.foNumber || '',
-          '',                      // FO Split Suffix
-          outletId,
-          rd.area     || '',
-          rd.quantity || '',
-          rd.cbm      || '',
-          rd.restrictions || '',
-          truckId,
-          driverId,
-          Array.isArray(helperIds) ? helperIds.join(',') : (helperIds || ''),
-          billingCat,
-          'Scheduled',
-          '',                      // Parent Trip ID
-          'Import',
-          rd.tier || '',
-          '',                      // Remarks
-          '',                      // Status Changed By
-          '',                      // Status Changed At
-          email,
-          nowStr,
-        ]);
-
-        // Suggested waybill — sequence increments per row within this import
-        nextSeq += 1;
-        const waybillId = nextWaybillId++;
-        newWaybillRows.push([
-          waybillId,
-          `${pref.prefix}-${nextSeq}`,
-          prefixId,
-          nextSeq,
-          tripId,
-          rd.foNumber || '',
-          'Regular',
-          '',                      // Parent Waybill ID
-          'Suggested',
-          false,
-          '',                      // Confirmed By
-          '',                      // Confirmed At
-        ]);
-
-        // Route frequency log
-        if (driverId && outletId) {
-          newRouteFreqRows.push([nextRouteFreqId++, tripId, tripDate, driverId, outletId]);
-        }
-
-        // Audit log
-        newAuditRows.push([
-          nextAuditId++,
-          nowStr,
-          email || 'unknown',
-          'TRIP_CREATE',
-          '',
-          SHEET_TRIPS,
-          tripId,
-          '',
-          JSON.stringify({ foNumber: rd.foNumber || '', outletId, tripDate }),
-        ]);
-
-        imported++;
       } catch (rowErr) {
-        errors.push(`Row ${idx + 1}: ${rowErr.message}`);
+        errors.push(`FO ${g.foNumber || '(none)'}: ${rowErr.message}`);
         skipped++;
       }
     });
@@ -877,6 +928,111 @@ function updateBillingCategory(categoryId, changes) {
         id:     categoryId,
         name:   _val(row, headers, 'Name'),
         active: _val(row, headers, 'Active') !== false,
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ============================================================
+//  DATA WRITERS — Route Type Map (Admin only)
+// ============================================================
+
+/**
+ * Creates a new Route Type Map entry (route-file truck-type code → billing
+ * category) used to resolve truck assignment during import.
+ *
+ * @param {Object} data  { fileTypeCode, billingCategory }
+ * @returns {{ success: boolean, mapping: Object } | { success: false, error: string }}
+ */
+function createRouteTypeMapping(data) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const code     = String(data.fileTypeCode || '').trim();
+    const category = String(data.billingCategory || '').trim();
+    if (!code) throw new Error('File type code is required.');
+    if (!category) throw new Error('Billing category is required.');
+
+    getRouteTypeMap(); // ensure the sheet exists (self-bootstraps)
+    const sheet   = _getSheet(SHEET_ROUTE_TYPE_MAP);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const dup = rows.slice(1).some(row =>
+      String(_val(row, headers, 'File Type Code')).trim().toUpperCase() === code.toUpperCase());
+    if (dup) throw new Error(`A mapping for "${code}" already exists.`);
+
+    const nextId = _nextRowId(sheet);
+    sheet.appendRow([nextId, code, category, true]);
+
+    _auditLog('ROUTE_TYPE_MAP_CREATE', SHEET_ROUTE_TYPE_MAP, nextId, '', `${code} → ${category}`);
+
+    return {
+      success: true,
+      mapping: { id: nextId, fileTypeCode: code, billingCategory: category, active: true },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Updates an existing Route Type Map entry.
+ *
+ * @param {number} mappingId
+ * @param {Object} changes  { fileTypeCode?, billingCategory?, active? }
+ * @returns {{ success: boolean, mapping: Object } | { success: false, error: string }}
+ */
+function updateRouteTypeMapping(mappingId, changes) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    getRouteTypeMap(); // ensure the sheet exists
+    const sheet   = _getSheet(SHEET_ROUTE_TYPE_MAP);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const rowIdx = _findRowById(rows, headers, mappingId);
+    if (rowIdx === -1) throw new Error(`Route type mapping ID ${mappingId} not found.`);
+
+    const row    = rows[rowIdx];
+    const oldVal = {
+      fileTypeCode:    _val(row, headers, 'File Type Code'),
+      billingCategory: _val(row, headers, 'Billing Category'),
+      active:          _val(row, headers, 'Active'),
+    };
+
+    const updates = {};
+    if (changes.fileTypeCode !== undefined) {
+      const code = String(changes.fileTypeCode).trim();
+      if (!code) throw new Error('File type code is required.');
+      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
+        && String(_val(r, headers, 'File Type Code')).trim().toUpperCase() === code.toUpperCase());
+      if (dup) throw new Error(`A mapping for "${code}" already exists.`);
+      updates['File Type Code'] = code;
+    }
+    if (changes.billingCategory !== undefined) {
+      const category = String(changes.billingCategory).trim();
+      if (!category) throw new Error('Billing category is required.');
+      updates['Billing Category'] = category;
+    }
+    if (changes.active !== undefined) updates['Active'] = !!changes.active;
+
+    if (Object.keys(updates).length > 0) {
+      _writeRowFields(sheet, row, rowIdx, headers, updates);
+    }
+
+    _auditLog('ROUTE_TYPE_MAP_EDIT', SHEET_ROUTE_TYPE_MAP, mappingId,
+      JSON.stringify(oldVal), JSON.stringify(changes));
+
+    return {
+      success: true,
+      mapping: {
+        id:              mappingId,
+        fileTypeCode:    _val(row, headers, 'File Type Code'),
+        billingCategory: _val(row, headers, 'Billing Category'),
+        active:          _val(row, headers, 'Active') !== false,
       },
     };
   } catch (e) {

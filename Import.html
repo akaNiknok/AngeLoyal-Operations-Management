@@ -114,13 +114,28 @@
                 const ciArea = col("AREA", "PROVINCE", "REGION", "CITY");
                 const ciQty = col("QTY", "QUANTITY", "CASES", "CARTONS", "PCS");
                 const ciCBM = col("CBM");
-                const ciRestriction = col(
-                    "RESTRICTION",
-                    "TRUCK TYPE",
-                    "VEHICLE",
-                );
+                // "Restrictions" is the client's requested vehicle constraint
+                // (e.g. "6W"). It is NOT the truck type — that lives in the
+                // per-type count columns identified below.
+                const ciRestriction = col("RESTRICTION");
                 const ciTier = col("TIER");
                 const ciAddress = col("ADDRESS", "DELIVERY ADDRESS");
+
+                // Truck-type columns: each is a code (10W, 6WF, 6WC, 4WC,
+                // L300…) and the number under it is how many trucks of that
+                // type the FO needs. They sit between FREIGHT ORDER and TOTAL.
+                const ciTotal = headers.findIndex((h) => h === "TOTAL");
+                const typeCols = [];
+                const isTypeCode = (h) => /^(\d+\s*W[A-Z]*|L\d{3})$/.test(h);
+                if (ciFO >= 0 && ciTotal > ciFO) {
+                    for (let c = ciFO + 1; c < ciTotal; c++) {
+                        if (headers[c]) typeCols.push({ idx: c, code: headers[c] });
+                    }
+                } else {
+                    headers.forEach((h, c) => {
+                        if (isTypeCode(h)) typeCols.push({ idx: c, code: h });
+                    });
+                }
 
                 const result = [];
                 for (let i = headerIdx + 1; i < raw.length; i++) {
@@ -135,6 +150,13 @@
                     const fo = String(row[ciFO] ?? "").trim();
                     const outletName = String(row[ciOutlet] ?? "").trim();
                     if (!fo && !outletName) continue;
+
+                    // Truck slots requested on this row, from the type columns.
+                    const slots = [];
+                    typeCols.forEach((tc) => {
+                        const n = Number(row[tc.idx]);
+                        if (n > 0) slots.push({ type: tc.code, count: n });
+                    });
 
                     result.push({
                         _rowIdx: i,
@@ -154,8 +176,44 @@
                                 ? String(row[ciRestriction] || "").trim()
                                 : "",
                         tier: ciTier >= 0 ? Number(row[ciTier]) || null : null,
+                        slots: slots,
                     });
                 }
+
+                // Resolve each row's truck type, back-filling blank rows.
+                // A blank type row inherits a prior line's type, in order:
+                //   1. a prior line with the SAME FO — a continuation stop on
+                //      the same truck, so it adds no new truck slot; or
+                //   2. if none, the line DIRECTLY ABOVE regardless of FO — in
+                //      which case it becomes its own truck slot of that type so
+                //      it still gets a truck instead of being left blank.
+                const primaryTypeByFO = {};
+                let lastRowType = "";
+                result.forEach((r) => {
+                    if (r.slots.length) {
+                        r.displayType = r.slots
+                            .map((s) =>
+                                s.count > 1 ? `${s.count}×${s.type}` : s.type,
+                            )
+                            .join(", ");
+                        lastRowType = r.slots[0].type;
+                        if (r.foNumber)
+                            primaryTypeByFO[r.foNumber] = lastRowType;
+                    } else if (r.foNumber && primaryTypeByFO[r.foNumber]) {
+                        // same-FO continuation — rides that FO's truck
+                        r.displayType = primaryTypeByFO[r.foNumber];
+                        lastRowType = primaryTypeByFO[r.foNumber];
+                    } else if (lastRowType) {
+                        // fallback: copy the line directly above, regardless of
+                        // FO, and give this row its own truck slot of that type
+                        r.displayType = lastRowType;
+                        r.slots = [{ type: lastRowType, count: 1 }];
+                        if (r.foNumber)
+                            primaryTypeByFO[r.foNumber] = lastRowType;
+                    } else {
+                        r.displayType = "";
+                    }
+                });
                 return result;
             }
 
@@ -178,10 +236,11 @@
     <table class="preview-table">
       <thead><tr>
         <th style="width:100px">FO #</th>
-        <th style="width:210px">Outlet</th>
-        <th style="width:90px">Area</th>
-        <th style="width:55px;text-align:right">Qty</th>
-        <th style="width:55px">Type</th>
+        <th style="width:190px">Outlet</th>
+        <th style="width:80px">Area</th>
+        <th style="width:50px;text-align:right">Qty</th>
+        <th style="width:60px">Type</th>
+        <th style="width:55px">Restr.</th>
         <th style="width:60px"></th>
       </tr></thead>
       <tbody>
@@ -193,7 +252,8 @@
             <td>${esc(r.outletName) || "—"}</td>
             <td style="font-size:11px;color:var(--muted)">${esc(r.area) || "—"}</td>
             <td style="font-family:'DM Mono',monospace;text-align:right">${r.quantity || "—"}</td>
-            <td style="font-size:11px">${esc(r.restrictions) || "—"}</td>
+            <td style="font-size:11px;font-weight:500">${esc(r.displayType) || "—"}</td>
+            <td style="font-size:11px;color:var(--muted)">${esc(r.restrictions) || "—"}</td>
             <td><button class="row-toggle-btn" onclick="toggleRow(${i})">${exc ? "Include" : "Exclude"}</button></td>
           </tr>`;
             })

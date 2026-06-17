@@ -162,6 +162,11 @@ class FakeSpreadsheet {
   getSheetByName(name) {
     return this.sheets[name] || null;
   }
+
+  insertSheet(name) {
+    this.sheets[name] = new FakeSheet(name, []);
+    return this.sheets[name];
+  }
 }
 
 // ------------------------------------------------------------

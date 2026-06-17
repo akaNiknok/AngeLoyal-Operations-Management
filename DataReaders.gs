@@ -36,6 +36,7 @@ function getBootData() {
     outlets:            getOutlets(),
     defaultAssignments: getDefaultAssignments(),
     billingCategories:  getBillingCategories(),
+    routeTypeMap:       getRouteTypeMap(),
   };
 }
 
@@ -102,6 +103,54 @@ function getBillingCategories() {
     name:   _val(row, headers, 'Name'),
     active: _val(row, headers, 'Active') !== false,
   })).filter(r => r.id !== null);
+}
+
+/** Default Route Type Map rows seeded the first time the sheet is created. */
+const ROUTE_TYPE_MAP_DEFAULTS = [
+  ['10W', '10W'],
+  ['6WF', '6W'],
+  ['6WC', '6W'],
+  ['4WC', '6W'],
+  ['L300', 'L300'],
+];
+
+/**
+ * Returns the Route Type Map: how the truck-type column codes in a Rebisco
+ * route file (e.g. 6WF, 6WC, 4WC) map to a truck Billing Category used for
+ * assignment. Self-bootstraps with sensible defaults if the sheet is missing.
+ *
+ * @returns {Object[]} Array of { id, fileTypeCode, billingCategory, active }
+ */
+function getRouteTypeMap() {
+  const seed   = ROUTE_TYPE_MAP_DEFAULTS.map((r, i) => [i + 1, r[0], r[1], true]);
+  const sheet  = _getOrCreateSheet(SHEET_ROUTE_TYPE_MAP,
+    ['ID', 'File Type Code', 'Billing Category', 'Active'], seed);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+
+  return rows.slice(1).map(row => ({
+    id:              _numOrNull(_val(row, headers, 'ID')),
+    fileTypeCode:    String(_val(row, headers, 'File Type Code')).trim(),
+    billingCategory: String(_val(row, headers, 'Billing Category')).trim(),
+    active:          _val(row, headers, 'Active') !== false,
+  })).filter(r => r.id !== null);
+}
+
+/**
+ * Builds an uppercase lookup of active File Type Code → Billing Category from
+ * the Route Type Map, for resolving a route file's truck-type column to a
+ * billing category during import.
+ *
+ * @returns {Object<string,string>}
+ */
+function getRouteTypeCategoryLookup() {
+  const lookup = {};
+  getRouteTypeMap().forEach(m => {
+    if (m.active && m.fileTypeCode) {
+      lookup[m.fileTypeCode.toUpperCase()] = m.billingCategory;
+    }
+  });
+  return lookup;
 }
 
 /**

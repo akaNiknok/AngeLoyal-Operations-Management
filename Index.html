@@ -115,6 +115,13 @@
                     >
                         Billing Categories
                     </button>
+                    <button
+                        class="nav-btn admin-only"
+                        id="nav-route-type-map"
+                        onclick="switchPanel('route-type-map')"
+                    >
+                        Route Type Map
+                    </button>
                 </nav>
 
                 <div class="header-right">
@@ -950,6 +957,67 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: ROUTE TYPE MAP (admin)
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-route-type-map">
+                <div class="toolbar">
+                    <span class="tb-label" id="route-type-map-count"></span>
+                    <label
+                        class="tb-label"
+                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                    >
+                        <input
+                            type="checkbox"
+                            id="route-type-map-show-inactive"
+                            onchange="renderRouteTypeMapAdmin()"
+                        />
+                        Show inactive
+                    </label>
+                    <div class="tb-spacer"></div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="openAddRouteTypeMapModal()"
+                    >
+                        + Add mapping
+                    </button>
+                </div>
+                <div class="admin-split">
+                    <div class="admin-list-wrap">
+                        <table class="data-table" id="route-type-map-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th>File Type</th>
+                                    <th>Billing Category</th>
+                                    <th style="width: 90px">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="route-type-map-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="admin-detail-col">
+                        <div class="col-head">Mapping detail</div>
+                        <div
+                            class="detail-body"
+                            id="route-type-map-detail-body"
+                        >
+                            <div class="empty-board" style="padding: 24px 0">
+                                <div class="icon">🗺️</div>
+                                <div class="sub">
+                                    Select a mapping to view details
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class="detail-footer"
+                            id="route-type-map-detail-footer"
+                            style="display: none"
+                        ></div>
+                    </div>
+                </div>
+            </div>
         </div>
         <!-- /.app -->
 
@@ -1241,6 +1309,48 @@
                         onclick="submitAddBillingCategory()"
                     >
                         Add category
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-backdrop" id="modal-add-route-type-map">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Add route type mapping</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-add-route-type-map')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">File type code</label>
+                        <input
+                            type="text"
+                            id="nrtm-code"
+                            placeholder="e.g. 4WC"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Billing category</label>
+                        <select id="nrtm-category"></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-add-route-type-map')"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        onclick="submitAddRouteTypeMap()"
+                    >
+                        Add mapping
                     </button>
                 </div>
             </div>
