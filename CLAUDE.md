@@ -94,5 +94,5 @@ npm run fetch-data         # snapshot live sheets → data/ (gitignored, real da
 - Keep the schema doc and code in lockstep. A new feature usually means: a new sheet/columns in `Docs/Schema.md` → constants in `Code.gs` → reader in `DataReaders.gs` → writer (+ `_requirePermission` + `_auditLog`) in `DataWriters.gs` → UI partial + `Core.html` state/boot wiring.
 - Match the surrounding style: the `_`-prefixed helpers are private; reader functions return plain objects with camelCase keys; writers return `{ success, ... } | { success:false, error }`.
 - Only commit/push when asked.
-- One feature branch per task; **squash-merge** PRs (PR title = squash subject, Conventional Commits style) and branch fresh off updated `main` each time. Full rationale + repo settings in [`DEPLOY.md`](DEPLOY.md#git--pr-workflow).
+- One feature branch per task; **merge commit** PRs (Conventional Commits style on branch commits) and branch fresh off updated `main` each time. Full rationale + repo settings in [`DEPLOY.md`](DEPLOY.md#git--pr-workflow).
 - Money, payroll, and billing logic are contractually sensitive and Phase 2's hardest part — favor correctness, date-locking, and an audit trail over cleverness.
