@@ -6,7 +6,6 @@ here are the source of truth, and changes get pushed to the Apps Script
 project bound to the AngeLoyal Google Sheet.
 
 ## One-time setup
-
 1. **Enable the Apps Script API** for your Google account:
    https://script.google.com/home/usersettings (toggle it ON).
 
@@ -52,7 +51,6 @@ project bound to the AngeLoyal Google Sheet.
    delete `.clasp-tmp`.
 
 ## Google Sign-In (OAuth) setup
-
 The web app runs `executeAs: USER_DEPLOYING` + `access: ANYONE_ANONYMOUS`, so
 the Google Sheet stays private (the script runs as the owner) but the platform
 can't tell the backend who a visitor is. Identity instead comes from a
@@ -94,7 +92,6 @@ project — Apps Script editor → Project Settings → Google Cloud Platform):
 > works for script editors**; test non-owner accounts on the **`/exec`** URL.
 
 ## Transferring ownership to AngeLoyal
-
 When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google
 account, the OAuth sign-in needs attention — most breakage on handoff is here:
 
@@ -129,7 +126,6 @@ account, the OAuth sign-in needs attention — most breakage on handoff is here:
 > it's an option if you'd rather not maintain an OAuth client.
 
 ## Day-to-day workflow
-
 ```sh
 git pull                # get latest code
 # ... make changes to Code.gs / Index.html ...
@@ -158,30 +154,23 @@ npm run release         # push + redeploy the live web app
 > visible to actual users.
 
 ## Git & PR workflow
-
 This is a solo project developed mostly through Claude Code, with **one feature
 branch per task** (e.g. `claude/<task>`). The merge convention is:
 
-- **Squash and merge** every PR. Each PR is one logical unit of work, so its
-  intermediate commits ("fix test", "address review") collapse into a single
-  clean commit on `main`. This keeps history linear and makes a whole feature
-  revertable with one `git revert`.
-- Use the **PR title** as the squash commit subject. Titles follow
-  Conventional Commits (`test:`, `feat:`, `fix:`, …) so `main` stays
-  changelog-friendly.
+- **Merge commit** every PR. This preserves the branch as a named grouping in
+  `main`'s history — useful when multiple sessions run in parallel on different
+  branches, since the merge commit brackets which commits belong together.
+- Commit messages on the branch should follow Conventional Commits (`test:`,
+  `feat:`, `fix:`, …) so `main` stays changelog-friendly.
 - **Delete the head branch after merge** (GitHub can do this automatically).
   Web/remote Claude branches are ephemeral anyway.
-- **Always start a new task from a fresh branch off the updated `main`.** After
-  a squash merge the old branch's commits no longer exist on `main`, so
-  continuing to build on a merged branch causes duplicate-diff conflicts.
+- **Always start a new task from a fresh branch off the updated `main`.**
 
 Recommended GitHub repo settings (**Settings → General → Pull Requests**):
-allow **only** squash merging (disable merge commits and rebase merging), set
-the squash message to "Pull request title and description", and enable
-"Automatically delete head branches".
+allow **only** merge commits (disable squash merging and rebase merging), and
+enable "Automatically delete head branches".
 
 ## Notes
-
 - `.claspignore` restricts what gets pushed to `Code.gs`, `Index.html`, and
   `appsscript.json` — the `Docs/` and `Sample Files/` folders stay local/Git
   only and are never sent to Apps Script.
@@ -190,7 +179,6 @@ the squash message to "Pull request title and description", and enable
 - Auth tokens (`~/.clasprc.json`) are per-user and never committed.
 
 ## Reading live sheet data locally (for testing/verification)
-
 `Code.gs` has a token-gated `devDump` endpoint (`doGet` with
 `?action=devDump`) that returns raw sheet data as JSON. It's used by
 `scripts/fetch-sheet-data.js` to snapshot the live data for local
