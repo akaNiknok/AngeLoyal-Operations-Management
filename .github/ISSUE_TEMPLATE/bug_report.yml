@@ -6,84 +6,23 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve the system! Fill in what you can — the most
-        important parts are **what happened** and **steps to make it happen again**.
-        You don't need to know anything technical. 🙂
-  - type: dropdown
-    id: screen
-    attributes:
-      label: Which screen were you on?
-      description: Pick the tab/page where the problem showed up.
-      options:
-        - Dispatch
-        - Import
-        - Truck Roster
-        - Outlets
-        - Trucks
-        - Employees
-        - Billing Categories
-        - Login / access
-        - Other / not sure
-    validations:
-      required: true
+        Thanks for helping improve the system! Tell us what happened, what you
+        were doing right before it happened, and what you expected instead.
+        Feel free to paste in a screenshot too. You don't need to know
+        anything technical. 🙂
   - type: textarea
-    id: what-happened
+    id: details
     attributes:
       label: What happened?
-      description: Describe the problem in your own words.
-      placeholder: e.g. I clicked "Confirm Waybill" and the page showed a red error message.
+      description: Describe the problem, the steps to reproduce it, and what you expected instead.
+      placeholder: |
+        e.g. I clicked "Confirm Waybill" on the Dispatch screen and the page showed a red error message.
+
+        Steps: 1. ... 2. ... 3. ...
+
+        Expected: the waybill should have been saved and shown as Confirmed.
     validations:
       required: true
-  - type: textarea
-    id: steps
-    attributes:
-      label: Steps to make it happen again
-      description: What did you do, step by step, right before the problem?
-      value: |
-        1.
-        2.
-        3.
-    validations:
-      required: true
-  - type: textarea
-    id: expected
-    attributes:
-      label: What did you expect to happen instead?
-      placeholder: e.g. The waybill number should have been saved and shown as Confirmed.
-    validations:
-      required: false
-  - type: dropdown
-    id: severity
-    attributes:
-      label: How bad is it?
-      options:
-        - "Blocker — I can't continue my work"
-        - "Major — a feature is broken but I can work around it"
-        - "Minor — small problem, not urgent"
-        - "Cosmetic — looks off but still works"
-    validations:
-      required: true
-  - type: input
-    id: when
-    attributes:
-      label: When did it happen?
-      placeholder: e.g. June 14, 2026, around 9:30 AM
-    validations:
-      required: false
-  - type: textarea
-    id: screenshots
-    attributes:
-      label: Screenshots
-      description: A picture helps a lot! Drag and drop an image here, or paste one.
-    validations:
-      required: false
-  - type: input
-    id: device
-    attributes:
-      label: Device & browser
-      placeholder: e.g. Windows laptop, Google Chrome
-    validations:
-      required: false
   - type: markdown
     attributes:
       value: |
