@@ -59,6 +59,23 @@ One-time configuration (in the **GCP project** linked to the Apps Script project
 
 > Workspace accounts get redirected through a domain-scoped URL (`…/a/macros/<domain>/…/exec`). The code handles this by caching the exact `redirect_uri` with the CSRF `state` and reusing it in the token exchange — so the rewrite doesn't cause a `redirect_uri` mismatch. The **`/dev` URL only works for script editors**; test non-owner accounts on the **`/exec`** URL.
 
+## Troubleshooting: multiple Google accounts
+**Symptom:** a user opens the OMS link and Google shows *"Sorry, unable to open the file at this time"* (`Paumanhin, hindi mabuksan ang file sa oras na ito`) — **before** any sign-in screen or the app's "Not authorized" gate appears.
+
+**This is a Google problem, not an app bug.** The page is served by Google Drive *before* the script runs, so `doGet` / `Auth.gs` / the `Users` sheet are not involved — there's nothing to fix in code. It's the Apps Script **`/u/N/` account-routing bug**: the `/exec` link has no account index, so when a browser has several accounts signed in, Google rewrites the URL to `…/u/N/macros/s/<id>/exec` and sometimes picks an `N` whose session can't resolve the deployment. It correlates with the number of signed-in accounts and is intermittent.
+
+**Fixes, in order:**
+
+1. **Verify the live deployment's access is "Anyone" (anonymous).** `appsscript.json` declares `ANYONE_ANONYMOUS`, but the *active deployment's* actual setting can drift if it was edited in the UI. Apps Script editor → **Deploy → Manage deployments → (active) → Edit → Who has access** → set to **"Anyone"** (not "Anyone with a Google account", which forces account resolution and triggers the bad `/u/N/` pick) → redeploy. This is the highest-leverage fix.
+2. **Make sure everyone has the `/exec` URL, never `/dev`.** The `/dev` URL only opens for script editors and shows this same page for everyone else.
+3. **Per-user workaround** (any one forces a single, unambiguous account):
+   - Open the link in an **Incognito / private window**, or
+   - **Sign out** of the other Google accounts (keep only the OMS account), or
+   - Make the OMS account the **default** (sign into it *first*), or
+   - When it fails, change the `/u/1/` (or `/u/2/`) segment in the address bar to **`/u/0/`** and reload.
+
+> Long term, moving AngeLoyal to a Workspace domain with the consent screen set to **Internal** and the script owned in-domain makes account routing predictable (see *Transferring ownership* below). Tracked in [#53](https://github.com/akaNiknok/AngeLoyal-Operations-Management/issues/53).
+
 ## Transferring ownership to AngeLoyal
 When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google account, the OAuth sign-in needs attention — most breakage on handoff is here:
 
