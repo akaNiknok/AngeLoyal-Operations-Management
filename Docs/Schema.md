@@ -218,6 +218,8 @@ The core transactional table of the system. Each row tracks an individual delive
 Prepping (imported, pre-waybill — dispatcher merges/splits/reassigns freely)
   → Scheduled (day promoted via markDayScheduled; waybills suggested)
 Scheduled
+  → Preload (goods loaded onto the truck, not yet delivered)
+      → Delivered
   → Delivered (normal completion)
   → Undelivered
       → Foul Trip - No Redeliver (billed as foul, no next-day attempt)

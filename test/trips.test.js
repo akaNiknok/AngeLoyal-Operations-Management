@@ -164,6 +164,19 @@ test('saveTripChanges spawns a carry-over trip on Redeliver', () => {
   assert.equal(carry['Billing Date'], '6/16/2026'); // preserved from parent
 });
 
+test('saveTripChanges does not spawn a carry-over trip on Preload', () => {
+  const { api, ss } = withExistingTrip();
+  const before = dump(ss, 'Trips').rows.length;
+
+  const res = api.saveTripChanges(50, { tripStatus: 'Preload' });
+  assert.equal(res.success, true);
+  assert.equal(res.newTripId, null);
+
+  const after = dump(ss, 'Trips');
+  assert.equal(after.rows.length, before);
+  assert.equal(rowObject(after.headers, after.rows[0])['Trip Status'], 'Preload');
+});
+
 test('saveTripChanges warns when a driver exceeds the route-frequency threshold', () => {
   // 5 recent trips for driver 9 to outlet 12; reassigning makes it the 6th.
   const today = '6/16/2026';
