@@ -689,6 +689,69 @@
             .td-select input {
                 cursor: pointer;
             }
+
+            /* Share-to-Drivers cards (screen side; print has its own CSS) */
+            .ds-card-row {
+                display: flex;
+                gap: 6px;
+                margin-bottom: 8px;
+                align-items: flex-start;
+            }
+            .ds-card-controls {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .ds-card {
+                flex: 1;
+                border: 1px solid var(--border-md);
+                border-radius: var(--radius-sm);
+                padding: 8px 10px;
+                background: var(--surface);
+            }
+            .ds-convoy {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--purple);
+                margin-bottom: 4px;
+            }
+            .ds-leg {
+                display: flex;
+                gap: 10px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            .ds-plate {
+                font-family: "DM Mono", monospace;
+            }
+            .ds-wb {
+                margin-left: auto;
+                font-family: "DM Mono", monospace;
+                color: var(--muted);
+            }
+            .ds-stops {
+                margin-top: 5px;
+                border-top: 1px dashed var(--border);
+                padding-top: 5px;
+            }
+            .ds-stop {
+                font-size: 12px;
+                margin-bottom: 2px;
+            }
+            .ds-stop-n {
+                font-weight: 600;
+                margin-right: 3px;
+            }
+            .ds-area,
+            .ds-qty {
+                color: var(--muted);
+                font-size: 11px;
+            }
+            .ds-remarks {
+                font-size: 11px;
+                color: var(--amber);
+                margin-left: 16px;
+            }
             .td-outlet {
                 font-weight: 500;
                 max-width: 200px !important;

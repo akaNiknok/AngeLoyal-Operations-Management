@@ -321,6 +321,14 @@
                                 <span class="account-action-icon">⬇</span>
                                 Excel (.xlsx)
                             </button>
+                            <button
+                                class="account-action"
+                                type="button"
+                                onclick="openDriverShareView()"
+                            >
+                                <span class="account-action-icon">🚚</span>
+                                Share to Drivers…
+                            </button>
                         </div>
                     </div>
                     <div class="tb-sep"></div>
@@ -1171,6 +1179,52 @@
                     </button>
                     <button class="btn btn-primary" onclick="submitAddTrip()">
                         Add trip
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Share to Drivers Modal -->
+        <div class="modal-backdrop" id="modal-driver-share">
+            <div class="modal" style="width: 560px; max-width: 92vw">
+                <div class="modal-head">
+                    <span class="modal-head-title">Share to Drivers</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-driver-share')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div
+                    class="modal-body"
+                    style="max-height: 65vh; overflow-y: auto"
+                >
+                    <div
+                        style="
+                            font-size: 11px;
+                            color: var(--hint);
+                            margin-bottom: 8px;
+                        "
+                    >
+                        One card per truck load — convoy trucks share a card.
+                        Use ↑ ↓ to arrange, then print or screenshot for the
+                        drivers' group chat.
+                    </div>
+                    <div id="driver-share-cards"></div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-driver-share')"
+                    >
+                        Close
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        onclick="printDriverShare()"
+                    >
+                        🖨 Print / Save as PDF
                     </button>
                 </div>
             </div>
