@@ -221,6 +221,13 @@
                         </button>
                         <button
                             class="pill"
+                            data-sf="Prepping"
+                            onclick="setStatusFilter('Prepping', this)"
+                        >
+                            Prepping
+                        </button>
+                        <button
+                            class="pill"
                             data-sf="Scheduled"
                             onclick="setStatusFilter('Scheduled', this)"
                         >
@@ -249,6 +256,14 @@
                         </button>
                     </div>
                     <div class="tb-spacer"></div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        id="btn-mark-scheduled"
+                        onclick="openMarkScheduledModal()"
+                        style="display: none"
+                    >
+                        Mark day Scheduled
+                    </button>
                     <button
                         class="btn btn-ghost btn-sm"
                         onclick="openAddTripModal()"
@@ -281,6 +296,10 @@
                     <div class="stat-cell">
                         <div class="stat-label">Total trips</div>
                         <div class="stat-val blue" id="ds-total">—</div>
+                    </div>
+                    <div class="stat-cell">
+                        <div class="stat-label">Prepping</div>
+                        <div class="stat-val muted" id="ds-prepping">—</div>
                     </div>
                     <div class="stat-cell">
                         <div class="stat-label">Scheduled</div>
@@ -525,12 +544,6 @@
                                 >Trip date</label
                             >
                             <input type="date" id="import-date" />
-                        </div>
-                        <div>
-                            <label class="field-label" for="import-prefix"
-                                >Waybill prefix</label
-                            >
-                            <select id="import-prefix"></select>
                         </div>
                         <div id="import-file-info" style="display: none">
                             <div class="field-label">Selected file</div>
@@ -1108,6 +1121,50 @@
                     </button>
                     <button class="btn btn-primary" onclick="submitAddTrip()">
                         Add trip
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mark Day Scheduled Modal -->
+        <div class="modal-backdrop" id="modal-mark-scheduled">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Mark day Scheduled</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-mark-scheduled')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div id="mds-summary" style="font-size: 13px"></div>
+                        <span class="form-hint"
+                            >Promotes every Prepping trip on this date to
+                            Scheduled and suggests waybill numbers — one per
+                            truck load (same FO + same truck share a
+                            waybill).</span
+                        >
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Waybill prefix</label>
+                        <select id="mds-prefix"></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-mark-scheduled')"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        onclick="submitMarkScheduled()"
+                    >
+                        Mark Scheduled
                     </button>
                 </div>
             </div>

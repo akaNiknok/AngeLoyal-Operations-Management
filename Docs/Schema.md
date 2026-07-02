@@ -202,7 +202,7 @@ The core transactional table of the system. Each row tracks an individual delive
 | Driver ID | Number | Foreign Key → Employees.ID pointing to the operating driver |
 | Helper IDs | String | Comma-separated Employee IDs for assigned crew; Nullable |
 | Truck Billing Category | String | Historical snapshot of the vehicle's billing class at the exact moment of dispatch |
-| Trip Status | String | Current execution state: Scheduled, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
+| Trip Status | String | Current execution state: Prepping, Scheduled, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
 | Parent Trip ID | Number | Foreign Key → Trips.ID. Points to the initiating record for all redeliveries or foul trip tracking |
 | Source | String | Generation origin: Import, Manual, or Carry-over |
 | Tier | Number | Client priority ranking (1, 2, 3); Nullable for manual entries |
@@ -215,6 +215,8 @@ The core transactional table of the system. Each row tracks an individual delive
 #### **Status & Carry-Over Workflow**
 
 ```
+Prepping (imported, pre-waybill — dispatcher merges/splits/reassigns freely)
+  → Scheduled (day promoted via markDayScheduled; waybills suggested)
 Scheduled
   → Delivered (normal completion)
   → Undelivered
@@ -268,7 +270,7 @@ Tracks system-generated billing numbers. Once a record is finalized by operation
 
 #### **Document Generation Logic**
 
-1. Upon trip registration, the application evaluates the Last Sequence Number for the active prefix within Waybill Prefixes.  
+1. Upon trip registration, the application evaluates the Last Sequence Number for the active prefix within Waybill Prefixes. For manual trips this happens at creation; for imported trips it happens when the dispatcher promotes the day out of Prepping (markDayScheduled) — one waybill per truck load, so trips sharing an FO Number and Truck ID share a number.  
 2. The index increments by 1, rendering a new entry in Waybills marked as Status \= Suggested and Locked \= FALSE.  
 3. Dispatch staff review the layout inside the UI and retain the option to manually alter the number string.  
 4. If changed, the application verifies the registry; if the manually entered string matches an existing record marked Confirmed, the system rejects the input with a validation error.  

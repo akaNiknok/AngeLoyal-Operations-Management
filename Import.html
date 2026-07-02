@@ -288,15 +288,8 @@
                     return;
                 }
                 const dateVal = document.getElementById("import-date").value;
-                const prefixId = Number(
-                    document.getElementById("import-prefix").value,
-                );
                 if (!dateVal) {
                     showToast("Select a trip date first.", "warning");
-                    return;
-                }
-                if (!prefixId) {
-                    showToast("Select a waybill prefix.", "warning");
                     return;
                 }
 
@@ -316,7 +309,7 @@
                             showToast("Import failed: " + r.errors[0], "error");
                             return;
                         }
-                        const msg = `Imported ${r.imported} trips.${r.skipped > 0 ? " " + r.skipped + " skipped." : ""}`;
+                        const msg = `Imported ${r.imported} trips in Prepping.${r.skipped > 0 ? " " + r.skipped + " skipped." : ""}`;
                         showToast(msg, r.skipped > 0 ? "warning" : "success");
                         if (r.errors.length)
                             console.warn("Import errors:", r.errors);
@@ -330,7 +323,7 @@
                         hideLoading();
                         showToast("Import error: " + e.message, "error");
                     })
-                    .importRouteFile(isoToMDY(dateVal), prefixId, rowsToImport);
+                    .importRouteFile(isoToMDY(dateVal), rowsToImport);
             }
 
             function clearImport() {
