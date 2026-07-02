@@ -2,7 +2,8 @@
 //  Rebisco route-file import — importRouteFile, deleteImportedTrip,
 //  and _resolveOrCreateOutlet (DataWriters.gs / Internals.gs).
 //  The batched import is the trickiest writer: it seeds outlets,
-//  pre-fills crew from defaults, and numbers waybills in-memory.
+//  pre-fills crew from defaults, and lands trips in Prepping
+//  (waybills come later, via markDayScheduled).
 // ============================================================
 
 const { test } = require('node:test');
@@ -47,23 +48,23 @@ const ROWS = [
   { foNumber: 'FO-3', outletName: 'outlet alpha', area: 'Cavite', restrictions: '6W', quantity: 8, cbm: 1, tier: 1, slots: [{ type: '6WC', count: 1 }] },
 ];
 
-test('importRouteFile imports every row and numbers waybills sequentially', () => {
+test('importRouteFile imports every row as Prepping with no waybills yet', () => {
   const { api, ss } = asDispatcher(importSheets());
-  const res = api.importRouteFile('6/16/2026', 1, ROWS);
+  const res = api.importRouteFile('6/16/2026', ROWS);
 
   assert.equal(res.success, true);
   assert.equal(res.imported, 3);
   assert.equal(res.skipped, 0);
 
-  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
-  // prefix started at 40 -> 41, 42, 43
-  assert.deepEqual(wbs.map((w) => w['Waybill Number']), ['AL-41', 'AL-42', 'AL-43']);
-  assert.ok(wbs.every((w) => w.Status === 'Suggested' && w.Locked === false));
+  const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
+  assert.ok(trips.every((t) => t['Trip Status'] === 'Prepping'));
+  // Waybills are suggested at day promotion (markDayScheduled), not import.
+  assert.equal(dump(ss, 'Waybills').rows.length, 0);
 });
 
 test('importRouteFile seeds new outlets once and dedupes case-insensitively', () => {
   const { api, ss } = asDispatcher(importSheets());
-  api.importRouteFile('6/16/2026', 1, ROWS);
+  api.importRouteFile('6/16/2026', ROWS);
 
   const outlets = dump(ss, 'Outlets').rows.map((r) => rowObject(HEADERS.Outlets, r));
   // "Outlet Alpha" and "outlet alpha" collapse to one; plus "Outlet Beta" = 2 total
@@ -79,7 +80,7 @@ test('importRouteFile seeds new outlets once and dedupes case-insensitively', ()
 
 test('importRouteFile assigns the right truck type + default crew and distributes without double-booking', () => {
   const { api, ss } = asDispatcher(importSheets());
-  api.importRouteFile('6/16/2026', 1, ROWS);
+  api.importRouteFile('6/16/2026', ROWS);
   const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
 
   // FO-1 (6WC -> 6W) takes the first free 6W truck.
@@ -107,7 +108,7 @@ test('importRouteFile assigns the right truck type + default crew and distribute
 test('importRouteFile keeps Restrictions distinct from the resolved truck type', () => {
   const { api, ss } = asDispatcher(importSheets());
   // Restriction column says "6W" but the truck-type column is 4WC (-> 6W).
-  api.importRouteFile('6/16/2026', 1, [
+  api.importRouteFile('6/16/2026', [
     { foNumber: 'FO-R', outletName: 'Outlet R', restrictions: '6W', slots: [{ type: '4WC', count: 1 }] },
   ]);
   const trip = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r))[0];
@@ -115,42 +116,36 @@ test('importRouteFile keeps Restrictions distinct from the resolved truck type',
   assert.equal(trip['Truck Billing Category'], '6W');   // resolved truck type via map
 });
 
-test('importRouteFile shares one waybill across a truck\'s multiple outlet rows', () => {
+test('importRouteFile rides a truck\'s multiple outlet rows on one truck', () => {
   const { api, ss } = asDispatcher(importSheets());
   // One FO, two outlet rows; the 2nd row has no type column (continuation),
-  // so it rides the same truck and shares the waybill number.
-  api.importRouteFile('6/16/2026', 1, [
+  // so it rides the same truck (multi-drop load).
+  api.importRouteFile('6/16/2026', [
     { foNumber: 'FO-M', outletName: 'Stop One', slots: [{ type: '6WC', count: 1 }] },
     { foNumber: 'FO-M', outletName: 'Stop Two', slots: [] },
   ]);
   const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
-  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
 
   assert.equal(trips.length, 2);
   assert.equal(Number(trips[0]['Truck ID']), 3);
   assert.equal(Number(trips[1]['Truck ID']), 3); // continuation inherits the truck
-  // Both trips share one waybill number/sequence.
-  assert.deepEqual(wbs.map((w) => w['Waybill Number']), ['AL-41', 'AL-41']);
 });
 
-test('importRouteFile creates one truck + one waybill per truck for a multi-truck FO', () => {
+test('importRouteFile creates one trip per truck for a multi-truck FO', () => {
   const { api, ss } = asDispatcher(importSheets());
   // One outlet, two trucks of the same type requested (count 2).
-  api.importRouteFile('6/16/2026', 1, [
+  api.importRouteFile('6/16/2026', [
     { foNumber: 'FO-T', outletName: 'Big Outlet', slots: [{ type: '6WC', count: 2 }] },
   ]);
   const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
-  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
 
   assert.equal(trips.length, 2);
   assert.deepEqual(trips.map((t) => Number(t['Truck ID'])).sort(), [3, 4]);
-  // Distinct waybill numbers — one per truck.
-  assert.deepEqual(wbs.map((w) => w['Waybill Number']), ['AL-41', 'AL-42']);
 });
 
 test('importRouteFile logs route frequency only for rows with a resolved driver', () => {
   const { api, ss } = asDispatcher(importSheets());
-  api.importRouteFile('6/16/2026', 1, ROWS);
+  api.importRouteFile('6/16/2026', ROWS);
   // FO-1 (truck 3 / driver 9) and FO-2 (truck 4 / driver 10) get a driver;
   // FO-3 is unassigned -> 2 route-freq rows.
   assert.equal(dump(ss, 'Route Frequency Log').rows.length, 2);
@@ -158,7 +153,7 @@ test('importRouteFile logs route frequency only for rows with a resolved driver'
 
 test('importRouteFile skips blank rows', () => {
   const { api } = asDispatcher(importSheets());
-  const res = api.importRouteFile('6/16/2026', 1, [
+  const res = api.importRouteFile('6/16/2026', [
     { foNumber: '', outletName: '' },
     { foNumber: 'FO-9', outletName: 'Outlet Z', restrictions: '6W' },
   ]);
@@ -166,16 +161,9 @@ test('importRouteFile skips blank rows', () => {
   assert.equal(res.skipped, 1);
 });
 
-test('importRouteFile fails cleanly for an unknown prefix', () => {
-  const { api } = asDispatcher(importSheets());
-  const res = api.importRouteFile('6/16/2026', 999, ROWS);
-  assert.equal(res.success, false);
-  assert.match(res.errors[0], /not found/);
-});
-
 test('importRouteFile is gated by ADD_MANUAL_TRIP permission', () => {
   const { api } = makeEnv({ sheets: importSheets(), userEmail: EMAIL.Viewer });
-  assert.throws(() => api.importRouteFile('6/16/2026', 1, ROWS), /Access denied/);
+  assert.throws(() => api.importRouteFile('6/16/2026', ROWS), /Access denied/);
 });
 
 // ---------------- deleteImportedTrip ----------------

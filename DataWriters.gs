@@ -311,23 +311,25 @@ function confirmWaybill(waybillId, customNumber) {
  *   - Truck slots are expanded (one per truck needed) and each slot's type code
  *     is mapped to a Billing Category via the Route Type Map, then to the next
  *     free truck of that category (no double-booking within the date).
- *   - The primary truck visits every outlet row of the FO — those trips share
- *     one waybill number ("same FO = same waybill"). Each additional truck rides
- *     the FO's first outlet with its own waybill number ("one waybill per truck").
+ *   - The primary truck visits every outlet row of the FO — one multi-drop
+ *     load. Each additional truck rides the FO's first outlet (split load).
  *   - Outlets are auto-seeded; default driver/helpers are pre-filled per truck.
  *   - "Restrictions" stores the client's requested constraint (file column);
  *     "Truck Billing Category" stores the required/assigned truck type.
+ *
+ * Trips land in 'Prepping' with NO waybills: the dispatcher regroups and
+ * reassigns freely, then markDayScheduled promotes the day and suggests the
+ * waybills (one per truck load — same FO + same truck = same waybill).
  *
  * Unlike createTrip (used for single manual trips), this writes each affected
  * sheet in one batch at the end instead of once per row — needed because a
  * 44-row import previously meant 400+ individual Sheets API calls.
  *
  * @param {string}   tripDate   'M/d/yyyy' — the date these trips are for
- * @param {number}   prefixId   Waybill prefix to use for auto-generation
  * @param {Object[]} rowData    Array of parsed route rows
  * @returns {{ success: boolean, imported: number, skipped: number, errors: string[] }}
  */
-function importRouteFile(tripDate, prefixId, rowData) {
+function importRouteFile(tripDate, rowData) {
   _requirePermission('ADD_MANUAL_TRIP');
   try {
     const defaults       = getDefaultAssignments();
@@ -391,12 +393,6 @@ function importRouteFile(tripDate, prefixId, rowData) {
       return id;
     };
 
-    // --- Waybill prefix: validate up front so we fail before writing trips.
-    //     The actual numbering happens in _suggestWaybillsForGroups. ---
-    if (!getWaybillPrefixes().some(p => Number(p.id) === Number(prefixId))) {
-      throw new Error(`Waybill prefix ID ${prefixId} not found.`);
-    }
-
     // --- Next IDs for the sheets we'll append to ---
     const tripsSheet     = _getSheet(SHEET_TRIPS);
     const routeFreqSheet = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
@@ -406,7 +402,6 @@ function importRouteFile(tripDate, prefixId, rowData) {
     let nextAuditId     = _nextRowId(auditSheet);
 
     const newTripRows      = [];
-    const waybillGroups    = [];   // [{ foNumber, tripIds }] — one waybill per group
     const newRouteFreqRows = [];
     const newAuditRows     = [];
 
@@ -414,10 +409,9 @@ function importRouteFile(tripDate, prefixId, rowData) {
     let skipped  = 0;
     const errors = [];
 
-    // Creates one trip row and returns its ID. Waybill rows are created
-    // afterwards by _suggestWaybillsForGroups from waybillGroups (trips
-    // that share a truck — a truck's several stops on one FO — share a
-    // group and therefore a waybill number).
+    // Creates one trip row and returns its ID. No waybills yet — imported
+    // trips land in 'Prepping'; markDayScheduled suggests the waybills
+    // once the dispatcher promotes the day.
     const emitTrip = (rd, outletId, slotTruck, category) => {
       const truckId   = slotTruck ? slotTruck.id : '';
       const def       = slotTruck ? defaultByTruck[slotTruck.id] : null;
@@ -440,7 +434,7 @@ function importRouteFile(tripDate, prefixId, rowData) {
         driverId,
         Array.isArray(helperIds) ? helperIds.join(',') : (helperIds || ''),
         category || '',          // required/assigned truck type
-        'Scheduled',
+        'Prepping',
         '',                      // Parent Trip ID
         'Import',
         rd.tier || '',
@@ -497,24 +491,22 @@ function importRouteFile(tripDate, prefixId, rowData) {
         // their outlet rows still produce trips and a waybill.
         if (slotTypes.length === 0) slotTypes.push('');
 
-        // Allocate a truck for every slot; each slot becomes one waybill group.
+        // Allocate a truck for every slot.
         const slots = slotTypes.map(type => allocateTruck(type));
 
         const primary = slots[0];
 
-        // Primary truck visits every outlet row — those trips share its waybill.
-        const primaryTripIds = g.rows.map(rd => {
+        // Primary truck visits every outlet row — one multi-drop load.
+        g.rows.forEach(rd => {
           const outletId = resolveOutlet(rd);
-          return emitTrip(rd, outletId, primary.truck, primary.category);
+          emitTrip(rd, outletId, primary.truck, primary.category);
         });
-        waybillGroups.push({ foNumber: g.foNumber, tripIds: primaryTripIds });
 
-        // Additional trucks (split load) ride the first outlet, each its own waybill.
+        // Additional trucks (split load) ride the first outlet.
         const firstRow      = g.rows[0];
         const firstOutletId = resolveOutlet(firstRow);
         for (let s = 1; s < slots.length; s++) {
-          const tripId = emitTrip(firstRow, firstOutletId, slots[s].truck, slots[s].category);
-          waybillGroups.push({ foNumber: g.foNumber, tripIds: [tripId] });
+          emitTrip(firstRow, firstOutletId, slots[s].truck, slots[s].category);
         }
       } catch (rowErr) {
         errors.push(`FO ${g.foNumber || '(none)'}: ${rowErr.message}`);
@@ -526,8 +518,6 @@ function importRouteFile(tripDate, prefixId, rowData) {
     _appendRows(tripsSheet, newTripRows);
     _appendRows(routeFreqSheet, newRouteFreqRows);
     _appendRows(auditSheet, newAuditRows);
-    // After the audit append: the helper allocates its own audit-row IDs.
-    _suggestWaybillsForGroups(prefixId, waybillGroups);
 
     return { success: true, imported, skipped, errors };
   } catch (e) {
@@ -565,6 +555,104 @@ function deleteImportedTrip(tripId) {
 
     _auditLog('TRIP_DELETE', SHEET_TRIPS, tripId, 'Imported trip deleted (pre-confirmation)', '');
     return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Promotes every 'Prepping' trip on a date to 'Scheduled' and suggests
+ * their waybills — the end of the planning phase started by importRouteFile.
+ *
+ * Waybills are grouped by (FO Number, Truck ID): a truck's several drops on
+ * one FO share one waybill; each truck of a split FO gets its own. Trips
+ * with no FO Number each get their own waybill. Trips that already have a
+ * waybill row are skipped, so a second click is a no-op.
+ * ponytail: trips of one FO left with NO truck share one waybill (import
+ * used to give each unassigned slot its own) — Prepping exists precisely
+ * so trucks are assigned before promotion.
+ *
+ * @param {string} tripDate  'M/d/yyyy'
+ * @param {number} prefixId  Waybill prefix for the suggested numbers
+ * @returns {{ success: boolean, promoted: number, waybillsSuggested: number }
+ *           | { success: false, error: string }}
+ */
+function markDayScheduled(tripDate, prefixId) {
+  _requirePermission('ADD_MANUAL_TRIP');
+  try {
+    if (!getWaybillPrefixes().some(p => Number(p.id) === Number(prefixId))) {
+      throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+    }
+
+    const sheet   = _getSheet(SHEET_TRIPS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const promoted = [];   // { rowIdx, tripId, foNumber, truckId }
+    rows.forEach((row, i) => {
+      if (i === 0) return;
+      if (_val(row, headers, 'Trip Status') !== 'Prepping') return;
+      if (_formatDate(_readDateCell(_val(row, headers, 'Trip Date'))) !== tripDate) return;
+      promoted.push({
+        rowIdx:   i,
+        tripId:   _numOrNull(_val(row, headers, 'ID')),
+        foNumber: String(_val(row, headers, 'FO Number') || ''),
+        truckId:  _numOrNull(_val(row, headers, 'Truck ID')),
+      });
+    });
+
+    if (promoted.length === 0) {
+      return { success: true, promoted: 0, waybillsSuggested: 0 };
+    }
+
+    // Batch the status stamps: mutate the in-memory rows, write back the
+    // span between the first and last affected row in one setValues call
+    // (imported rows are contiguous, so the span is tight in practice).
+    const email  = _getCurrentUserEmail();
+    const nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+    const colOf  = (name) => headers.indexOf(name);
+    promoted.forEach(p => {
+      rows[p.rowIdx][colOf('Trip Status')]       = 'Scheduled';
+      rows[p.rowIdx][colOf('Status Changed By')] = email;
+      rows[p.rowIdx][colOf('Status Changed At')] = nowStr;
+    });
+    const minIdx = promoted[0].rowIdx;
+    const maxIdx = promoted[promoted.length - 1].rowIdx;
+    sheet.getRange(minIdx + 1, 1, maxIdx - minIdx + 1, headers.length)
+      .setValues(rows.slice(minIdx, maxIdx + 1));
+
+    // Batched audit rows (mirrors importRouteFile's batching rationale).
+    const auditSheet  = _getSheet(SHEET_AUDIT);
+    let   nextAuditId = _nextRowId(auditSheet);
+    _appendRows(auditSheet, promoted.map(p =>
+      [nextAuditId++, nowStr, email || 'unknown', 'TRIP_STATUS_CHANGE', '', SHEET_TRIPS, p.tripId, 'Prepping', 'Scheduled']
+    ));
+
+    // Suggest waybills: skip trips that already have a waybill row.
+    const wbSheet   = _getSheet(SHEET_WAYBILLS);
+    const wbRows    = wbSheet.getDataRange().getValues();
+    const wbHeaders = wbRows[0].map(h => h.toString().trim());
+    const hasWaybill = {};
+    wbRows.slice(1).forEach(row => {
+      const t = _numOrNull(_val(row, wbHeaders, 'Trip ID'));
+      if (t !== null) hasWaybill[t] = true;
+    });
+
+    const groups  = [];
+    const byKey   = {};
+    promoted.forEach(p => {
+      if (hasWaybill[p.tripId]) return;
+      const key = p.foNumber ? `${p.foNumber}|${p.truckId || ''}` : `solo|${p.tripId}`;
+      if (!byKey[key]) {
+        byKey[key] = { foNumber: p.foNumber, tripIds: [] };
+        groups.push(byKey[key]);
+      }
+      byKey[key].tripIds.push(p.tripId);
+    });
+    _suggestWaybillsForGroups(prefixId, groups);
+
+    // groups.length = distinct waybill numbers (every group has ≥1 trip)
+    return { success: true, promoted: promoted.length, waybillsSuggested: groups.length };
   } catch (e) {
     return { success: false, error: e.message };
   }

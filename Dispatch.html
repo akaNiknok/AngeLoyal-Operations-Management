@@ -32,6 +32,13 @@
                 // Stats (always computed from full data, not filtered)
                 const all = dispatchData.trips || [];
                 document.getElementById("ds-total").textContent = all.length;
+                const preppingCount = all.filter(
+                    (t) => t.tripStatus === "Prepping",
+                ).length;
+                document.getElementById("ds-prepping").textContent =
+                    preppingCount;
+                document.getElementById("btn-mark-scheduled").style.display =
+                    canEdit() && preppingCount > 0 ? "" : "none";
                 document.getElementById("ds-scheduled").textContent =
                     all.filter((t) => t.tripStatus === "Scheduled").length;
                 document.getElementById("ds-delivered").textContent =
@@ -314,6 +321,7 @@
 
             function statusOptions(current) {
                 const opts = [
+                    ["Prepping", "sc-prepping", "Prepping"],
                     ["Scheduled", "sc-scheduled", "Scheduled"],
                     ["Preload", "sc-preload", "Preload"],
                     ["Delivered", "sc-delivered", "Delivered"],
@@ -437,6 +445,7 @@
 
                 // Map short labels back to full status values
                 const statusMap = {
+                    Prepping: "Prepping",
                     Scheduled: "Scheduled",
                     Preload: "Preload",
                     Delivered: "Delivered",
@@ -601,6 +610,54 @@
             }
 
             // ── ADD MANUAL TRIP MODAL ──────────────────────────────────
+            function openMarkScheduledModal() {
+                if (!canEdit()) {
+                    showToast("Your role cannot schedule trips.", "warning");
+                    return;
+                }
+                const count = (dispatchData?.trips || []).filter(
+                    (t) => t.tripStatus === "Prepping",
+                ).length;
+                if (count === 0) {
+                    showToast("No Prepping trips on this date.", "warning");
+                    return;
+                }
+                document.getElementById("mds-summary").textContent =
+                    `${count} Prepping trip${count === 1 ? "" : "s"} on ${document.getElementById("dispatch-date").value} will be marked Scheduled.`;
+                populatePrefixSelects();
+                openModal("modal-mark-scheduled");
+            }
+
+            function submitMarkScheduled() {
+                const dateVal = document.getElementById("dispatch-date").value;
+                const prefixId = Number(
+                    document.getElementById("mds-prefix").value,
+                );
+                if (!prefixId) {
+                    showToast("Select a waybill prefix.", "warning");
+                    return;
+                }
+                closeModal("modal-mark-scheduled");
+                setSyncing(true);
+                srv()
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast(
+                                "Scheduling failed: " + r.error,
+                                "error",
+                            );
+                            return;
+                        }
+                        showToast(
+                            `${r.promoted} trips Scheduled, ${r.waybillsSuggested} waybills suggested.`,
+                            "success",
+                        );
+                        loadDispatch();
+                    })
+                    .markDayScheduled(isoToMDY(dateVal), prefixId);
+            }
+
             function openAddTripModal() {
                 if (!canEdit()) {
                     showToast("Your role cannot add trips.", "warning");
@@ -656,7 +713,7 @@
             }
 
             function populatePrefixSelects() {
-                ["import-prefix", "at-prefix"].forEach((id) => {
+                ["at-prefix", "mds-prefix"].forEach((id) => {
                     const sel = document.getElementById(id);
                     if (!sel) return;
                     sel.innerHTML = waybillPrefixes
