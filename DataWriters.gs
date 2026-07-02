@@ -65,6 +65,7 @@ function createTrip(tripData) {
       '',  // Status Changed At
       email,
       Utilities.formatDate(now, tz, 'M/d/yyyy HH:mm:ss'),
+      tripData.convoyGroup     || '',
     ]);
 
     // 4. Write suggested waybill if a prefix is provided
@@ -303,7 +304,11 @@ function confirmWaybill(waybillId, customNumber) {
  *
  * Expected rowData fields:
  *   foNumber, outletName, area, address, quantity, cbm, restrictions, tier,
- *   slots  — [{ type, count }] from the file's truck-type columns (e.g. 6WC×2).
+ *   slots        — [{ type, count }] from the file's truck-type columns (e.g. 6WC×2),
+ *   convoyGroup  — optional batch index from the file's fill-color runs; rows
+ *                  sharing it must travel together (convoy / split load). Tokens
+ *                  are offset by the date's existing maximum so re-imports on the
+ *                  same day never collide.
  *
  * Each row is a delivery drop. Rows are grouped by FO Number; one FO can span
  * several outlet rows (one truck, multiple stops) and/or request several trucks
@@ -349,8 +354,15 @@ function importRouteFile(tripDate, rowData) {
     defaults.forEach(d => { defaultByTruck[d.truckId] = d; });
 
     // Trucks already committed on this date (existing trips) — never double-book.
+    // Same pass finds the highest convoy token already used on the date, so a
+    // second import's batch tokens don't collide with the first's.
     const usedTruckIds = {};
-    getTrips(tripDate, tripDate).forEach(t => { if (t.truckId) usedTruckIds[t.truckId] = true; });
+    let convoyTokenBase = 0;
+    getTrips(tripDate, tripDate).forEach(t => {
+      if (t.truckId) usedTruckIds[t.truckId] = true;
+      const cg = Number(t.convoyGroup);
+      if (cg > convoyTokenBase) convoyTokenBase = cg;
+    });
 
     // Resolve a file type code (e.g. "4WC") → billing category → next free truck.
     // Returns { truck, category }; truck is null when none are free, but the
@@ -443,6 +455,7 @@ function importRouteFile(tripDate, rowData) {
         '',                      // Status Changed At
         email,
         nowStr,
+        rd.convoyGroup ? String(convoyTokenBase + Number(rd.convoyGroup)) : '',
       ]);
 
       if (driverId && outletId) {

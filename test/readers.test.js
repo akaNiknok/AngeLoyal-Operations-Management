@@ -46,6 +46,20 @@ test('getTrips parses helper CSV into a numeric array', () => {
   assert.deepEqual([...trip.helperIds], [7, 8, 9]);
 });
 
+test('getTrips returns convoyGroup as a string, blank when unset', () => {
+  const sheets = {
+    Trips: [
+      HEADERS.Trips.slice(),
+      tripRow({ ID: 1, 'Trip Date': '6/16/2026', 'Billing Date': '6/16/2026', 'Convoy Group': 3 }),
+      tripRow({ ID: 2, 'Trip Date': '6/16/2026', 'Billing Date': '6/16/2026' }),
+    ],
+  };
+  const { api } = makeEnv({ sheets, userEmail: EMAIL.Viewer });
+  const trips = api.getTrips('6/16/2026', '6/16/2026');
+  assert.equal(trips.find((t) => t.id === 1).convoyGroup, '3');
+  assert.equal(trips.find((t) => t.id === 2).convoyGroup, '');
+});
+
 // ---------------- getDispatchBoardData ----------------
 
 test('getDispatchBoardData joins suggested + confirmed waybills onto each trip', () => {

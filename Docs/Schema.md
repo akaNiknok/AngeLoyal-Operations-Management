@@ -211,6 +211,7 @@ The core transactional table of the system. Each row tracks an individual delive
 | Status Changed At | DateTime | Timestamp of the latest status modification |
 | Added By | String | Email address of the user who generated the record |
 | Added At | DateTime | Creation timestamp |
+| Convoy Group | String | Token grouping trips whose trucks must travel together (convoys / split loads); unique within a Trip Date; Nullable (blank = not in a convoy) |
 
 #### **Status & Carry-Over Workflow**
 
@@ -345,6 +346,7 @@ A Rebisco route file lists one delivery drop per row, but a single Freight Order
 * **Truck type** comes from the per-type count column (10W/6WF/6WC/4WC/L300), **not** the Restrictions column — those are distinct fields. A continuation row with no type count rides the FO's truck and inherits its type.
 * **One waybill per truck.** The FO's primary truck visits every outlet row of the FO, and those trips share one waybill number ("same FO = same waybill", surfaced on the dispatch board as an alternating row shade). Each additional truck on the FO gets its own waybill number. Shared waybill rows carry the same Sequence Number; confirmation bumps the prefix's Last Sequence Number to the max, so sharing is safe.
 * **Distribution without double-booking.** Trucks are drawn from the pool matching the resolved billing category, ordered by ID, skipping any already committed on that date. When the pool is exhausted the trip is left unassigned (with the required category recorded) rather than overloading one truck.
+* **Convoy detection from fill colors.** Rebisco highlights the truck-type count columns in alternating yellow/blue runs; each contiguous same-color run is one truck batch, and a run can span multiple FOs (trucks that must travel together because quantities are summed onto one FO's row). The importer reads only those columns' fills (the Customer column reuses the same palette for chain codes), treats a color change as a batch boundary, folds uncolored rows into the batch of a colored row sharing their FO, and persists batches needing ≥ 2 truck slots into `Trips.Convoy Group`. Tokens are numeric, unique within a Trip Date (re-imports offset by the date's existing maximum). Fill parsing is best-effort: if the library or colors are absent, the import proceeds with no groups.
 
 ### **Independent Route Frequency Tracking**
 

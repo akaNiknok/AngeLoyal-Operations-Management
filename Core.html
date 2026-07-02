@@ -10,6 +10,18 @@
             document.head.appendChild(xlsxScript);
             let xlsxReady = false;
 
+            // ExcelJS reads cell fill colors (convoy batches in the route
+            // file), which the community SheetJS build can't. Optional: if it
+            // fails to load, imports still work, just without convoy detection.
+            const excelJsScript = document.createElement("script");
+            excelJsScript.src =
+                "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+            excelJsScript.onload = () => {
+                excelJsReady = true;
+            };
+            document.head.appendChild(excelJsScript);
+            let excelJsReady = false;
+
             // ── GLOBAL STATE ──────────────────────────────────────────
             let currentUser = { email: "", displayName: "", role: null };
             let employees = [];
