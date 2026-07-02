@@ -73,7 +73,7 @@ First, tell the two failures apart — they look similar but have different caus
 
 **Fixes, in order:**
 
-1. **Give everyone the launcher link, not the raw `/exec` URL.** The launcher (see [The account launcher page](#the-account-launcher-page) below) remembers each person's OMS account and always opens the app as `…/exec?authuser=<their-email>`. The `authuser` parameter selects the account **by email**, so Google routes straight to it instead of guessing a `/u/N/` index — which is the whole cause of the bug. This is the fix to distribute; the manual steps in (4) become unnecessary once people bookmark it.
+1. **Give everyone the launcher link (`https://akaniknok.github.io/angeloyal-oms-launcher/`), not the raw `/exec` URL.** The launcher (see [The account launcher page](#the-account-launcher-page) below) remembers each person's OMS account and always opens the app as `…/exec?authuser=<their-email>`. The `authuser` parameter selects the account **by email**, so Google routes straight to it instead of guessing a `/u/N/` index — which is the whole cause of the bug. This is the fix to distribute; the manual steps in (4) become unnecessary once people bookmark it.
 2. **Verify the live deployment's access is "Anyone" (anonymous).** `appsscript.json` declares `ANYONE_ANONYMOUS`, but the *active deployment's* actual setting can drift if it was edited in the UI. Apps Script editor → **Deploy → Manage deployments → (active) → Edit → Who has access** → set to **"Anyone"** (not "Anyone with a Google account", which forces account resolution and makes the bad `/u/N/` pick far more likely) → redeploy. Highest-leverage server-side fix.
 3. **Make sure everyone has the `/exec` URL (or the launcher), never `/dev`.** The `/dev` URL only opens for script editors and shows the same page for everyone else.
 4. **Manual per-user fallback** (only if someone hits the raw `/exec` link and it fails — any one forces a single, unambiguous account):
@@ -92,13 +92,17 @@ First, tell the two failures apart — they look similar but have different caus
 ### The account launcher page
 [`pages/index.html`](pages/index.html) is a tiny static page that sidesteps the `/u/N/` routing bug. On first visit it asks for the person's OMS Google account, remembers it in `localStorage`, and thereafter redirects straight to `…/exec?authuser=<that-email>`. Because the account is named by email, Google never mis-picks a `/u/N/` index, so multi-account browsers stop getting "unable to open the file." A **"Use a different account"** link (or visiting the launcher with `?switch=1`) clears the stored email.
 
-It is **not** an Apps Script partial — `.claspignore` excludes `pages/**` so `npm run push` never uploads it. It's hosted on **GitHub Pages** off a `gh-pages` branch:
+It is **not** an Apps Script partial — `.claspignore` excludes `pages/**` so `npm run push` never uploads it. GitHub Pages requires a *public* repo on the free plan, and this repo stays private, so the page is published from a separate, standalone public repo: **[akaNiknok/angeloyal-oms-launcher](https://github.com/akaNiknok/angeloyal-oms-launcher)**. That repo contains nothing but this page — the `EXEC_URL` it points to is meant to be public (identity is still gated server-side by Google sign-in), so there's nothing confidential in it.
+
+GitHub Pages is enabled there (Settings → Pages, Source: `master` / root), served at **`https://akaniknok.github.io/angeloyal-oms-launcher/`** — that's the link to hand out.
+
+[`pages/index.html`](pages/index.html) in *this* repo is the source of truth. If the deployment ID ever changes, update `EXEC_URL` here first, then copy the file into a local checkout of `angeloyal-oms-launcher` and commit/push it there — there's no automated sync between the two repos:
 
 ```sh
-npm run pages:publish   # git subtree push --prefix pages origin gh-pages
+cp pages/index.html ../angeloyal-oms-launcher/index.html
+cd ../angeloyal-oms-launcher
+git add index.html && git commit -m "sync EXEC_URL" && git push
 ```
-
-One-time setup: after the first publish, go to the repo's **Settings → Pages → Build and deployment**, set **Source: Deploy from a branch**, **Branch: `gh-pages` / `(root)`**, and save. The launcher is then served at `https://akaniknok.github.io/AngeLoyal-Operations-Management/` — that's the link to hand out. If the deployment ID ever changes, update `EXEC_URL` in [`pages/index.html`](pages/index.html) (and `package.json` / the URLs in this doc) and re-run `npm run pages:publish`.
 
 ## Transferring ownership to AngeLoyal
 When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google account, the OAuth sign-in needs attention — most breakage on handoff is here:

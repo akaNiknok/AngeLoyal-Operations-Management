@@ -14,7 +14,6 @@
     "release": "clasp push --force && npm run deploy",
     "deployments": "clasp deployments",
     "logs": "clasp logs",
-    "pages:publish": "git subtree push --prefix pages origin gh-pages",
     "fetch-data": "node scripts/fetch-sheet-data.js",
     "backlog:seed": "node scripts/seed-github-issues.mjs",
     "backlog:sync": "node scripts/sync-backlog.mjs"
