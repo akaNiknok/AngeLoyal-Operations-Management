@@ -58,6 +58,7 @@
                 document.getElementById("ds-nowb").textContent = noWb;
                 renderUnassignedCrewStat();
                 updateConvoyButtons();
+                if (dispatchView === "board") renderCrewBoard();
 
                 // Table
                 const empty = document.getElementById("dispatch-empty");
