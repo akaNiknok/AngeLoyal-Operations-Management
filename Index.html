@@ -255,6 +255,23 @@
                             Carry-over
                         </button>
                     </div>
+                    <div class="tb-sep"></div>
+                    <div class="pill-group" id="view-pills">
+                        <button
+                            class="pill active"
+                            data-view="table"
+                            onclick="switchDispatchView('table')"
+                        >
+                            Table
+                        </button>
+                        <button
+                            class="pill"
+                            data-view="board"
+                            onclick="switchDispatchView('board')"
+                        >
+                            Crew Board
+                        </button>
+                    </div>
                     <div class="tb-spacer"></div>
                     <button
                         class="btn btn-ghost btn-sm"
@@ -441,6 +458,26 @@
                                 </thead>
                                 <tbody id="dispatch-tbody"></tbody>
                             </table>
+                        </div>
+
+                        <!-- Crew board (drag-and-drop alternate view) -->
+                        <div id="crew-board" style="display: none">
+                            <div
+                                class="cb-rail"
+                                ondragover="cbDragOver(event)"
+                                ondragleave="cbDragLeave(event)"
+                                ondrop="cbDrop(event, null)"
+                            >
+                                <div class="col-head">
+                                    Unassigned trips
+                                    <span id="cb-rail-count"></span>
+                                </div>
+                                <div
+                                    class="cb-rail-list"
+                                    id="cb-rail-list"
+                                ></div>
+                            </div>
+                            <div class="cb-cards" id="cb-cards"></div>
                         </div>
                     </div>
 
@@ -1547,6 +1584,7 @@
         <?!= include('Core'); ?>
         <?!= include('Dispatch'); ?>
         <?!= include('Export'); ?>
+        <?!= include('CrewBoard'); ?>
         <?!= include('Import'); ?>
         <?!= include('Roster'); ?>
         <?!= include('Masters'); ?>
