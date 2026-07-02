@@ -293,6 +293,36 @@
                     >
                         ↺ Refresh
                     </button>
+                    <div style="position: relative">
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            onclick="toggleExportMenu(event)"
+                        >
+                            ⇩ Export ▾
+                        </button>
+                        <div
+                            class="account-dropdown"
+                            id="export-dropdown"
+                            style="min-width: 180px"
+                        >
+                            <button
+                                class="account-action"
+                                type="button"
+                                onclick="printDispatchDay()"
+                            >
+                                <span class="account-action-icon">🖨</span>
+                                Print / Save as PDF
+                            </button>
+                            <button
+                                class="account-action"
+                                type="button"
+                                onclick="exportDispatchXlsx()"
+                            >
+                                <span class="account-action-icon">⬇</span>
+                                Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
                     <div class="tb-sep"></div>
                     <button
                         class="btn btn-ghost btn-sm"
@@ -1462,6 +1492,7 @@
         </script>
         <?!= include('Core'); ?>
         <?!= include('Dispatch'); ?>
+        <?!= include('Export'); ?>
         <?!= include('Import'); ?>
         <?!= include('Roster'); ?>
         <?!= include('Masters'); ?>

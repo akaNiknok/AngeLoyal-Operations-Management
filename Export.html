@@ -1,0 +1,245 @@
+<script>
+            // ── EXPORT (dispatch day → FINAL-ROUTE print / xlsx) ──────
+            // Client-only: everything needed is already in dispatchData +
+            // the master-data caches. The exported layout mirrors the
+            // dispatcher-worked "FINAL ROUTE" files (cols B..X + the
+            // driver/helper/waybill/plate annotations on load-start rows).
+
+            const EXPORT_TYPE_COLS = ["10W", "6WF", "6WC", "4WC", "L300"];
+
+            function toggleExportMenu(e) {
+                e.stopPropagation();
+                document
+                    .getElementById("export-dropdown")
+                    .classList.toggle("open");
+            }
+            document.addEventListener("click", () => {
+                const dd = document.getElementById("export-dropdown");
+                if (dd) dd.classList.remove("open");
+            });
+
+            // Maps a Truck Billing Category back to one of the route file's
+            // type-count columns. Exact name match first, else the first
+            // active Route Type Map entry pointing at that category.
+            function categoryToTypeCode(cat) {
+                if (!cat) return "";
+                const CAT = String(cat).toUpperCase();
+                if (EXPORT_TYPE_COLS.includes(CAT)) return CAT;
+                const m = (routeTypeMap || []).find(
+                    (r) =>
+                        r.active &&
+                        String(r.billingCategory).toUpperCase() === CAT &&
+                        EXPORT_TYPE_COLS.includes(
+                            String(r.fileTypeCode).toUpperCase(),
+                        ),
+                );
+                return m ? m.fileTypeCode.toUpperCase() : "";
+            }
+
+            /**
+             * Builds the shared export row model from the loaded day:
+             * trips sorted so convoy groups sit adjacent (group → FO →
+             * board order), names joined from the master caches, and the
+             * first row of each (FO, truck) load marked `loadStart` — the
+             * row that carries the driver/helper/waybill/plate annotations.
+             */
+            function buildFinalRouteModel() {
+                const trips = [...((dispatchData && dispatchData.trips) || [])];
+                const outletMap = indexById(outlets);
+                const truckMap = indexById(trucks);
+                const empMap = indexById(employees);
+
+                const boardIdx = new Map(trips.map((t, i) => [t.id, i]));
+                const groupAnchor = {};
+                const foAnchor = {};
+                trips.forEach((t, i) => {
+                    if (t.convoyGroup && !(t.convoyGroup in groupAnchor))
+                        groupAnchor[t.convoyGroup] = i;
+                    const fk = t.foNumber || "t" + t.id;
+                    if (!(fk in foAnchor)) foAnchor[fk] = i;
+                });
+                const sortKey = (t) =>
+                    t.convoyGroup
+                        ? groupAnchor[t.convoyGroup]
+                        : foAnchor[t.foNumber || "t" + t.id];
+                trips.sort(
+                    (a, b) =>
+                        sortKey(a) - sortKey(b) ||
+                        boardIdx.get(a.id) - boardIdx.get(b.id),
+                );
+
+                const seenLoad = new Set();
+                return trips.map((t) => {
+                    const loadKey =
+                        (t.foNumber || "t" + t.id) +
+                        "|" +
+                        (t.truckId || "t" + t.id);
+                    const loadStart = !seenLoad.has(loadKey);
+                    seenLoad.add(loadKey);
+
+                    const outlet = outletMap[t.outletId] || {};
+                    const truck = truckMap[t.truckId] || {};
+                    const driver = empMap[t.driverId] || {};
+                    const helper =
+                        (t.helperIds || [])
+                            .map((h) => empMap[h])
+                            .filter(Boolean)[0] || {};
+
+                    return {
+                        trip: t,
+                        loadStart,
+                        area: t.area || outlet.area || "",
+                        customer: outlet.customerGroup || "",
+                        outletName: outlet.outletName || "",
+                        address: outlet.address || "",
+                        waybill: t.waybillConfirmed || t.waybillSuggested || "",
+                        driverName: String(
+                            driver.firstName || driver.nick || "",
+                        ).toUpperCase(),
+                        helperName: String(
+                            helper.firstName || helper.nick || "",
+                        ).toUpperCase(),
+                        plate: truck.plate || "",
+                        typeCode: categoryToTypeCode(
+                            t.truckBillingCategory || truck.billingCategory,
+                        ),
+                    };
+                });
+            }
+
+            function exportDispatchXlsx() {
+                if (!xlsxReady) {
+                    showToast("Excel writer still loading — retry in a second.", "warning");
+                    return;
+                }
+                const rows = buildFinalRouteModel();
+                if (!rows.length) {
+                    showToast("No trips to export for this date.", "warning");
+                    return;
+                }
+                const dateVal = document.getElementById("dispatch-date").value;
+
+                const header = [
+                    "ORIGINAL RDD", "REVISED RDD", "STATUS", "Sold-to party",
+                    "AREA", "CUSTOMER", "OUTLET", "ADDRESS",
+                    "UNLOADING LOCATION", "QTY in packs/ cartons", "CBM",
+                    "RESTRICTIONS", "Scheduled Last Week",
+                    "ACTUAL BO PICKED UP LAST WEEK", "Pick up BO",
+                    "FREIGHT ORDER", ...EXPORT_TYPE_COLS, "TOTAL", "TIER",
+                    "DRIVER", "HELPER", "WAYBILL", "PLATE",
+                ];
+                const aoa = [[dateVal], header];
+                rows.forEach((r) => {
+                    const t = r.trip;
+                    const counts = EXPORT_TYPE_COLS.map((c) =>
+                        r.loadStart && r.typeCode === c ? 1 : "",
+                    );
+                    aoa.push([
+                        "", "", "", "",
+                        r.area, r.customer, r.outletName, r.address, "",
+                        t.quantity || "", t.cbm || "", t.restrictions || "",
+                        "", "", "",
+                        t.foNumber || "", ...counts,
+                        r.loadStart ? 1 : "", t.tier || "",
+                        r.loadStart ? r.driverName : "",
+                        r.loadStart ? r.helperName : "",
+                        r.loadStart ? r.waybill : "",
+                        r.loadStart ? r.plate : "",
+                    ]);
+                });
+
+                const ws = XLSX.utils.aoa_to_sheet(aoa);
+                ws["!cols"] = header.map((h, i) =>
+                    i === 6 || i === 7 ? { wch: 30 } : { wch: 12 },
+                );
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "ROUTE");
+                XLSX.writeFile(wb, `FINAL ROUTE ${dateVal} (ANGELOYAL).xlsx`);
+            }
+
+            // Renders a full HTML document into a hidden same-origin iframe
+            // and prints it (popups are unreliable in the Apps Script
+            // sandbox; the browser's Print dialog does the PDF part).
+            function printHtmlDocument(html) {
+                const old = document.getElementById("print-frame");
+                if (old) old.remove();
+                const frame = document.createElement("iframe");
+                frame.id = "print-frame";
+                frame.style.cssText =
+                    "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+                document.body.appendChild(frame);
+                const doc = frame.contentDocument;
+                doc.open();
+                doc.write(html);
+                doc.close();
+                setTimeout(() => {
+                    frame.contentWindow.focus();
+                    frame.contentWindow.print();
+                }, 150);
+            }
+
+            const PRINT_BASE_CSS = `
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; padding: 12px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    h1 { font-size: 14px; margin-bottom: 2px; }
+    .sub { font-size: 10px; color: #555; margin-bottom: 8px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #999; padding: 2px 4px; text-align: left; }
+    th { background: #eee; font-size: 9px; text-transform: uppercase; }
+    @page { size: landscape; margin: 10mm; }`;
+
+            function printDispatchDay() {
+                const rows = buildFinalRouteModel();
+                if (!rows.length) {
+                    showToast("No trips to print for this date.", "warning");
+                    return;
+                }
+                const dateVal = document.getElementById("dispatch-date").value;
+
+                // Cycle print-safe convoy colors in model order.
+                const cgColor = {};
+                const palette = ["#1e88e5", "#43a047", "#e53935", "#8e24aa", "#f4511e", "#00897b"];
+                rows.forEach((r) => {
+                    const g = r.trip.convoyGroup;
+                    if (g && !(g in cgColor))
+                        cgColor[g] = palette[Object.keys(cgColor).length % 6];
+                });
+
+                const body = rows
+                    .map((r) => {
+                        const t = r.trip;
+                        const g = t.convoyGroup;
+                        const stripe = g
+                            ? `border-left:4px solid ${cgColor[g]}`
+                            : "";
+                        return `<tr>
+        <td style="${stripe}">${g ? "C" + esc(g) : ""}</td>
+        <td>${esc(t.foNumber) || ""}</td>
+        <td>${esc(r.customer)}</td>
+        <td>${esc(r.outletName)}</td>
+        <td>${esc(r.area)}</td>
+        <td style="text-align:right">${t.quantity || ""}</td>
+        <td style="text-align:right">${t.cbm || ""}</td>
+        <td>${esc(t.restrictions || "")}</td>
+        <td>${r.loadStart ? esc(r.typeCode) : ""}</td>
+        <td>${esc(t.tier || "")}</td>
+        <td>${r.loadStart ? esc(r.driverName) : ""}</td>
+        <td>${r.loadStart ? esc(r.helperName) : ""}</td>
+        <td>${r.loadStart ? esc(r.waybill) : ""}</td>
+        <td>${r.loadStart ? esc(r.plate) : ""}</td>
+        <td>${esc(t.remarks || "")}</td>
+      </tr>`;
+                    })
+                    .join("");
+
+                printHtmlDocument(`<!DOCTYPE html><html><head><title>ROUTE ${esc(dateVal)}</title>
+  <style>${PRINT_BASE_CSS}</style></head><body>
+  <h1>FINAL ROUTE ${esc(dateVal)} (ANGELOYAL)</h1>
+  <div class="sub">${rows.length} drops · generated from the AngeLoyal OMS dispatch board</div>
+  <table><thead><tr>
+    <th>Convoy</th><th>FO</th><th>Cust</th><th>Outlet</th><th>Area</th><th>Qty</th><th>CBM</th>
+    <th>Restr</th><th>Type</th><th>Tier</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Remarks</th>
+  </tr></thead><tbody>${body}</tbody></table>
+  </body></html>`);
+            }
+        </script>
