@@ -264,6 +264,7 @@ function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason
     '',
     email,
     now,
+    '',              // Convoy Group — a next-day carry-over leaves its convoy
   ]);
 
   // Suggest waybill with correct suffix

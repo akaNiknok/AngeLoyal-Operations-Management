@@ -1,6 +1,9 @@
 <script>
             // ── IMPORT ────────────────────────────────────────────────
             let parsedXlsxData = null;
+            // { headerIdx, typeCols } from the last parseRebiscoFile run —
+            // parseConvoyFills needs them to scope the fill scan.
+            let importParseMeta = null;
 
             function handleDragOver(e) {
                 e.preventDefault();
@@ -51,6 +54,27 @@
                         renderImportPreview();
                         document.getElementById("btn-run-import").disabled =
                             importRows.length === 0;
+
+                        // Convoy detection from fill colors — strictly an
+                        // enhancement. Any failure degrades to no groups.
+                        if (
+                            excelJsReady &&
+                            window.ExcelJS &&
+                            importParseMeta &&
+                            importParseMeta.typeCols.length
+                        ) {
+                            parseConvoyFills(e.target.result, importParseMeta)
+                                .then((colorByRow) => {
+                                    if (assignConvoyGroups(colorByRow) > 0)
+                                        renderImportPreview();
+                                })
+                                .catch((err) =>
+                                    console.warn(
+                                        "Convoy fill parse skipped:",
+                                        err,
+                                    ),
+                                );
+                        }
                     } catch (err) {
                         showToast(
                             "Could not read file: " + err.message,
@@ -138,6 +162,8 @@
                     });
                 }
 
+                importParseMeta = { headerIdx, typeCols };
+
                 const result = [];
                 for (let i = headerIdx + 1; i < raw.length; i++) {
                     const row = raw[i];
@@ -151,6 +177,9 @@
                     const fo = String(row[ciFO] ?? "").trim();
                     const outletName = String(row[ciOutlet] ?? "").trim();
                     if (!fo && !outletName) continue;
+                    // Dispatcher-worked files stack a second block with a
+                    // repeated header row — skip it, it's not a trip.
+                    if (/FREIGHT ORDER|FO NO/i.test(fo)) continue;
 
                     // Truck slots requested on this row, from the type columns.
                     const slots = [];
@@ -222,6 +251,104 @@
                 return result;
             }
 
+            /**
+             * Reads the fill colors of the truck-type count columns (only —
+             * the Customer column reuses the same palette for chain codes)
+             * and returns { rawRowIdx: colorKey|null }. Rebisco marks truck
+             * batches as contiguous same-color runs (alternating yellow/blue);
+             * the color itself carries no meaning, a color CHANGE = new batch.
+             */
+            async function parseConvoyFills(arrayBuffer, meta) {
+                const wb = new ExcelJS.Workbook();
+                await wb.xlsx.load(arrayBuffer);
+                const ws = wb.worksheets[0];
+                const colorByRow = {};
+                for (let r = meta.headerIdx + 2; r <= ws.rowCount; r++) {
+                    let key = null;
+                    for (const tc of meta.typeCols) {
+                        const f = ws.getRow(r).getCell(tc.idx + 1).fill;
+                        if (
+                            f &&
+                            f.type === "pattern" &&
+                            f.pattern &&
+                            f.pattern !== "none" &&
+                            f.fgColor
+                        ) {
+                            // Key on the whole color object so theme-indexed
+                            // fills (no argb) still delimit runs. Skip white.
+                            if (
+                                f.fgColor.argb === "FFFFFFFF" ||
+                                f.fgColor.argb === "00FFFFFF"
+                            )
+                                continue;
+                            key = JSON.stringify(f.fgColor);
+                            break;
+                        }
+                    }
+                    colorByRow[r - 1] = key; // 0-based, matching raw[] indexes
+                }
+                return colorByRow;
+            }
+
+            /**
+             * Turns color runs into convoy groups on importRows. Contiguous
+             * same-color rows form a batch; uncolored rows join the batch of
+             * a colored row sharing their FO (Rebisco leaves some rows of a
+             * batch unfilled). Only batches needing ≥2 truck slots are
+             * convoys — a single truck's multi-drop run isn't. Returns the
+             * number of convoy groups assigned (rows get .convoyGroup 1..n).
+             */
+            function assignConvoyGroups(colorByRow) {
+                const batches = [];
+                const batchByFO = {};
+                let currentBatch = null;
+                let prevKey = null;
+
+                importRows.forEach((r) => {
+                    delete r.convoyGroup;
+                    const key = colorByRow[r._rowIdx] || null;
+                    if (key) {
+                        if (key !== prevKey || !currentBatch) {
+                            currentBatch = { rows: [] };
+                            batches.push(currentBatch);
+                        }
+                        currentBatch.rows.push(r);
+                        if (r.foNumber && !batchByFO[r.foNumber])
+                            batchByFO[r.foNumber] = currentBatch;
+                        prevKey = key;
+                    } else {
+                        currentBatch = null;
+                        prevKey = null;
+                    }
+                });
+                // Second pass: uncolored rows fall back to FO grouping.
+                importRows.forEach((r) => {
+                    if (colorByRow[r._rowIdx]) return;
+                    const b = r.foNumber && batchByFO[r.foNumber];
+                    if (b) b.rows.push(r);
+                });
+
+                let n = 0;
+                batches.forEach((b) => {
+                    const slotCount = b.rows.reduce(
+                        (sum, r) =>
+                            sum +
+                            (r.slots || []).reduce(
+                                (x, s) => x + (s.count || 1),
+                                0,
+                            ),
+                        0,
+                    );
+                    if (slotCount >= 2) {
+                        n += 1;
+                        b.rows.forEach((r) => {
+                            r.convoyGroup = String(n);
+                        });
+                    }
+                });
+                return n;
+            }
+
             function renderImportPreview() {
                 const toolbar = document.getElementById("preview-toolbar");
                 const wrap = document.getElementById("import-preview-table");
@@ -246,6 +373,7 @@
         <th style="width:50px;text-align:right">Qty</th>
         <th style="width:60px">Type</th>
         <th style="width:55px">Restr.</th>
+        <th style="width:55px">Convoy</th>
         <th style="width:60px"></th>
       </tr></thead>
       <tbody>
@@ -259,6 +387,7 @@
             <td style="font-family:'DM Mono',monospace;text-align:right">${r.quantity || "—"}</td>
             <td style="font-size:11px;font-weight:500">${esc(r.displayType) || "—"}</td>
             <td style="font-size:11px;color:var(--muted)">${esc(r.restrictions) || "—"}</td>
+            <td style="font-family:'DM Mono',monospace;font-size:11px">${r.convoyGroup ? "C" + esc(r.convoyGroup) : ""}</td>
             <td><button class="row-toggle-btn" onclick="toggleRow(${i})">${exc ? "Include" : "Exclude"}</button></td>
           </tr>`;
             })

@@ -161,6 +161,26 @@ test('importRouteFile skips blank rows', () => {
   assert.equal(res.skipped, 1);
 });
 
+test('importRouteFile persists convoy groups, offset past the date\'s existing tokens', () => {
+  // A pre-existing same-date trip already uses convoy token 2.
+  const existing = HEADERS.Trips.map((h) =>
+    h === 'ID' ? 60 : h === 'Trip Date' ? '6/16/2026' : h === 'Convoy Group' ? '2' : h === 'Trip Status' ? 'Prepping' : ''
+  );
+  const { api, ss } = asDispatcher(importSheets({ Trips: [HEADERS.Trips.slice(), existing] }));
+
+  api.importRouteFile('6/16/2026', [
+    { foNumber: 'FO-A', outletName: 'Outlet A', slots: [{ type: '6WC', count: 1 }], convoyGroup: '1' },
+    { foNumber: 'FO-B', outletName: 'Outlet B', slots: [{ type: '4WC', count: 1 }], convoyGroup: '1' },
+    { foNumber: 'FO-C', outletName: 'Outlet C', slots: [{ type: '6WC', count: 1 }] },
+  ]);
+
+  const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
+  // Incoming token 1 offsets past the existing max (2) -> 3.
+  assert.equal(trips.find((t) => t['FO Number'] === 'FO-A')['Convoy Group'], '3');
+  assert.equal(trips.find((t) => t['FO Number'] === 'FO-B')['Convoy Group'], '3');
+  assert.equal(trips.find((t) => t['FO Number'] === 'FO-C')['Convoy Group'], '');
+});
+
 test('importRouteFile is gated by ADD_MANUAL_TRIP permission', () => {
   const { api } = makeEnv({ sheets: importSheets(), userEmail: EMAIL.Viewer });
   assert.throws(() => api.importRouteFile('6/16/2026', ROWS), /Access denied/);
