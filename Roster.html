@@ -363,7 +363,9 @@
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${o.id}</td>
     <td style="font-weight:500">${esc(o.outletName)}</td>
     <td style="font-size:11px;color:var(--muted)">${esc(o.area) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(o.address) || "—"}</td>
     <td><span class="status-chip" style="background:var(--bg);color:var(--muted)">${esc(o.customerGroup) || "—"}</span></td>
+    <td style="font-size:11px;color:var(--muted)">${esc(o.notes) || "—"}</td>
   </tr>`;
                     })
                     .join("");

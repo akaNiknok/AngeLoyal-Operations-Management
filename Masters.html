@@ -37,7 +37,9 @@
                         return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectTruckAdmin(${t.id})">
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
     <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(t.plate)}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(t.brand) || "—"}</td>
     <td style="font-size:11px;color:var(--muted)">${esc(t.type) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(t.billingCategory) || "—"}</td>
     <td>${statusChip(t.active)}</td>
   </tr>`;
                     })
@@ -247,6 +249,9 @@
                         return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectEmployeeAdmin(${e.id})">
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
     <td style="font-weight:500">${esc(e.nick)}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(e.firstName) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(e.middleName) || "—"}</td>
+    <td style="font-size:11px;color:var(--muted)">${esc(e.lastName) || "—"}</td>
     <td><span class="badge ${roleBadgeClass(e.role)}">${esc(e.role)}</span></td>
     <td>${statusChip(e.active)}</td>
   </tr>`;

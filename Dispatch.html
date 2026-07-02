@@ -103,6 +103,7 @@
 
                         const outletName = (outletMap[t.outletId] || {}).outletName || "";
                         const truckPlate = (truckMap[t.truckId] || {}).plate || "";
+                        const assignedTruckBillingCat = (truckMap[t.truckId] || {}).billingCategory || "";
                         const driverNick = (empMap[t.driverId] || {}).nick || "";
                         const helperDetails = (t.helperIds || [])
                             .map((hid) => empMap[hid])
@@ -133,9 +134,10 @@
       <td class="td-area">${esc(t.area) || "—"}</td>
       <td class="td-qty">${t.quantity || "—"}</td>
       <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(billingCat) || "—"}</span></td>
-      <td class="td-plate">${esc(truckPlate) || "—"}</td>
+      <td class="td-plate col-divider">${esc(truckPlate) || "—"}</td>
+      <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(assignedTruckBillingCat) || "—"}</span></td>
       <td>${driverHtml}</td>
-      <td><span class="status-chip ${statusCls}">${statusLabel}</span></td>
+      <td class="col-divider"><span class="status-chip ${statusCls}">${statusLabel}</span></td>
       <td class="td-wb">${wbHtml}</td>
       <td><span style="font-size:10px;color:var(--hint)">${esc(t.source)}</span></td>
     </tr>`;
