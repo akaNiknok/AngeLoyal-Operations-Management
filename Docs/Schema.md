@@ -202,7 +202,7 @@ The core transactional table of the system. Each row tracks an individual delive
 | Driver ID | Number | Foreign Key → Employees.ID pointing to the operating driver |
 | Helper IDs | String | Comma-separated Employee IDs for assigned crew; Nullable |
 | Truck Billing Category | String | Historical snapshot of the vehicle's billing class at the exact moment of dispatch |
-| Trip Status | String | Current execution state: Scheduled, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
+| Trip Status | String | Current execution state: Scheduled, Preload, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
 | Parent Trip ID | Number | Foreign Key → Trips.ID. Points to the initiating record for all redeliveries or foul trip tracking |
 | Source | String | Generation origin: Import, Manual, or Carry-over |
 | Tier | Number | Client priority ranking (1, 2, 3); Nullable for manual entries |
@@ -216,6 +216,8 @@ The core transactional table of the system. Each row tracks an individual delive
 
 ```
 Scheduled
+  → Preload (goods loaded onto the truck, not yet delivered)
+      → Delivered
   → Delivered (normal completion)
   → Undelivered
       → Foul Trip - No Redeliver (billed as foul, no next-day attempt)

@@ -315,6 +315,7 @@
             function statusOptions(current) {
                 const opts = [
                     ["Scheduled", "sc-scheduled", "Scheduled"],
+                    ["Preload", "sc-preload", "Preload"],
                     ["Delivered", "sc-delivered", "Delivered"],
                     ["Undelivered", "sc-undelivered", "Undelivered"],
                     ["Foul Trip - No Redeliver", "sc-fouln", "Foul – No RD"],
@@ -437,6 +438,7 @@
                 // Map short labels back to full status values
                 const statusMap = {
                     Scheduled: "Scheduled",
+                    Preload: "Preload",
                     Delivered: "Delivered",
                     Undelivered: "Undelivered",
                     "Foul – No RD": "Foul Trip - No Redeliver",
