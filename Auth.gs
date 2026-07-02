@@ -227,6 +227,7 @@ const RPC_ALLOWED = {
   importRouteFile: true,
   deleteImportedTrip: true,
   markDayScheduled: true,
+  setTripConvoyGroup: true,
   updateDefaultAssignment: true,
   createOutlet: true,
   updateOutlet: true,

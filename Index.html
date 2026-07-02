@@ -257,6 +257,22 @@
                     </div>
                     <div class="tb-spacer"></div>
                     <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-group-convoy"
+                        onclick="groupSelectedTrips('group')"
+                        style="display: none"
+                    >
+                        ⛓ Group convoy
+                    </button>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-ungroup-convoy"
+                        onclick="groupSelectedTrips('ungroup')"
+                        style="display: none"
+                    >
+                        Ungroup
+                    </button>
+                    <button
                         class="btn btn-primary btn-sm"
                         id="btn-mark-scheduled"
                         onclick="openMarkScheduledModal()"
@@ -348,6 +364,10 @@
                             >
                                 <thead>
                                     <tr>
+                                        <th
+                                            class="th-select"
+                                            style="width: 28px"
+                                        ></th>
                                         <th style="width: 110px">FO #</th>
                                         <th style="width: 200px">Outlet</th>
                                         <th style="width: 90px">Area</th>

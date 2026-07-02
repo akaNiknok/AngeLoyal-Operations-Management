@@ -301,6 +301,7 @@ The global ledger recording all administrative, operational, and data state modi
 * TRIP\_CREATE — Registration of a new delivery record  
 * TRIP\_STATUS\_CHANGE — Modifications to an active trip's state  
 * TRIP\_REASSIGN — Changes made to a trip's driver or vehicle allocation  
+* TRIP\_CONVOY\_CHANGE — Grouping or ungrouping trips as a convoy (Old\New Value = the Convoy Group token)  
 * WAYBILL\_SUGGEST — Draft creation of a billing document sequence  
 * WAYBILL\_CONFIRM — Locking and finalizing a waybill sequence  
 * WAYBILL\_OVERRIDE — Manual adjustment of a system-suggested waybill number  

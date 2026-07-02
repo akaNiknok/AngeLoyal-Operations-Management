@@ -672,6 +672,64 @@ function markDayScheduled(tripDate, prefixId) {
 }
 
 
+/**
+ * Groups or ungroups trips as a convoy (trucks that must travel together).
+ * 'group' mints a fresh token — (max numeric Convoy Group on the trips'
+ * date) + 1 — and stamps it on every trip; 'ungroup' blanks the column.
+ * All trips must share one Trip Date.
+ *
+ * @param {number[]} tripIds
+ * @param {'group'|'ungroup'} action
+ * @returns {{ success: boolean, group: string } | { success: false, error: string }}
+ */
+function setTripConvoyGroup(tripIds, action) {
+  _requirePermission('ASSIGN_CREW');
+  try {
+    const ids = (tripIds || []).map(Number).filter(Boolean);
+    if (ids.length === 0) throw new Error('No trips selected.');
+    if (action === 'group' && ids.length < 2) {
+      throw new Error('Select at least two trips to form a convoy.');
+    }
+
+    const sheet   = _getSheet(SHEET_TRIPS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const targets = [];
+    let tripDate = null;
+    ids.forEach(id => {
+      const rowIdx = _findRowById(rows, headers, id);
+      if (rowIdx === -1) throw new Error(`Trip ID ${id} not found.`);
+      const d = _formatDate(_readDateCell(_val(rows[rowIdx], headers, 'Trip Date')));
+      if (tripDate === null) tripDate = d;
+      else if (d !== tripDate) throw new Error('All trips in a convoy must share one Trip Date.');
+      targets.push({ id, rowIdx });
+    });
+
+    let group = '';
+    if (action === 'group') {
+      let maxToken = 0;
+      rows.slice(1).forEach(row => {
+        if (_formatDate(_readDateCell(_val(row, headers, 'Trip Date'))) !== tripDate) return;
+        const t = Number(_val(row, headers, 'Convoy Group'));
+        if (t > maxToken) maxToken = t;
+      });
+      group = String(maxToken + 1);
+    }
+
+    targets.forEach(t => {
+      const old = String(_val(rows[t.rowIdx], headers, 'Convoy Group') || '');
+      _writeRowFields(sheet, rows[t.rowIdx], t.rowIdx, headers, { 'Convoy Group': group });
+      _auditLog('TRIP_CONVOY_CHANGE', SHEET_TRIPS, t.id, old, group);
+    });
+
+    return { success: true, group };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
 // ============================================================
 //  DATA WRITERS — Default Assignments (Admin only)
 // ============================================================
