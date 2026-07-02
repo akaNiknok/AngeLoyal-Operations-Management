@@ -97,6 +97,14 @@ function _numOrNull(v) {
 }
 
 /**
+ * Rounds to 3 decimal places, undoing binary float drift (e.g. 10.568999999999999)
+ * that creeps into cells computed by formulas upstream in the route file.
+ */
+function _round3(n) {
+  return n === null ? null : Math.round(n * 1000) / 1000;
+}
+
+/**
  * Reads a date cell value safely.
  * Google Sheets returns Date objects for formatted date cells and numeric serial numbers
  * for unformatted ones. Returns a JS Date or null.

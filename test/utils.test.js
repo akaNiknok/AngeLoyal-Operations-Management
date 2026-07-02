@@ -69,6 +69,13 @@ test('_readDateCell handles Date objects, strings, and Excel serials', () => {
   assert.equal(fromSerial.getUTCFullYear(), 2024);
 });
 
+// ---- _valDateTime: Date-coerced cells must serialize with separators ----
+test('_valDateTime formats a Date-coerced cell as M/d/yyyy HH:mm:ss', () => {
+  const headers = ['ID', 'Changed At'];
+  const row = [1, new Date(2026, 5, 16, 9, 5, 3)];
+  assert.equal(api._valDateTime(row, headers, 'Changed At'), '6/16/2026 09:05:03');
+});
+
 // ---- _nextBusinessDay: Sunday skip ----
 test('_nextBusinessDay advances one day but skips Sundays', () => {
   // Friday 6/19/2026 -> Saturday 6/20
@@ -91,6 +98,13 @@ test('_startOfDay zeroes the time component without mutating the input', () => {
   assert.equal(start.getHours(), 0);
   assert.equal(start.getMinutes(), 0);
   assert.equal(original.getHours(), 14); // original untouched
+});
+
+// ---- _round3: undoes binary float drift on numbers like CBM ----
+test('_round3 rounds away float drift without altering clean values', () => {
+  assert.equal(api._round3(10.568999999999999), 10.569);
+  assert.equal(api._round3(10.569), 10.569);
+  assert.equal(api._round3(null), null);
 });
 
 // ---- _findRowById ----

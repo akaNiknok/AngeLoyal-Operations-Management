@@ -263,7 +263,7 @@ function getTrips(dateFrom, dateTo) {
       outletId:            _numOrNull(_val(row, headers, 'Outlet ID')),
       area:                _val(row, headers, 'Area') || '',
       quantity:            _numOrNull(_val(row, headers, 'Quantity')),
-      cbm:                 _numOrNull(_val(row, headers, 'CBM')),
+      cbm:                 _round3(_numOrNull(_val(row, headers, 'CBM'))),
       restrictions:        _val(row, headers, 'Restrictions') || '',
       truckId:             _numOrNull(_val(row, headers, 'Truck ID')),
       driverId:            _numOrNull(_val(row, headers, 'Driver ID')),
