@@ -51,7 +51,7 @@ One-time configuration (in the **GCP project** linked to the Apps Script project
    - `https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec`
    - `https://script.google.com/macros/s/<SCRIPT_ID>/dev`
    (JavaScript origins are **not** used by this flow — leave them empty.)
-3. **OAuth consent screen** — scopes `openid email profile`. While in "Testing", every sign-in account must be listed under **Audience → Test users** (including non-owner / external-domain accounts). For an org rollout, either publish to **Production** or, if AngeLoyal uses Google Workspace, set the app to **Internal** so all domain users are allowed without test-user listing.
+3. **OAuth consent screen** — scopes `openid email profile`. While in "Testing", every sign-in account must be listed under **Audience → Test users** (including non-owner / external-domain accounts) — anyone else is blocked by Google itself, and this has been a **confirmed cause** of accounts being unable to sign in (see the multi-account troubleshooting section below). Switch **Publishing status to Production** once you have real (non-test) users; or, if AngeLoyal uses Google Workspace, set **User type** to **Internal** so all domain users are allowed without test-user listing. Scopes here are non-sensitive, so Production doesn't require Google's app-verification review — but until you optionally complete that review, each account sees a one-time "Google hasn't verified this app" interstitial (**Advanced → Go to [app name] (unsafe)**) on first sign-in.
 4. **Script Properties** (Apps Script editor → Project Settings → Script Properties) — these are read by `Auth.gs`; never put them in source:
    - `OAUTH_CLIENT_ID` = the Web client's ID
    - `OAUTH_CLIENT_SECRET` = the Web client's secret (used only server-side to exchange the auth code)
@@ -60,21 +60,45 @@ One-time configuration (in the **GCP project** linked to the Apps Script project
 > Workspace accounts get redirected through a domain-scoped URL (`…/a/macros/<domain>/…/exec`). The code handles this by caching the exact `redirect_uri` with the CSRF `state` and reusing it in the token exchange — so the rewrite doesn't cause a `redirect_uri` mismatch. The **`/dev` URL only works for script editors**; test non-owner accounts on the **`/exec`** URL.
 
 ## Troubleshooting: multiple Google accounts
-**Symptom:** a user opens the OMS link and Google shows *"Sorry, unable to open the file at this time"* (`Paumanhin, hindi mabuksan ang file sa oras na ito`) — **before** any sign-in screen or the app's "Not authorized" gate appears.
 
-**This is a Google problem, not an app bug.** The page is served by Google Drive *before* the script runs, so `doGet` / `Auth.gs` / the `Users` sheet are not involved — there's nothing to fix in code. It's the Apps Script **`/u/N/` account-routing bug**: the `/exec` link has no account index, so when a browser has several accounts signed in, Google rewrites the URL to `…/u/N/macros/s/<id>/exec` and sometimes picks an `N` whose session can't resolve the deployment. It correlates with the number of signed-in accounts and is intermittent.
+First, tell the two failures apart — they look similar but have different causes:
+
+| What the user sees | Where it comes from | Meaning |
+| :--- | :--- | :--- |
+| Google page: *"Sorry, unable to open the file at this time"* (`Paumanhin, hindi mabuksan ang file sa oras na ito`), **before** any sign-in screen | Google Drive, *before* `doGet` runs | The `/u/N/` account-routing bug (below). |
+| Google's own *"Access blocked"* / *"Error 403: access_denied"* page, **before** any app content | Google's OAuth consent screen, *before* `doGet` runs | The consent screen is still in **Testing** and this account isn't listed under **Audience → Test users**. Fix: publish the consent screen to **Production** (see *Google Sign-In (OAuth) setup* above). |
+| The app's own *"Account not authorized"* card, signed in as some email | `getUserSession()` returned `role: null` | The page loaded fine; that account just has **no usable row** in the `Users` sheet — see the note after the fixes. |
+
+**The routing bug is a Google problem, not an app bug.** The "unable to open the file" page is served by Google Drive *before* the script runs, so `doGet` / `Auth.gs` / the `Users` sheet are not involved — there's nothing to fix in `doGet`. The `/exec` link carries no account index, so when a browser has several accounts signed in, Google rewrites the URL to `…/u/N/macros/s/<id>/exec` and sometimes picks an `N` whose session can't resolve the deployment. It correlates with the number of signed-in accounts and is intermittent.
 
 **Fixes, in order:**
 
-1. **Verify the live deployment's access is "Anyone" (anonymous).** `appsscript.json` declares `ANYONE_ANONYMOUS`, but the *active deployment's* actual setting can drift if it was edited in the UI. Apps Script editor → **Deploy → Manage deployments → (active) → Edit → Who has access** → set to **"Anyone"** (not "Anyone with a Google account", which forces account resolution and triggers the bad `/u/N/` pick) → redeploy. This is the highest-leverage fix.
-2. **Make sure everyone has the `/exec` URL, never `/dev`.** The `/dev` URL only opens for script editors and shows this same page for everyone else.
-3. **Per-user workaround** (any one forces a single, unambiguous account):
+1. **Give everyone the launcher link, not the raw `/exec` URL.** The launcher (see [The account launcher page](#the-account-launcher-page) below) remembers each person's OMS account and always opens the app as `…/exec?authuser=<their-email>`. The `authuser` parameter selects the account **by email**, so Google routes straight to it instead of guessing a `/u/N/` index — which is the whole cause of the bug. This is the fix to distribute; the manual steps in (4) become unnecessary once people bookmark it.
+2. **Verify the live deployment's access is "Anyone" (anonymous).** `appsscript.json` declares `ANYONE_ANONYMOUS`, but the *active deployment's* actual setting can drift if it was edited in the UI. Apps Script editor → **Deploy → Manage deployments → (active) → Edit → Who has access** → set to **"Anyone"** (not "Anyone with a Google account", which forces account resolution and makes the bad `/u/N/` pick far more likely) → redeploy. Highest-leverage server-side fix.
+3. **Make sure everyone has the `/exec` URL (or the launcher), never `/dev`.** The `/dev` URL only opens for script editors and shows the same page for everyone else.
+4. **Manual per-user fallback** (only if someone hits the raw `/exec` link and it fails — any one forces a single, unambiguous account):
+   - Append **`?authuser=<your-email>`** to the `/exec` URL, or
    - Open the link in an **Incognito / private window**, or
    - **Sign out** of the other Google accounts (keep only the OMS account), or
    - Make the OMS account the **default** (sign into it *first*), or
    - When it fails, change the `/u/1/` (or `/u/2/`) segment in the address bar to **`/u/0/`** and reload.
 
-> Long term, moving AngeLoyal to a Workspace domain with the consent screen set to **Internal** and the script owned in-domain makes account routing predictable (see *Transferring ownership* below). Tracked in [#53](https://github.com/akaNiknok/AngeLoyal-Operations-Management/issues/53).
+> **If instead the app's own "Account not authorized" card appears**, the routing worked and the problem is data, not accounts. That account reached the app but `getUserSession()` found no usable `Users` row. Check the `Users` sheet for that exact email: the row must have a non-blank **`Role`** *and* **`Active` = TRUE** (`_getCurrentUserRecord` in [`Code.gs`](Code.gs) requires both). Watch for a trailing/invisible character in the email cell (a zero-width space survives `trim()`), a blank `Role`, or `Active` left empty. Fix the row — no redeploy needed, it's read live on each sign-in.
+>
+> If the `Users` row looks correct and the account still can't get past sign-in, also check: (a) the consent screen's **Publishing status** — see the *Access blocked* row above; and (b) whether the script owner has an outstanding Apps Script authorization prompt. Apps Script re-asks the **owner** to review permissions whenever the project starts using a scope it hadn't consented to yet (e.g. after code changes touching `UrlFetchApp` in the OAuth token exchange); until that one-time consent is granted, the deployed app runs with a stale authorization for *every* visitor, since it always executes as the owner (`executeAs: USER_DEPLOYING`). Clear it by opening the Apps Script editor, running any function once, and clicking through the permissions dialog.
+
+> Long term, moving AngeLoyal to a Workspace domain with the consent screen set to **Internal** and the script owned in-domain makes account routing predictable (see *Transferring ownership* below). Confirmed and closed via the launcher page + publishing the consent screen to Production; tracked in [#53](https://github.com/akaNiknok/AngeLoyal-Operations-Management/issues/53).
+
+### The account launcher page
+[`pages/index.html`](pages/index.html) is a tiny static page that sidesteps the `/u/N/` routing bug. On first visit it asks for the person's OMS Google account, remembers it in `localStorage`, and thereafter redirects straight to `…/exec?authuser=<that-email>`. Because the account is named by email, Google never mis-picks a `/u/N/` index, so multi-account browsers stop getting "unable to open the file." A **"Use a different account"** link (or visiting the launcher with `?switch=1`) clears the stored email.
+
+It is **not** an Apps Script partial — `.claspignore` excludes `pages/**` so `npm run push` never uploads it. It's hosted on **GitHub Pages** off a `gh-pages` branch:
+
+```sh
+npm run pages:publish   # git subtree push --prefix pages origin gh-pages
+```
+
+One-time setup: after the first publish, go to the repo's **Settings → Pages → Build and deployment**, set **Source: Deploy from a branch**, **Branch: `gh-pages` / `(root)`**, and save. The launcher is then served at `https://akaniknok.github.io/AngeLoyal-Operations-Management/` — that's the link to hand out. If the deployment ID ever changes, update `EXEC_URL` in [`pages/index.html`](pages/index.html) (and `package.json` / the URLs in this doc) and re-run `npm run pages:publish`.
 
 ## Transferring ownership to AngeLoyal
 When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google account, the OAuth sign-in needs attention — most breakage on handoff is here:
