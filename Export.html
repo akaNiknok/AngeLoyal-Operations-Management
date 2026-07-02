@@ -188,6 +188,144 @@
     th { background: #eee; font-size: 9px; text-transform: uppercase; }
     @page { size: landscape; margin: 10mm; }`;
 
+            // ── SHARE TO DRIVERS ──────────────────────────────────────
+            // One card per truck load, convoy trucks merged into one card
+            // (they travel together and the drivers coordinate). Cards are
+            // reorderable before printing; the order lives only in this
+            // dialog — it's a message to the group chat, not data.
+            let driverShareCards = [];
+
+            function buildDriverShareCards() {
+                const rows = buildFinalRouteModel();
+                const cards = [];
+                const byKey = {};
+                rows.forEach((r) => {
+                    const t = r.trip;
+                    const key = t.convoyGroup
+                        ? "cg|" + t.convoyGroup
+                        : t.truckId
+                          ? "tk|" + t.truckId
+                          : "fo|" + (t.foNumber || "t" + t.id);
+                    let card = byKey[key];
+                    if (!card) {
+                        card = {
+                            convoy: t.convoyGroup || "",
+                            legs: [],
+                            legKeys: {},
+                            stops: [],
+                        };
+                        byKey[key] = card;
+                        cards.push(card);
+                    }
+                    const legKey =
+                        (t.foNumber || "t" + t.id) +
+                        "|" +
+                        (t.truckId || "t" + t.id);
+                    if (!card.legKeys[legKey]) {
+                        card.legKeys[legKey] = true;
+                        card.legs.push({
+                            plate: r.plate,
+                            driverName: r.driverName,
+                            helperName: r.helperName,
+                            waybill: r.waybill,
+                        });
+                    }
+                    card.stops.push({
+                        outletName: r.outletName,
+                        area: r.area,
+                        quantity: t.quantity,
+                        cbm: t.cbm,
+                        remarks: t.remarks || "",
+                        status: t.tripStatus,
+                    });
+                });
+                return cards;
+            }
+
+            function openDriverShareView() {
+                driverShareCards = buildDriverShareCards();
+                if (!driverShareCards.length) {
+                    showToast("No trips to share for this date.", "warning");
+                    return;
+                }
+                renderDriverShareCards();
+                openModal("modal-driver-share");
+            }
+
+            function moveDriverShareCard(idx, delta) {
+                const to = idx + delta;
+                if (to < 0 || to >= driverShareCards.length) return;
+                const [card] = driverShareCards.splice(idx, 1);
+                driverShareCards.splice(to, 0, card);
+                renderDriverShareCards();
+            }
+
+            function driverShareCardHtml(card, forPrint) {
+                const legs = card.legs
+                    .map(
+                        (l) => `<div class="ds-leg">
+        <span class="ds-plate">${esc(l.plate) || "UNASSIGNED"}</span>
+        <span>${esc(l.driverName) || "—"}${l.helperName ? " / " + esc(l.helperName) : ""}</span>
+        <span class="ds-wb">${esc(l.waybill) || "no waybill"}</span>
+      </div>`,
+                    )
+                    .join("");
+                const stops = card.stops
+                    .map(
+                        (s, i) => `<div class="ds-stop">
+        <span class="ds-stop-n">${i + 1}.</span>
+        <span>${esc(s.outletName)} <span class="ds-area">(${esc(s.area)})</span></span>
+        <span class="ds-qty">${s.quantity || ""}${s.cbm ? " · " + s.cbm + " cbm" : ""}</span>
+        ${s.remarks ? `<div class="ds-remarks">✎ ${esc(s.remarks)}</div>` : ""}
+      </div>`,
+                    )
+                    .join("");
+                return `<div class="ds-card">
+      ${card.convoy ? `<div class="ds-convoy">⛓ CONVOY C${esc(card.convoy)} — trucks travel together</div>` : ""}
+      ${legs}
+      <div class="ds-stops">${stops}</div>
+    </div>`;
+            }
+
+            function renderDriverShareCards() {
+                const wrap = document.getElementById("driver-share-cards");
+                wrap.innerHTML = driverShareCards
+                    .map(
+                        (card, i) => `<div class="ds-card-row">
+        <div class="ds-card-controls">
+          <button class="btn btn-ghost btn-sm" onclick="moveDriverShareCard(${i},-1)" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button class="btn btn-ghost btn-sm" onclick="moveDriverShareCard(${i},1)" ${i === driverShareCards.length - 1 ? "disabled" : ""}>↓</button>
+        </div>
+        ${driverShareCardHtml(card)}
+      </div>`,
+                    )
+                    .join("");
+            }
+
+            function printDriverShare() {
+                const dateVal = document.getElementById("dispatch-date").value;
+                const cards = driverShareCards
+                    .map((c) => driverShareCardHtml(c, true))
+                    .join("");
+                printHtmlDocument(`<!DOCTYPE html><html><head><title>Trips ${esc(dateVal)}</title>
+  <style>${PRINT_BASE_CSS}
+    @page { size: portrait; margin: 10mm; }
+    .ds-card { border: 1.5px solid #333; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; page-break-inside: avoid; }
+    .ds-convoy { font-weight: bold; font-size: 11px; margin-bottom: 4px; }
+    .ds-leg { display: flex; gap: 10px; font-size: 12px; font-weight: bold; margin-bottom: 2px; }
+    .ds-wb { margin-left: auto; font-family: monospace; }
+    .ds-stops { margin-top: 4px; border-top: 1px dashed #999; padding-top: 4px; }
+    .ds-stop { font-size: 11px; margin-bottom: 2px; }
+    .ds-stop-n { font-weight: bold; margin-right: 4px; }
+    .ds-area { color: #555; }
+    .ds-qty { color: #555; margin-left: 6px; }
+    .ds-remarks { font-size: 10px; color: #333; margin-left: 14px; }
+  </style></head><body>
+  <h1>TRIPS ${esc(dateVal)} (ANGELOYAL)</h1>
+  <div class="sub">Grouped by truck / convoy — sequence as arranged by the dispatcher</div>
+  ${cards}</body></html>`);
+            }
+
             function printDispatchDay() {
                 const rows = buildFinalRouteModel();
                 if (!rows.length) {
