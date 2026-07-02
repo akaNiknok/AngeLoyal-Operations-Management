@@ -220,9 +220,6 @@ const RPC_ALLOWED = {
   // readers
   getBootData: true,
   getDispatchBoardData: true,
-  getDefaultAssignments: true,
-  getWaybillsForTrip: true,
-  getSuggestedWaybillNumber: true,
   // writers
   createTrip: true,
   saveTripChanges: true,

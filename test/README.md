@@ -45,7 +45,7 @@ Phase 1 (records, dispatch, waybills) is now broadly covered:
 | `import.test.js` | `importRouteFile` + delete | batch import, outlet dedup, crew pre-fill, sequential waybills, delete guard |
 | `masters.test.js` | master CRUD + roster | dedup/validation, billing-category rename cascade, append-only roster |
 | `readers.test.js` | read path | `getTrips` date filtering, dispatch-board join, route-frequency window, `getBootData` |
-| `edits.test.js` | edit paths + small readers | `updateOutlet`/`updateEmployee`/`updateDefaultAssignment`/`updateTruck`, `getSuggestedWaybillNumber`, `_resolveBillingCategory`, master-list readers |
+| `edits.test.js` | edit paths + small readers | `updateOutlet`/`updateEmployee`/`updateDefaultAssignment`/`updateTruck`, `_resolveBillingCategory`, master-list readers |
 
 Phase 2 (billing & payroll) is not built yet — write its tests alongside the code.
 

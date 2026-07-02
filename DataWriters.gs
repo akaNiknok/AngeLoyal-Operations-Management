@@ -237,8 +237,7 @@ function confirmWaybill(waybillId, customNumber) {
     if (rowIdx === -1) throw new Error(`Waybill ID ${waybillId} not found.`);
 
     const row    = rows[rowIdx];
-    const locked = _val(row, headers, 'Locked');
-    if (locked === true || locked === 'TRUE') {
+    if (_isTrue(_val(row, headers, 'Locked'))) {
       throw new Error(`Waybill ${_val(row, headers, 'Waybill Number')} is already confirmed and locked.`);
     }
 
@@ -252,7 +251,7 @@ function confirmWaybill(waybillId, customNumber) {
       const isDuplicate = rows.slice(1).some((r, i) => {
         if (i === rowIdx - 1) return false; // skip current row
         return _val(r, headers, 'Waybill Number') === customNumber
-            && (_val(r, headers, 'Locked') === true || _val(r, headers, 'Locked') === 'TRUE');
+            && _isTrue(_val(r, headers, 'Locked'));
       });
       if (isDuplicate) {
         throw new Error(`Waybill number "${customNumber}" is already confirmed and in use.`);
@@ -565,8 +564,7 @@ function deleteImportedTrip(tripId) {
   try {
     // Safety: refuse to delete if trip has a confirmed waybill
     const wbs = getWaybillsForTrip(tripId);
-    const confirmed = wbs.some(w => w.locked === true);
-    if (confirmed) {
+    if (wbs.some(w => w.locked)) {
       throw new Error('Cannot delete a trip with a confirmed waybill. Use Trip Status instead.');
     }
 

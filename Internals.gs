@@ -128,8 +128,7 @@ function _deleteSuggestedWaybillsForTrip(tripId) {
   for (let i = rows.length - 1; i >= 1; i--) {
     const row     = rows[i];
     const rowTrip = _numOrNull(_val(row, headers, 'Trip ID'));
-    const locked  = _val(row, headers, 'Locked');
-    if (Number(rowTrip) === Number(tripId) && locked !== true && locked !== 'TRUE') {
+    if (Number(rowTrip) === Number(tripId) && !_isTrue(_val(row, headers, 'Locked'))) {
       sheet.deleteRow(i + 1);
     }
   }
