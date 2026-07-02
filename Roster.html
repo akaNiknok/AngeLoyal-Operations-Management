@@ -530,21 +530,6 @@
             }
 
             // ── DEFAULT ASSIGNMENTS ────────────────────────────────────
-            function loadDefaultAssignments() {
-                srv()
-                    .withSuccessHandler((d) => {
-                        defaultAssignments = d || [];
-                        renderDefaults();
-                    })
-                    .withFailureHandler((e) => {
-                        showToast(
-                            "Could not load defaults: " + e.message,
-                            "error",
-                        );
-                    })
-                    .getDefaultAssignments();
-            }
-
             function renderDefaults() {
                 const q = (
                     document.getElementById("defaults-search").value || ""

@@ -1,8 +1,8 @@
 // ============================================================
 //  Remaining Phase 1 edit paths + small readers:
 //  updateOutlet / updateEmployee / updateDefaultAssignment /
-//  updateTruck(active), getSuggestedWaybillNumber,
-//  _resolveBillingCategory, and the master-list readers.
+//  updateTruck(active), _resolveBillingCategory, and the
+//  master-list readers.
 // ============================================================
 
 const { test } = require('node:test');
@@ -115,23 +115,6 @@ test('updateTruck toggles active and returns the refreshed record', () => {
 
   const truck = rowObject(HEADERS.Trucks, dump(ss, 'Trucks').rows[0]);
   assert.equal(truck.Active, false);
-});
-
-// ---------------- getSuggestedWaybillNumber ----------------
-
-test('getSuggestedWaybillNumber previews the next number without writing', () => {
-  const sheets = base({
-    'Waybill Prefixes': [HEADERS['Waybill Prefixes'].slice(), [1, 'AL', 'AngeLoyal', 40]],
-  });
-  const { api, ss } = asAdmin(sheets);
-
-  const res = api.getSuggestedWaybillNumber(1);
-  assert.equal(res.nextNumber, 41);
-  assert.equal(res.suggested, 'AL-41');
-  // unchanged on the sheet
-  assert.equal(rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0])['Last Sequence Number'], 40);
-
-  assert.throws(() => api.getSuggestedWaybillNumber(999), /not found/);
 });
 
 // ---------------- _resolveBillingCategory ----------------

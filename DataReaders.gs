@@ -308,8 +308,7 @@ function getDispatchBoardData(dateStr) {
       const tripId = _numOrNull(_val(row, wbHeaders, 'Trip ID'));
       if (tripId === null) return;
 
-      const locked = _val(row, wbHeaders, 'Locked');
-      const isLocked = locked === true || locked === 'TRUE';
+      const isLocked = _isTrue(_val(row, wbHeaders, 'Locked'));
       const entry = wbByTrip[tripId] || {};
 
       if (isLocked) {
@@ -359,27 +358,10 @@ function getWaybillsForTrip(tripId) {
     waybillType:     _val(row, headers, 'Waybill Type'),
     parentWaybillId: _numOrNull(_val(row, headers, 'Parent Waybill ID')),
     status:          _val(row, headers, 'Status'),
-    locked:          _val(row, headers, 'Locked') === true || _val(row, headers, 'Locked') === 'TRUE',
+    locked:          _isTrue(_val(row, headers, 'Locked')),
     confirmedBy:     _val(row, headers, 'Confirmed By'),
     confirmedAt:     _valDateTime(row, headers, 'Confirmed At'),
   })).filter(w => w.id !== null && Number(w.tripId) === Number(tripId));
-}
-
-/**
- * Returns the suggested next waybill number for a given prefix.
- * Does NOT write anything to the sheet.
- *
- * @param {number} prefixId
- * @returns {{ prefixId, prefix, nextNumber, suggested: string }}
- */
-function getSuggestedWaybillNumber(prefixId) {
-  const prefixes = getWaybillPrefixes();
-  const pref     = prefixes.find(p => Number(p.id) === Number(prefixId));
-  if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
-
-  const next      = (pref.lastSequenceNumber || 0) + 1;
-  const suggested = `${pref.prefix}-${next}`;
-  return { prefixId: pref.id, prefix: pref.prefix, nextNumber: next, suggested };
 }
 
 /**
