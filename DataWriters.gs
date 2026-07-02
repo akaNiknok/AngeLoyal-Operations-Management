@@ -516,7 +516,7 @@ function importRouteFile(tripDate, prefixId, rowData) {
         const slots = slotTypes.map(type => {
           const a = allocateTruck(type);
           nextSeq += 1;
-          return { truck: a.truck, category: a.category, wbSeq: nextSeq, wbNumber: `${pref.prefix}-${nextSeq}` };
+          return { truck: a.truck, category: a.category, wbSeq: nextSeq, wbNumber: _waybillNumberString(pref.prefix, nextSeq) };
         });
 
         const primary = slots[0];

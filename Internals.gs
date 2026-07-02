@@ -69,7 +69,7 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
   if (waybillType === 'Redeliver')  suffix = '-R';
   if (waybillType === 'Foul Trip')  suffix = '-FT';
 
-  const waybillNumber = `${pref.prefix}-${nextSeq}${suffix}`;
+  const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, suffix);
   const nextId        = _nextRowId(sheet);
 
   sheet.appendRow([

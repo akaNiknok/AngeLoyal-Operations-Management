@@ -45,6 +45,18 @@ test('suggested waybill number = prefix + (lastSeq+1) with type suffix', () => {
   assert.equal(rowObject(HEADERS['Waybill Prefixes'], rows[0])['Last Sequence Number'], 5);
 });
 
+test('blank prefix produces a bare sequence number, no leading dash', () => {
+  const sheets = baseSheets({ lastSeq: 5 });
+  sheets['Waybill Prefixes'][1] = [1, '', 'AngeLoyal', 5]; // Prefix column blank
+  const { api } = asAdmin(sheets);
+
+  const reg = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+  assert.equal(reg.waybillNumber, '6');
+
+  const redeliver = api._createSuggestedWaybill(102, 1, 'FO-2', 'Redeliver', null);
+  assert.equal(redeliver.waybillNumber, '6-R');
+});
+
 test('suggested waybills are written unlocked / Suggested', () => {
   const { api, ss } = asAdmin(baseSheets());
   api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);

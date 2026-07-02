@@ -227,6 +227,19 @@ function _writeRowFields(sheet, row, rowIdx, headers, updates) {
 }
 
 /**
+ * Builds a waybill number string from a prefix, sequence number, and optional
+ * suffix. A blank prefix (Waybill Prefixes.Prefix = "") omits the leading
+ * "prefix-" segment entirely, so the number is just the bare sequence.
+ * @param {string} prefix
+ * @param {number} seq
+ * @param {string} [suffix]
+ * @returns {string}
+ */
+function _waybillNumberString(prefix, seq, suffix) {
+  return (prefix ? `${prefix}-${seq}` : `${seq}`) + (suffix || '');
+}
+
+/**
  * Builds a { id → object } index from an array of objects that have an `id` field.
  * @param {Object[]} arr
  * @returns {Object}

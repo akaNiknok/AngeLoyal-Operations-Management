@@ -133,6 +133,8 @@
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
       <td class="td-area">${esc(t.area) || "—"}</td>
       <td class="td-qty">${t.quantity || "—"}</td>
+      <td class="td-qty">${t.cbm || "—"}</td>
+      <td>${esc(t.tier) || "—"}</td>
       <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(billingCat) || "—"}</span></td>
       <td class="td-plate col-divider">${esc(truckPlate) || "—"}</td>
       <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(assignedTruckBillingCat) || "—"}</span></td>

@@ -99,7 +99,7 @@ Tracks the alphanumeric code sequences allocated to each company or subcontracto
 | Column | Type | Notes |
 | :---- | :---- | :---- |
 | ID | Number | Auto-incrementing primary key |
-| Prefix | String | Unique short code (e.g., AY) prepended to the numeric sequence |
+| Prefix | String | Unique short code (e.g., AY) prepended to the numeric sequence. May be left blank for "no prefix" — the waybill number is then just the bare sequence (e.g., `10761` instead of `AY-10761`). |
 | Company Name | String | Corporate identity associated with the prefix (e.g., AngeLoyal Logistics) |
 | Last Sequence Number | Number | The most recent sequence number issued. **Updated by the backend on every waybill confirmation.** |
 
