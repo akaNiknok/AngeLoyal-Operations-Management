@@ -391,24 +391,22 @@ function importRouteFile(tripDate, prefixId, rowData) {
       return id;
     };
 
-    // --- Waybill prefix: running sequence number, bumped once per waybill ---
-    const prefixes = getWaybillPrefixes();
-    const pref = prefixes.find(p => Number(p.id) === Number(prefixId));
-    if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
-    let nextSeq = pref.lastSequenceNumber || 0;
+    // --- Waybill prefix: validate up front so we fail before writing trips.
+    //     The actual numbering happens in _suggestWaybillsForGroups. ---
+    if (!getWaybillPrefixes().some(p => Number(p.id) === Number(prefixId))) {
+      throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+    }
 
     // --- Next IDs for the sheets we'll append to ---
     const tripsSheet     = _getSheet(SHEET_TRIPS);
-    const waybillsSheet  = _getSheet(SHEET_WAYBILLS);
     const routeFreqSheet = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
     const auditSheet     = _getSheet(SHEET_AUDIT);
     let nextTripId      = _nextRowId(tripsSheet);
-    let nextWaybillId   = _nextRowId(waybillsSheet);
     let nextRouteFreqId = _nextRowId(routeFreqSheet);
     let nextAuditId     = _nextRowId(auditSheet);
 
     const newTripRows      = [];
-    const newWaybillRows   = [];
+    const waybillGroups    = [];   // [{ foNumber, tripIds }] — one waybill per group
     const newRouteFreqRows = [];
     const newAuditRows     = [];
 
@@ -416,9 +414,11 @@ function importRouteFile(tripDate, prefixId, rowData) {
     let skipped  = 0;
     const errors = [];
 
-    // Creates one trip row + its suggested waybill row. Trips that share a
-    // truck (a truck's several stops on one FO) pass the same wbSeq/wbNumber.
-    const emitTrip = (rd, outletId, slotTruck, category, wbSeq, wbNumber) => {
+    // Creates one trip row and returns its ID. Waybill rows are created
+    // afterwards by _suggestWaybillsForGroups from waybillGroups (trips
+    // that share a truck — a truck's several stops on one FO — share a
+    // group and therefore a waybill number).
+    const emitTrip = (rd, outletId, slotTruck, category) => {
       const truckId   = slotTruck ? slotTruck.id : '';
       const def       = slotTruck ? defaultByTruck[slotTruck.id] : null;
       const driverId  = def ? def.defaultDriverId : '';
@@ -451,22 +451,6 @@ function importRouteFile(tripDate, prefixId, rowData) {
         nowStr,
       ]);
 
-      const waybillId = nextWaybillId++;
-      newWaybillRows.push([
-        waybillId,
-        wbNumber,
-        prefixId,
-        wbSeq,
-        tripId,
-        rd.foNumber || '',
-        'Regular',
-        '',                      // Parent Waybill ID
-        'Suggested',
-        false,
-        '',                      // Confirmed By
-        '',                      // Confirmed At
-      ]);
-
       if (driverId && outletId) {
         newRouteFreqRows.push([nextRouteFreqId++, tripId, tripDate, driverId, outletId]);
       }
@@ -484,6 +468,7 @@ function importRouteFile(tripDate, prefixId, rowData) {
       ]);
 
       imported++;
+      return tripId;
     };
 
     // --- Group rows by FO (first-seen order). Rows with no FO each stand alone. ---
@@ -512,26 +497,24 @@ function importRouteFile(tripDate, prefixId, rowData) {
         // their outlet rows still produce trips and a waybill.
         if (slotTypes.length === 0) slotTypes.push('');
 
-        // Allocate a truck + a waybill (sequence) for every slot.
-        const slots = slotTypes.map(type => {
-          const a = allocateTruck(type);
-          nextSeq += 1;
-          return { truck: a.truck, category: a.category, wbSeq: nextSeq, wbNumber: _waybillNumberString(pref.prefix, nextSeq) };
-        });
+        // Allocate a truck for every slot; each slot becomes one waybill group.
+        const slots = slotTypes.map(type => allocateTruck(type));
 
         const primary = slots[0];
 
         // Primary truck visits every outlet row — those trips share its waybill.
-        g.rows.forEach(rd => {
+        const primaryTripIds = g.rows.map(rd => {
           const outletId = resolveOutlet(rd);
-          emitTrip(rd, outletId, primary.truck, primary.category, primary.wbSeq, primary.wbNumber);
+          return emitTrip(rd, outletId, primary.truck, primary.category);
         });
+        waybillGroups.push({ foNumber: g.foNumber, tripIds: primaryTripIds });
 
         // Additional trucks (split load) ride the first outlet, each its own waybill.
         const firstRow      = g.rows[0];
         const firstOutletId = resolveOutlet(firstRow);
         for (let s = 1; s < slots.length; s++) {
-          emitTrip(firstRow, firstOutletId, slots[s].truck, slots[s].category, slots[s].wbSeq, slots[s].wbNumber);
+          const tripId = emitTrip(firstRow, firstOutletId, slots[s].truck, slots[s].category);
+          waybillGroups.push({ foNumber: g.foNumber, tripIds: [tripId] });
         }
       } catch (rowErr) {
         errors.push(`FO ${g.foNumber || '(none)'}: ${rowErr.message}`);
@@ -541,9 +524,10 @@ function importRouteFile(tripDate, prefixId, rowData) {
 
     _appendRows(outletsSheet, newOutletRows);
     _appendRows(tripsSheet, newTripRows);
-    _appendRows(waybillsSheet, newWaybillRows);
     _appendRows(routeFreqSheet, newRouteFreqRows);
     _appendRows(auditSheet, newAuditRows);
+    // After the audit append: the helper allocates its own audit-row IDs.
+    _suggestWaybillsForGroups(prefixId, waybillGroups);
 
     return { success: true, imported, skipped, errors };
   } catch (e) {

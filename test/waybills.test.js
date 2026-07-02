@@ -72,6 +72,49 @@ test('_createSuggestedWaybill throws for an unknown prefix', () => {
   assert.throws(() => api._createSuggestedWaybill(1, 999, 'FO', 'Regular', null), /not found/);
 });
 
+// ---- _suggestWaybillsForGroups: batch suggestion ----
+test('_suggestWaybillsForGroups shares one number within a group, increments across groups', () => {
+  const { api, ss } = asAdmin(baseSheets({ lastSeq: 40 }));
+
+  const out = api._suggestWaybillsForGroups(1, [
+    { foNumber: 'FO-1', tripIds: [101, 102] },   // multi-drop: 2 rows, 1 number
+    { foNumber: 'FO-2', tripIds: [103] },
+    { foNumber: 'FO-3', tripIds: [] },           // empty group -> skipped, no number burned
+    { foNumber: 'FO-4', tripIds: [104] },
+  ]);
+
+  assert.deepEqual([...out].map((o) => o.waybillNumber), ['AL-41', 'AL-41', 'AL-42', 'AL-43']);
+  assert.deepEqual([...out].map((o) => o.tripId), [101, 102, 103, 104]);
+
+  const { headers, rows } = dump(ss, 'Waybills');
+  assert.equal(rows.length, 4);
+  const wbs = rows.map((r) => rowObject(headers, r));
+  assert.deepEqual(wbs.map((w) => w['Sequence Number']), [41, 41, 42, 43]);
+  assert.ok(wbs.every((w) => w.Status === 'Suggested' && w.Locked === false && w['Waybill Type'] === 'Regular'));
+
+  // Suggesting must NOT bump the prefix — only confirming does.
+  const seq = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0])['Last Sequence Number'];
+  assert.equal(seq, 40);
+
+  // Audit: one WAYBILL_SUGGEST row per waybill row.
+  const audit = dump(ss, 'Audit Log');
+  const actionIdx = audit.headers.indexOf('Action');
+  assert.equal(audit.rows.filter((r) => r[actionIdx] === 'WAYBILL_SUGGEST').length, 4);
+});
+
+test('_suggestWaybillsForGroups supports a blank prefix', () => {
+  const sheets = baseSheets({ lastSeq: 5 });
+  sheets['Waybill Prefixes'][1] = [1, '', 'AngeLoyal', 5];
+  const { api } = asAdmin(sheets);
+  const out = api._suggestWaybillsForGroups(1, [{ foNumber: 'FO-1', tripIds: [101] }]);
+  assert.equal(out[0].waybillNumber, '6');
+});
+
+test('_suggestWaybillsForGroups throws for an unknown prefix', () => {
+  const { api } = asAdmin(baseSheets());
+  assert.throws(() => api._suggestWaybillsForGroups(999, [{ foNumber: 'FO', tripIds: [1] }]), /not found/);
+});
+
 // ---- _updateWaybillPrefixSequence: out-of-order guard ----
 test('prefix sequence only advances, never regresses', () => {
   const { api, ss } = asAdmin(baseSheets({ lastSeq: 10 }));

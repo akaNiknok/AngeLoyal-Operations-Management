@@ -92,6 +92,67 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
 }
 
 /**
+ * Batch-creates Suggested 'Regular' waybills for groups of trips.
+ * One waybill number per group; every trip in a group shares that
+ * number/sequence (= a truck's several drops on one load). Groups with
+ * no trips are skipped. Does NOT bump the prefix's Last Sequence
+ * Number — confirmation does.
+ *
+ * @param {number} prefixId
+ * @param {Array<{foNumber: string, tripIds: number[]}>} groups
+ * @returns {Array<{tripId: number, waybillId: number, waybillNumber: string}>}
+ */
+function _suggestWaybillsForGroups(prefixId, groups) {
+  const prefixes = getWaybillPrefixes();
+  const pref     = prefixes.find(p => Number(p.id) === Number(prefixId));
+  if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+
+  const sheet   = _getSheet(SHEET_WAYBILLS);
+  let nextId    = _nextRowId(sheet);
+  let nextSeq   = pref.lastSequenceNumber || 0;
+
+  const newRows = [];
+  const out     = [];
+  groups.forEach(g => {
+    if (!g.tripIds || g.tripIds.length === 0) return;
+    nextSeq += 1;
+    const waybillNumber = _waybillNumberString(pref.prefix, nextSeq);
+    g.tripIds.forEach(tripId => {
+      const id = nextId++;
+      newRows.push([
+        id,
+        waybillNumber,
+        prefixId,
+        nextSeq,
+        tripId,
+        g.foNumber || '',
+        'Regular',
+        '',                      // Parent Waybill ID
+        'Suggested',
+        false,
+        '',                      // Confirmed By
+        '',                      // Confirmed At
+      ]);
+      out.push({ tripId, waybillId: id, waybillNumber });
+    });
+  });
+  _appendRows(sheet, newRows);
+
+  // Audit is best-effort, like _auditLog — but batched.
+  try {
+    const auditSheet = _getSheet(SHEET_AUDIT);
+    let nextAuditId  = _nextRowId(auditSheet);
+    const email      = _getCurrentUserEmail() || 'unknown';
+    const nowStr     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+    _appendRows(auditSheet, out.map(o =>
+      [nextAuditId++, nowStr, email, 'WAYBILL_SUGGEST', '', SHEET_WAYBILLS, o.waybillId, '', o.waybillNumber]
+    ));
+  } catch (_) {}
+
+  return out;
+}
+
+/**
  * Updates the Last Sequence Number in the Waybill Prefixes sheet.
  * Only updates if the new sequence number is higher than the stored one
  * (protects against out-of-order confirmations).
