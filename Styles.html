@@ -656,6 +656,39 @@
                 font-size: 11px;
                 color: var(--muted);
             }
+
+            /* Convoy groups: a cycling palette per group token on the loaded
+               day. The tr carries cg-N (stripe on the FO cell) and the badge
+               inside the FO cell repeats the color, so groups read together
+               even when the FO shading alternates. */
+            .cg-0 { --cg-color: #1e88e5; }
+            .cg-1 { --cg-color: #43a047; }
+            .cg-2 { --cg-color: #e53935; }
+            .cg-3 { --cg-color: #8e24aa; }
+            .cg-4 { --cg-color: #f4511e; }
+            .cg-5 { --cg-color: #00897b; }
+            tr[class*="cg-"] .td-fo {
+                box-shadow: inset 3px 0 0 var(--cg-color);
+            }
+            .convoy-badge {
+                display: inline-block;
+                font-family: "DM Mono", monospace;
+                font-size: 9px;
+                font-weight: 500;
+                padding: 0 5px;
+                border-radius: 99px;
+                margin-right: 5px;
+                color: #fff;
+                background: var(--cg-color);
+            }
+            .td-select {
+                width: 28px;
+                max-width: 28px !important;
+                padding-right: 0 !important;
+            }
+            .td-select input {
+                cursor: pointer;
+            }
             .td-outlet {
                 font-weight: 500;
                 max-width: 200px !important;

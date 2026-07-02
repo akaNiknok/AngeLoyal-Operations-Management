@@ -7,6 +7,7 @@
                 srv()
                     .withSuccessHandler((data) => {
                         dispatchData = data;
+                        selectedForGroup.clear();
                         renderDispatch();
                         if (selectedTripId) renderSidebar();
                         setSyncing(false);
@@ -56,6 +57,7 @@
                 ).length;
                 document.getElementById("ds-nowb").textContent = noWb;
                 renderUnassignedCrewStat();
+                updateConvoyButtons();
 
                 // Table
                 const empty = document.getElementById("dispatch-empty");
@@ -93,6 +95,21 @@
                     prevFoKey = key;
                     return "fo-grp-" + foParity;
                 });
+
+                // Convoy groups: cycle a small palette per distinct token on
+                // the loaded day (stripe + badge, distinct from FO shading).
+                const convoyCls = {};
+                (dispatchData.trips || []).forEach((t) => {
+                    if (t.convoyGroup && !(t.convoyGroup in convoyCls)) {
+                        convoyCls[t.convoyGroup] =
+                            "cg-" + (Object.keys(convoyCls).length % 6);
+                    }
+                });
+
+                const showSelect = canEdit();
+                document
+                    .querySelectorAll("#dispatch-table .th-select")
+                    .forEach((th) => (th.style.display = showSelect ? "" : "none"));
 
                 tbody.innerHTML = trips
                     .map((t, i) => {
@@ -135,8 +152,19 @@
                             t.foNumber +
                             (t.foSplitSuffix ? "-" + t.foSplitSuffix : "");
 
-                        return `<tr class="${sourceCls} ${selCls} ${foGroupCls[i]}" onclick="selectTrip(${t.id})">
-      <td class="td-fo">${esc(foFull) || "—"}</td>
+                        const cgCls = t.convoyGroup
+                            ? convoyCls[t.convoyGroup]
+                            : "";
+                        const cgBadge = t.convoyGroup
+                            ? `<span class="convoy-badge ${cgCls}">C${esc(t.convoyGroup)}</span>`
+                            : "";
+                        const selectTd = showSelect
+                            ? `<td class="td-select" onclick="event.stopPropagation()"><input type="checkbox" ${selectedForGroup.has(t.id) ? "checked" : ""} onchange="toggleConvoySelect(${t.id}, this)"></td>`
+                            : "";
+
+                        return `<tr class="${sourceCls} ${selCls} ${foGroupCls[i]} ${cgCls}" onclick="selectTrip(${t.id})">
+      ${selectTd}
+      <td class="td-fo">${cgBadge}${esc(foFull) || "—"}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
       <td class="td-area">${esc(t.area) || "—"}</td>
       <td class="td-qty">${t.quantity || "—"}</td>
@@ -152,6 +180,48 @@
     </tr>`;
                     })
                     .join("");
+            }
+
+            function toggleConvoySelect(tripId, cb) {
+                if (cb.checked) selectedForGroup.add(tripId);
+                else selectedForGroup.delete(tripId);
+                updateConvoyButtons();
+            }
+
+            function updateConvoyButtons() {
+                const n = selectedForGroup.size;
+                document.getElementById("btn-group-convoy").style.display =
+                    canEdit() && n >= 2 ? "" : "none";
+                document.getElementById("btn-ungroup-convoy").style.display =
+                    canEdit() && n >= 1 ? "" : "none";
+            }
+
+            function groupSelectedTrips(action) {
+                const ids = [...selectedForGroup];
+                if (!ids.length) return;
+                setSyncing(true);
+                srv()
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast(r.error, "error");
+                            return;
+                        }
+                        (dispatchData.trips || []).forEach((t) => {
+                            if (selectedForGroup.has(t.id))
+                                t.convoyGroup = r.group;
+                        });
+                        selectedForGroup.clear();
+                        updateConvoyButtons();
+                        renderDispatch();
+                        showToast(
+                            action === "group"
+                                ? `Convoy C${r.group} created (${ids.length} trips).`
+                                : "Convoy grouping removed.",
+                            "success",
+                        );
+                    })
+                    .setTripConvoyGroup(ids, action);
             }
 
             function getFilteredTrips() {
@@ -227,6 +297,7 @@
     <div class="field-group">
       <div class="field-label">FO Number</div>
       <div class="field-value mono">${esc(foFull) || "—"}</div>
+      ${trip.convoyGroup ? `<div class="field-value muted" style="font-size:11px">Convoy C${esc(trip.convoyGroup)} — travels with its group</div>` : ""}
     </div>
     <div class="field-group">
       <div class="field-label">Outlet</div>
