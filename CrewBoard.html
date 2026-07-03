@@ -16,7 +16,7 @@
                 if (crewRailOpen) renderCrewRail();
             }
 
-            function cbCrewCardHtml(tk, empMap, assignedTruckIds) {
+            function cbCrewCardHtml(tk, empMap, tripCountByTruck) {
                 const def = defaultAssignments.find(
                     (a) => Number(a.truckId) === Number(tk.id),
                 );
@@ -33,32 +33,69 @@
                     ? `draggable="true" ondragstart="cbCrewDragStart(event, ${tk.id})"`
                     : "";
                 // Trucks already assigned to a trip today read as dimmed.
-                const dim = assignedTruckIds.has(Number(tk.id)) ? " assigned" : "";
+                const tripCount = tripCountByTruck[tk.id] || 0;
+                const dim = tripCount > 0 ? " assigned" : "";
                 const crewLine = driver
                     ? `<span class="cb-crew-driver">${esc(driver)}</span>${helpers.length ? ` <span class="cb-crew-helpers">+ ${esc(helpers.join(", "))}</span>` : ""}`
                     : `<span class="cb-crew-default">no default crew</span>`;
+                const badge = tripCount
+                    ? `<span class="cb-crew-badge" title="${tripCount} trip${tripCount === 1 ? "" : "s"} assigned today">${tripCount}</span>`
+                    : "";
                 // Truck type (color-coded) first, plate second.
                 return `<div class="cb-crew-card${dim}" ${drag} title="Drag onto a trip row to assign">
+      ${badge}
       <div class="cb-crew-line">${crewLine}</div>
       <div class="cb-crew-plate">${colorChip(tk.billingCategory || tk.type)} <span class="cb-crew-platenum">${esc(tk.plate)}</span></div>
     </div>`;
             }
 
+            function setCrewRailSort(mode) {
+                crewRailSort = mode;
+                renderCrewRail();
+            }
+
             function renderCrewRail() {
                 if (!crewRailOpen || !dispatchData) return;
                 const empMap = indexById(employees);
-                const assignedTruckIds = new Set(
-                    (dispatchData.trips || [])
-                        .map((t) => Number(t.truckId))
-                        .filter(Boolean),
-                );
+                const tripCountByTruck = {};
+                (dispatchData.trips || []).forEach((t) => {
+                    if (!t.truckId) return;
+                    tripCountByTruck[t.truckId] =
+                        (tripCountByTruck[t.truckId] || 0) + 1;
+                });
                 const active = trucks.filter((tk) => tk.active !== false);
+                const driverNick = (tk) => {
+                    const def = defaultAssignments.find(
+                        (a) => Number(a.truckId) === Number(tk.id),
+                    );
+                    return def && def.defaultDriverId
+                        ? (empMap[def.defaultDriverId] || {}).nick || ""
+                        : "";
+                };
+                if (crewRailSort === "plate") {
+                    active.sort((a, b) =>
+                        String(a.plate).localeCompare(String(b.plate)),
+                    );
+                } else if (crewRailSort === "type") {
+                    active.sort(
+                        (a, b) =>
+                            String(a.type || "").localeCompare(
+                                String(b.type || ""),
+                            ) || String(a.plate).localeCompare(String(b.plate)),
+                    );
+                } else {
+                    active.sort(
+                        (a, b) =>
+                            driverNick(a).localeCompare(driverNick(b)) ||
+                            String(a.plate).localeCompare(String(b.plate)),
+                    );
+                }
                 document.getElementById("cb-rail-count").textContent =
                     active.length;
                 document.getElementById("cb-rail-list").innerHTML = active.length
                     ? active
                           .map((tk) =>
-                              cbCrewCardHtml(tk, empMap, assignedTruckIds),
+                              cbCrewCardHtml(tk, empMap, tripCountByTruck),
                           )
                           .join("")
                     : `<div class="cb-empty">No active trucks.</div>`;
