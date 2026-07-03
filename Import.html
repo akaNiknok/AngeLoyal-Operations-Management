@@ -211,6 +211,9 @@
                                 ? String(row[ciCustomer] || "").trim()
                                 : "",
                         slots: slots,
+                        total: ciTotal >= 0 && row[ciTotal] !== "" && row[ciTotal] != null
+                            ? Number(row[ciTotal])
+                            : null,
                     });
                 }
 
@@ -237,6 +240,12 @@
                         // same-FO continuation — rides that FO's truck
                         r.displayType = primaryTypeByFO[r.foNumber];
                         lastRowType = primaryTypeByFO[r.foNumber];
+                    } else if (r.total === 0) {
+                        // TOTAL explicitly says this FO needs no truck of its
+                        // own — Rebisco sometimes stacks a whole batch's truck
+                        // counts on the batch's first row, leaving TOTAL=0 on
+                        // the other FOs sharing that run. Don't fabricate one.
+                        r.displayType = "";
                     } else if (lastRowType) {
                         // fallback: copy the line directly above, regardless of
                         // FO, and give this row its own truck slot of that type
@@ -246,6 +255,39 @@
                             primaryTypeByFO[r.foNumber] = lastRowType;
                     } else {
                         r.displayType = "";
+                    }
+                });
+
+                // Redistribute convoy slots: when a row asks for more than one
+                // truck, Rebisco is sometimes reporting the WHOLE convoy's
+                // requirement on that one row (its TOTAL is the convoy total),
+                // while the other FO(s) riding along sit right after it with
+                // blank type columns and TOTAL=0. Hand each surplus truck to
+                // the next such FO in file order instead of piling every
+                // truck onto the anchor FO.
+                result.forEach((r, i) => {
+                    const units = [];
+                    (r.slots || []).forEach((s) => {
+                        for (let k = 0; k < (s.count || 1); k++)
+                            units.push(s.type);
+                    });
+                    if (units.length <= 1) return;
+
+                    r.slots = [{ type: units[0], count: 1 }];
+                    r.displayType = units[0];
+                    let unitIdx = 1;
+                    for (
+                        let j = i + 1;
+                        j < result.length && unitIdx < units.length;
+                        j++
+                    ) {
+                        const cand = result[j];
+                        if (cand.foNumber === r.foNumber) continue; // same-FO stop, not a recipient
+                        if (cand.total !== 0) break; // outside this convoy's blank run
+                        if (cand.slots && cand.slots.length) break; // already has its own truck
+                        cand.slots = [{ type: units[unitIdx], count: 1 }];
+                        cand.displayType = units[unitIdx];
+                        unitIdx++;
                     }
                 });
                 return result;
@@ -430,7 +472,7 @@
                     return;
                 }
 
-                setLoading(`Importing ${rowsToImport.length} trips…`);
+                setLoading(`Importing ${rowsToImport.length} rows…`);
                 srv()
                     .withSuccessHandler((r) => {
                         hideLoading();
@@ -442,6 +484,9 @@
                         showToast(msg, r.skipped > 0 ? "warning" : "success");
                         if (r.errors.length)
                             console.warn("Import errors:", r.errors);
+                        // Merge outlets the import created — otherwise their
+                        // names show blank on the Dispatch board until reload.
+                        (r.newOutlets || []).forEach((o) => outlets.push(o));
                         clearImport();
                         // Switch to dispatch for the imported date
                         document.getElementById("dispatch-date").value =

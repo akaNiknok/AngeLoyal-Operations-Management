@@ -332,7 +332,9 @@ function confirmWaybill(waybillId, customNumber) {
  *
  * @param {string}   tripDate   'M/d/yyyy' — the date these trips are for
  * @param {Object[]} rowData    Array of parsed route rows
- * @returns {{ success: boolean, imported: number, skipped: number, errors: string[] }}
+ * @returns {{ success: boolean, imported: number, skipped: number, errors: string[],
+ *             newOutlets: { id: number, outletName: string, area: string, address: string,
+ *                           customerGroup: string, notes: string }[] }}
  */
 function importRouteFile(tripDate, rowData) {
   _requirePermission('ADD_MANUAL_TRIP');
@@ -394,6 +396,10 @@ function importRouteFile(tripDate, rowData) {
     });
     let nextOutletId = _nextRowId(outletsSheet);
     const newOutletRows = [];
+    // Returned to the client so it can merge these into its cached outlet
+    // list without a full reboot — otherwise newly-created outlets show
+    // blank on the Dispatch board until the next page load.
+    const newOutlets = [];
 
     const resolveOutlet = (rd) => {
       if (!rd.outletName) return '';
@@ -401,7 +407,12 @@ function importRouteFile(tripDate, rowData) {
       if (outletNameToId[nameLower] !== undefined) return outletNameToId[nameLower];
       const id = nextOutletId++;
       outletNameToId[nameLower] = id;
-      newOutletRows.push([id, rd.outletName.trim(), rd.area || '', rd.address || '', rd.customer || '', '', nowStr]);
+      const name = rd.outletName.trim();
+      const area = rd.area || '';
+      const address = rd.address || '';
+      const customerGroup = rd.customer || '';
+      newOutletRows.push([id, name, area, address, customerGroup, '', nowStr]);
+      newOutlets.push({ id, outletName: name, area, address, customerGroup, notes: '' });
       return id;
     };
 
@@ -532,7 +543,7 @@ function importRouteFile(tripDate, rowData) {
     _appendRows(routeFreqSheet, newRouteFreqRows);
     _appendRows(auditSheet, newAuditRows);
 
-    return { success: true, imported, skipped, errors };
+    return { success: true, imported, skipped, errors, newOutlets };
   } catch (e) {
     return { success: false, imported: 0, skipped: 0, errors: [e.message] };
   }

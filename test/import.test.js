@@ -78,6 +78,17 @@ test('importRouteFile seeds new outlets once and dedupes case-insensitively', ()
   assert.equal(alphaTrips[0]['Outlet ID'], alphaTrips[1]['Outlet ID']);
 });
 
+test('importRouteFile returns newly created outlets for the client to merge into its cache', () => {
+  const { api } = asDispatcher(importSheets());
+  const res = api.importRouteFile('6/16/2026', ROWS);
+
+  // "Outlet Alpha" / "outlet alpha" dedupe to one outlet; "Outlet Beta" is
+  // the other -> 2 distinct new outlets, not 3 rows.
+  assert.equal(res.newOutlets.length, 2);
+  const names = Array.from(res.newOutlets, (o) => o.outletName).sort();
+  assert.deepEqual(names, ['Outlet Alpha', 'Outlet Beta']);
+});
+
 test('importRouteFile assigns the right truck type + default crew and distributes without double-booking', () => {
   const { api, ss } = asDispatcher(importSheets());
   api.importRouteFile('6/16/2026', ROWS);
