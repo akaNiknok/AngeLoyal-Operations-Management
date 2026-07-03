@@ -39,6 +39,13 @@
                     preppingCount;
                 document.getElementById("btn-mark-scheduled").style.display =
                     canEdit() && preppingCount > 0 ? "" : "none";
+                const preppingCrewCount = all.filter(
+                    (t) => t.tripStatus === "Prepping" && t.truckId,
+                ).length;
+                document.getElementById(
+                    "btn-clear-prepping-crew",
+                ).style.display =
+                    canEdit() && preppingCrewCount > 0 ? "" : "none";
                 document.getElementById("ds-scheduled").textContent =
                     all.filter((t) => t.tripStatus === "Scheduled").length;
                 document.getElementById("ds-delivered").textContent =
@@ -123,6 +130,7 @@
 
                         const outlet = outletMap[t.outletId] || {};
                         const outletName = outlet.outletName || "";
+                        const address = outlet.address || "";
                         const custGroup = outlet.customerGroup || "";
                         const truckPlate = (truckMap[t.truckId] || {}).plate || "";
                         const assignedTruckBillingCat = (truckMap[t.truckId] || {}).billingCategory || "";
@@ -144,8 +152,8 @@
                             : "";
                         const crewCell = truckPlate
                             ? `<div class="crew-card">
-           <div class="crew-card-top">${colorChip(assignedTruckBillingCat)}<span class="crew-card-plate">${esc(truckPlate)}</span>${unassignBtn}</div>
            <div class="crew-card-crew">${crewSub}</div>
+           <div class="crew-card-top">${colorChip(assignedTruckBillingCat)}<span class="crew-card-plate">${esc(truckPlate)}</span>${unassignBtn}</div>
          </div>`
                             : `<div class="crew-card empty"><span class="crew-empty">Unassigned${canE ? " — drag a crew here" : ""}</span></div>`;
 
@@ -187,6 +195,7 @@
       <td class="td-fo">${cgBadge}${esc(foFull) || "—"}</td>
       <td>${colorChip(custGroup)}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
+      <td class="td-address" title="${esc(address)}">${esc(address) || "—"}</td>
       <td class="td-area">${esc(t.area) || "—"}</td>
       <td class="td-qty">${t.quantity || "—"}</td>
       <td class="td-qty">${t.cbm || "—"}</td>
@@ -195,8 +204,7 @@
       <td class="td-crew col-divider">${crewCell}</td>
       <td class="td-status col-divider">${statusCell}</td>
       <td class="td-wb">${waybillCellHtml(t, canE)}</td>
-      <td class="td-remarks">${remarksCell}</td>
-      <td><span style="font-size:10px;color:var(--hint)">${esc(t.source)}</span>${delBtn}</td>
+      <td class="td-remarks">${remarksCell}${delBtn}</td>
     </tr>`;
                     })
                     .join("");
@@ -426,15 +434,49 @@
                     showToast("No waybill to confirm for this trip yet.", "warning");
                     return;
                 }
-                bgSave("confirmWaybill", [trip.suggestedWaybillId, customNumber], {
+                // Optimistic: lock the row in immediately so confirming feels
+                // instant, then reconcile/revert once the server responds.
+                const old = {
+                    waybillConfirmed: trip.waybillConfirmed,
+                    waybillSuggested: trip.waybillSuggested,
+                    suggestedWaybillId: trip.suggestedWaybillId,
+                };
+                trip.waybillConfirmed = customNumber;
+                trip.waybillSuggested = "";
+                trip.suggestedWaybillId = null;
+                renderDispatch();
+                bgSave("confirmWaybill", [old.suggestedWaybillId, customNumber], {
                     onOk: (r) => {
                         trip.waybillConfirmed = r.waybillNumber;
-                        trip.waybillSuggested = "";
-                        trip.suggestedWaybillId = null;
                         showToast(`Waybill ${r.waybillNumber} confirmed.`, "success");
                         renderDispatch();
                     },
+                    revert: () => {
+                        Object.assign(trip, old);
+                        renderDispatch();
+                    },
                 });
+            }
+
+            // Clears crew (truck/driver/helpers) from every Prepping trip on
+            // the loaded day. Reuses assignCrew's optimistic apply + revert
+            // per trip — this is a dispatcher "start the day over" action.
+            function clearAllPreppingCrew() {
+                if (!canEdit()) return;
+                const targets = (dispatchData.trips || []).filter(
+                    (t) => t.tripStatus === "Prepping" && t.truckId,
+                );
+                if (!targets.length) {
+                    showToast("No Prepping trips have a crew assigned.", "warning");
+                    return;
+                }
+                if (
+                    !confirm(
+                        `Clear crew from ${targets.length} Prepping trip${targets.length === 1 ? "" : "s"}? This cannot be undone.`,
+                    )
+                )
+                    return;
+                targets.forEach((t) => assignCrew(t.id, ""));
             }
 
             function confirmDeleteTrip(tripId) {
