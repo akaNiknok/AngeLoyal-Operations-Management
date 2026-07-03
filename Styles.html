@@ -588,6 +588,7 @@
 
             table.dispatch-table {
                 width: 100%;
+                min-width: 1620px; /* >= sum of column widths, so columns (e.g. Status) scroll instead of squishing */
                 border-collapse: collapse;
                 font-size: 12px;
             }
@@ -611,6 +612,28 @@
             table.dispatch-table thead th:first-child {
                 padding-left: 14px;
             }
+            /* Freeze the FO # column while the table scrolls horizontally. */
+            table.dispatch-table thead th:first-child {
+                z-index: 3;
+            }
+            table.dispatch-table thead th:first-child,
+            table.dispatch-table tbody td:first-child {
+                position: sticky;
+                left: 0;
+            }
+            table.dispatch-table tbody td:first-child {
+                z-index: 1;
+                background: var(--surface);
+            }
+            table.dispatch-table tbody tr.fo-grp-1 td:first-child {
+                background: #eceae1;
+            }
+            table.dispatch-table tbody tr:hover td:first-child {
+                background: #eef1f5;
+            }
+            table.dispatch-table tbody tr.selected td:first-child {
+                background: var(--blue-bg);
+            }
 
             table.dispatch-table tbody tr {
                 border-bottom: 1px solid var(--border);
@@ -622,8 +645,14 @@
             table.dispatch-table tbody tr.fo-grp-1 {
                 background: #eceae1;
             }
+            /* Hover needs to read clearly against both the white rows and the
+               fo-grp-1 stripe, so each gets its own (cooler / darker) shade
+               rather than one light tone that blends into both. */
             table.dispatch-table tbody tr:hover {
-                background: #fafaf8;
+                background: #eef1f5;
+            }
+            table.dispatch-table tbody tr.fo-grp-1:hover {
+                background: #e0ddce;
             }
             table.dispatch-table tbody tr.selected {
                 background: var(--blue-bg);
@@ -667,7 +696,7 @@
             .cg-3 { --cg-color: #8e24aa; }
             .cg-4 { --cg-color: #f4511e; }
             .cg-5 { --cg-color: #00897b; }
-            tr[class*="cg-"] .td-fo {
+            tr[class*="cg-"] .td-crew {
                 box-shadow: inset 3px 0 0 var(--cg-color);
             }
             .convoy-badge {
@@ -677,9 +706,16 @@
                 font-weight: 500;
                 padding: 0 5px;
                 border-radius: 99px;
-                margin-right: 5px;
                 color: #fff;
                 background: var(--cg-color);
+            }
+            /* Billing Cat. column has spare width after its chip — the convoy
+               badge sits there instead of taking a column of its own. */
+            .billingcat-cell {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 4px;
             }
             /* Color-coded labels (customer group, billing category) — the hue
                is derived from the text (see colorChip/catSwatch in Core.html). */
@@ -741,15 +777,6 @@
                 cursor: pointer;
             }
 
-            .td-select {
-                width: 28px;
-                max-width: 28px !important;
-                padding-right: 0 !important;
-            }
-            .td-select input {
-                cursor: pointer;
-            }
-
             /* Crew rail: a toggled column of draggable crew cards beside the
                dispatch table; table rows are the drop targets. */
             .cb-rail {
@@ -760,6 +787,15 @@
                 background: var(--surface);
                 border-left: 1px solid var(--border);
                 overflow: hidden;
+            }
+            .cb-rail-sort {
+                margin: 0 8px 6px;
+                font-size: 11px;
+                padding: 4px 6px;
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+                background: var(--bg);
+                color: var(--muted);
             }
             .cb-rail-list {
                 overflow-y: auto;
@@ -783,6 +819,7 @@
 
             /* Draggable crew cards (rail) — driver/helper on top, plate below */
             .cb-crew-card {
+                position: relative;
                 border: 1px solid var(--border-md);
                 border-radius: var(--radius-sm);
                 background: var(--bg);
@@ -795,6 +832,24 @@
             }
             .cb-crew-card.assigned {
                 opacity: 0.4;
+            }
+            /* Count of trips already assigned to this crew today. */
+            .cb-crew-badge {
+                position: absolute;
+                top: -6px;
+                right: -6px;
+                min-width: 16px;
+                height: 16px;
+                padding: 0 4px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 99px;
+                background: var(--accent);
+                color: #fff;
+                font-size: 10px;
+                font-weight: 600;
+                font-family: "DM Mono", monospace;
             }
             .cb-crew-line {
                 font-size: 12px;
@@ -973,6 +1028,11 @@
                 cursor: pointer;
                 font-size: 11px;
                 padding: 0 4px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                line-height: 1;
+                align-self: stretch;
             }
             .cb-unassign:hover {
                 color: var(--red);
@@ -1008,6 +1068,7 @@
                 font-size: 11px;
                 padding: 2px 6px;
                 color: var(--muted);
+                flex-shrink: 0;
             }
             .row-confirm:hover {
                 background: var(--green-bg);
@@ -1015,12 +1076,23 @@
                 border-color: var(--green);
             }
             .row-del {
-                margin-left: 6px;
                 border-color: transparent;
             }
             .row-del:hover {
                 background: var(--red-bg);
                 color: var(--red);
+            }
+            /* Remarks input + delete button on one line — the input was
+               previously full-width, squeezing the delete button down to a
+               sliver that rendered as an ellipsis. */
+            .remarks-cell {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .remarks-cell .remarks-in {
+                flex: 1;
+                min-width: 0;
             }
 
             /* Status chips */

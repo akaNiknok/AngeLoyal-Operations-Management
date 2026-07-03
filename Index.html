@@ -420,10 +420,6 @@
                             >
                                 <thead>
                                     <tr>
-                                        <th
-                                            class="th-select"
-                                            style="width: 28px"
-                                        ></th>
                                         <th style="width: 110px">FO #</th>
                                         <th style="width: 110px">
                                             Cust. Grp.
@@ -472,6 +468,15 @@
                                 style="font-weight: 400"
                             ></span>
                         </div>
+                        <select
+                            class="cb-rail-sort"
+                            id="cb-rail-sort"
+                            onchange="setCrewRailSort(this.value)"
+                        >
+                            <option value="driver">Sort: Driver A–Z</option>
+                            <option value="plate">Sort: Plate A–Z</option>
+                            <option value="type">Sort: Truck type</option>
+                        </select>
                         <div class="cb-rail-list" id="cb-rail-list"></div>
                     </div>
                 </div>

@@ -90,17 +90,19 @@
                 const tbody = document.getElementById("dispatch-tbody");
 
                 // Alternating shade per FO so all trips of one Freight Order
-                // (even when split across several trucks/waybills) read as one
-                // visual group. Parity flips only when the FO changes between
-                // adjacent rows.
-                let foParity = 0;
-                let prevFoKey = null;
+                // (even when split across several trucks/waybills, or not
+                // adjacent in board order) read as one visual group. Parity
+                // is keyed by FO so every row of the same FO always gets the
+                // same class, not just adjacent ones.
+                const foParityByKey = {};
+                let nextFoParity = 0;
                 const foGroupCls = trips.map((t) => {
                     const key = t.foNumber ? "fo-" + t.foNumber : "none-" + t.id;
-                    if (prevFoKey !== null && key !== prevFoKey)
-                        foParity ^= 1;
-                    prevFoKey = key;
-                    return "fo-grp-" + foParity;
+                    if (!(key in foParityByKey)) {
+                        foParityByKey[key] = nextFoParity;
+                        nextFoParity ^= 1;
+                    }
+                    return "fo-grp-" + foParityByKey[key];
                 });
 
                 // Convoy groups: cycle a small palette per distinct token on
@@ -112,11 +114,6 @@
                             "cg-" + (Object.keys(convoyCls).length % 6);
                     }
                 });
-
-                const showSelect = canEdit();
-                document
-                    .querySelectorAll("#dispatch-table .th-select")
-                    .forEach((th) => (th.style.display = showSelect ? "" : "none"));
 
                 const canE = canEdit();
                 tbody.innerHTML = trips
@@ -162,7 +159,7 @@
                             : `<span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span>`;
 
                         const remarksCell = canE
-                            ? `<input class="cell-input" type="text" title="${esc(t.remarks || "")}" value="${esc(t.remarks || "")}" placeholder="—" onchange="this.title=this.value; changeRemarks(${t.id}, this.value)">`
+                            ? `<input class="cell-input remarks-in" type="text" title="${esc(t.remarks || "")}" value="${esc(t.remarks || "")}" placeholder="—" onchange="this.title=this.value; changeRemarks(${t.id}, this.value)">`
                             : `<span class="crew-helper" title="${esc(t.remarks || "")}">${esc(t.remarks || "")}</span>`;
 
                         // Rows are drop targets for crew cards dragged from the
@@ -182,17 +179,21 @@
                         const cgBadge = t.convoyGroup
                             ? `<span class="convoy-badge ${cgCls}">C${esc(t.convoyGroup)}</span>`
                             : "";
-                        const selectTd = showSelect
-                            ? `<td class="td-select"><input type="checkbox" ${selectedForGroup.has(t.id) ? "checked" : ""} onchange="toggleConvoySelect(${t.id}, this)"></td>`
-                            : "";
                         const delBtn =
                             canE && t.source === "Import"
-                                ? ` <button class="row-del" title="Remove trip" onclick="confirmDeleteTrip(${t.id})">✕</button>`
+                                ? `<button class="row-del" title="Remove trip" onclick="confirmDeleteTrip(${t.id})">✕</button>`
                                 : "";
 
-                        return `<tr class="${sourceCls} ${foGroupCls[i]} ${cgCls}" ${dz}>
-      ${selectTd}
-      <td class="td-fo">${cgBadge}${esc(foFull) || "—"}</td>
+                        // Rows are click-to-select (for convoy grouping) instead
+                        // of a checkbox column — clicks on inputs/buttons/selects
+                        // inside the row pass through instead of toggling.
+                        const selCls = selectedForGroup.has(t.id) ? " selected" : "";
+                        const rowClick = canE
+                            ? `onclick="handleRowClick(event, ${t.id})"`
+                            : "";
+
+                        return `<tr class="${sourceCls} ${foGroupCls[i]} ${cgCls}${selCls}" ${dz} ${rowClick}>
+      <td class="td-fo">${esc(foFull) || "—"}</td>
       <td>${colorChip(custGroup)}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
       <td class="td-address" title="${esc(address)}">${esc(address) || "—"}</td>
@@ -200,20 +201,25 @@
       <td class="td-qty">${t.quantity || "—"}</td>
       <td class="td-qty">${t.cbm || "—"}</td>
       <td>${esc(t.tier) || "—"}</td>
-      <td>${colorChip(billingCat)}</td>
+      <td class="td-billingcat"><div class="billingcat-cell">${colorChip(billingCat)}${cgBadge}</div></td>
       <td class="td-crew col-divider">${crewCell}</td>
       <td class="td-status col-divider">${statusCell}</td>
       <td class="td-wb">${waybillCellHtml(t, canE)}</td>
-      <td class="td-remarks">${remarksCell}${delBtn}</td>
+      <td class="td-remarks"><div class="remarks-cell">${remarksCell}${delBtn}</div></td>
     </tr>`;
                     })
                     .join("");
             }
 
-            function toggleConvoySelect(tripId, cb) {
-                if (cb.checked) selectedForGroup.add(tripId);
-                else selectedForGroup.delete(tripId);
+            // Row click toggles convoy-group selection (highlight instead of a
+            // checkbox column). Clicks on inline controls inside the row
+            // (inputs, selects, buttons, links) act on that control instead.
+            function handleRowClick(e, tripId) {
+                if (e.target.closest("input, select, button, a")) return;
+                if (selectedForGroup.has(tripId)) selectedForGroup.delete(tripId);
+                else selectedForGroup.add(tripId);
                 updateConvoyButtons();
+                renderDispatch();
             }
 
             function updateConvoyButtons() {

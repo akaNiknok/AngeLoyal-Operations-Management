@@ -403,7 +403,8 @@
                 }
                 const dateVal = document.getElementById("dispatch-date").value;
 
-                // Cycle print-safe convoy colors in model order.
+                // Cycle print-safe convoy colors in model order — the stripe on
+                // the Convoy cell is the convoy indicator (kept as-is).
                 const cgColor = {};
                 const palette = ["#1e88e5", "#43a047", "#e53935", "#8e24aa", "#f4511e", "#00897b"];
                 rows.forEach((r) => {
@@ -412,6 +413,19 @@
                         cgColor[g] = palette[Object.keys(cgColor).length % 6];
                 });
 
+                // Group-highlight by Driver + Helper instead of convoy — the
+                // convoy already has its own colored stripe, so the
+                // background tint is more useful marking which stops share a
+                // crew (which can span multiple convoys/loads in a day).
+                const crewColor = {};
+                rows.forEach((r) => {
+                    if (!r.loadStart || !r.driverName) return;
+                    const key = r.driverName + "|" + r.helperName;
+                    if (!(key in crewColor))
+                        crewColor[key] = palette[Object.keys(crewColor).length % 6];
+                });
+
+                let currentCrewKey = null;
                 const body = rows
                     .map((r) => {
                         const t = r.trip;
@@ -419,14 +433,15 @@
                         const stripe = g
                             ? `border-left:4px solid ${cgColor[g]}`
                             : "";
-                        // "Crew" cells (driver/helper/plate) get the convoy's
-                        // color as a background tint so trucks travelling
-                        // together are visually grouped, not just the badge.
-                        const crewBg = g
-                            ? `background:${tint(cgColor[g], 0.14)}`
-                            : "";
+                        if (r.loadStart)
+                            currentCrewKey = r.driverName
+                                ? r.driverName + "|" + r.helperName
+                                : null;
+                        const crewBg =
+                            currentCrewKey && crewColor[currentCrewKey]
+                                ? `background:${tint(crewColor[currentCrewKey], 0.14)}`
+                                : "";
                         return `<tr>
-        <td style="${stripe}">${g ? "C" + esc(g) : ""}</td>
         <td>${esc(t.foNumber) || ""}</td>
         <td>${colorChip(r.customer)}</td>
         <td>${esc(r.outletName)}</td>
@@ -437,6 +452,7 @@
         <td>${esc(t.restrictions || "")}</td>
         <td>${r.loadStart ? esc(r.typeCode) : ""}</td>
         <td>${esc(t.tier || "")}</td>
+        <td style="${stripe}">${g ? "C" + esc(g) : ""}</td>
         <td style="${crewBg}">${r.loadStart ? esc(r.driverName) : ""}</td>
         <td style="${crewBg}">${r.loadStart ? esc(r.helperName) : ""}</td>
         <td>${r.loadStart ? esc(r.waybill) : ""}</td>
@@ -453,8 +469,8 @@
   <h1>FINAL ROUTE ${esc(dateVal)} (ANGELOYAL)</h1>
   <div class="sub">${rows.length} drops · generated from the AngeLoyal OMS dispatch board</div>
   <table><thead><tr>
-    <th>Convoy</th><th>FO</th><th>Cust</th><th>Outlet</th><th>Address</th><th>Area</th><th>Qty</th><th>CBM</th>
-    <th>Restr</th><th>Type</th><th>Tier</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Remarks</th>
+    <th>FO</th><th>Cust</th><th>Outlet</th><th>Address</th><th>Area</th><th>Qty</th><th>CBM</th>
+    <th>Restr</th><th>Type</th><th>Tier</th><th>Convoy</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Remarks</th>
   </tr></thead><tbody>${body}</tbody></table>
   </body></html>`);
             }
