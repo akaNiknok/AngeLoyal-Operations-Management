@@ -802,6 +802,62 @@
                 padding: 6px 2px;
             }
 
+            /* Draggable crew cards (rail) — driver/helper on top, plate below */
+            .cb-crew-card {
+                border: 1px solid var(--border-md);
+                border-radius: var(--radius-sm);
+                background: var(--bg);
+                padding: 6px 8px;
+                margin-bottom: 6px;
+                cursor: grab;
+            }
+            .cb-crew-card:active {
+                cursor: grabbing;
+            }
+            .cb-crew-line {
+                font-size: 12px;
+            }
+            .cb-crew-plate {
+                font-family: "DM Mono", monospace;
+                font-size: 10px;
+                color: var(--muted);
+                margin-top: 2px;
+            }
+            /* Trip cards (drop targets) — assigned crew line */
+            .cb-tc-crew {
+                margin-top: 6px;
+                padding-top: 5px;
+                border-top: 1px dashed var(--border);
+                font-size: 11px;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                flex-wrap: wrap;
+            }
+            .cb-tc-plate {
+                font-family: "DM Mono", monospace;
+                font-weight: 500;
+            }
+            .cb-tc-driver {
+                font-weight: 500;
+            }
+            .cb-tc-empty {
+                color: var(--hint);
+                font-style: italic;
+            }
+            .cb-unassign {
+                margin-left: auto;
+                border: none;
+                background: transparent;
+                color: var(--hint);
+                cursor: pointer;
+                font-size: 11px;
+                padding: 0 4px;
+            }
+            .cb-unassign:hover {
+                color: var(--red);
+            }
+
             /* Share-to-Drivers cards (screen side; print has its own CSS) */
             .ds-card-row {
                 display: flex;
@@ -883,6 +939,86 @@
             .td-wb {
                 font-family: "DM Mono", monospace;
                 font-size: 11px;
+            }
+
+            /* Inline cell editors (dispatch table) */
+            .cell-select,
+            .cell-input {
+                font-size: 11px;
+                padding: 3px 6px;
+                width: 100%;
+                max-width: 100%;
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: var(--radius-sm);
+            }
+            .cell-select:hover,
+            .cell-input:hover {
+                border-color: var(--border);
+                background: var(--bg);
+            }
+            .cell-select:focus,
+            .cell-input:focus {
+                border-color: var(--accent);
+                background: white;
+            }
+            .td-crew,
+            .td-status,
+            .td-remarks {
+                max-width: 180px !important;
+                white-space: normal;
+                overflow: visible;
+            }
+            .td-crew .crew-cell {
+                margin-top: 2px;
+            }
+            .td-crew .crew-driver {
+                margin-right: 4px;
+            }
+            .cell-select.sc-scheduled {
+                color: var(--blue);
+            }
+            .cell-select.sc-delivered {
+                color: var(--green);
+            }
+            .cell-select.sc-undelivered,
+            .cell-select.sc-fouln,
+            .cell-select.sc-foutr {
+                color: var(--red);
+            }
+            .cell-select.sc-redeliver {
+                color: var(--purple);
+            }
+            .wb-inline {
+                display: flex;
+                gap: 3px;
+                align-items: center;
+            }
+            .wb-inline .wb-in {
+                width: 80px;
+            }
+            .row-confirm,
+            .row-del {
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+                background: transparent;
+                cursor: pointer;
+                font-size: 11px;
+                padding: 2px 6px;
+                color: var(--muted);
+            }
+            .row-confirm:hover {
+                background: var(--green-bg);
+                color: var(--green);
+                border-color: var(--green);
+            }
+            .row-del {
+                margin-left: 6px;
+                border-color: transparent;
+            }
+            .row-del:hover {
+                background: var(--red-bg);
+                color: var(--red);
             }
 
             /* Status chips */

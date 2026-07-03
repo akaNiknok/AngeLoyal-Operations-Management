@@ -5,6 +5,10 @@
                     ? `<span class="status-chip" style="background:var(--red-bg);color:var(--red)">Inactive</span>`
                     : `<span class="status-chip" style="background:var(--green-bg);color:var(--green)">Active</span>`;
             }
+            // Remove / Restore action button for an admin row.
+            function rowActionBtn(fn, id, active) {
+                return `<button class="row-del" style="border-color:var(--border)" onclick="${fn}(${id})">${active === false ? "Restore" : "Remove"}</button>`;
+            }
 
             // ── TRUCKS ADMIN ──────────────────────────────────────────
             function renderTrucksAdmin() {
@@ -15,6 +19,7 @@
                     "trucks-show-inactive",
                 ).checked;
                 const tbody = document.getElementById("trucks-tbody");
+                const isAdmin = currentUser.role === "Admin";
 
                 const filtered = trucks.filter((t) => {
                     if (!showInactive && t.active === false) return false;
@@ -30,115 +35,47 @@
 
                 tbody.innerHTML = filtered
                     .map((t) => {
-                        const selCls =
-                            selectedTruckAdminId === t.id
-                                ? " row-selected"
-                                : "";
-                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectTruckAdmin(${t.id})">
+                        const f = (field, val) =>
+                            isAdmin
+                                ? `<input class="cell-input" value="${esc(val)}" onchange="updateTruckField(${t.id},'${field}',this.value)">`
+                                : esc(val) || "—";
+                        const cat = isAdmin
+                            ? `<select class="cell-select" onchange="updateTruckField(${t.id},'billingCategory',this.value)">${billingCategoryOptions(t.billingCategory)}</select>`
+                            : esc(t.billingCategory) || "—";
+                        return `<tr>
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
-    <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(t.plate)}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(t.brand) || "—"}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(t.type) || "—"}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(t.billingCategory) || "—"}</td>
+    <td style="font-family:'DM Mono',monospace">${f("plate", t.plate)}</td>
+    <td>${f("brand", t.brand)}</td>
+    <td>${f("type", t.type)}</td>
+    <td>${cat}</td>
     <td>${statusChip(t.active)}</td>
+    <td>${isAdmin ? rowActionBtn("toggleTruckActive", t.id, t.active) : ""}</td>
   </tr>`;
                     })
                     .join("");
             }
 
-            function selectTruckAdmin(id) {
-                selectedTruckAdminId = Number(id);
-                renderTrucksAdmin();
-                renderTruckDetail();
-            }
-
-            function renderTruckDetail() {
-                const body = document.getElementById("truck-detail-body");
-                const footer = document.getElementById(
-                    "truck-detail-footer",
-                );
-
-                if (!selectedTruckAdminId) {
-                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🚚</div><div class="sub">Select a truck to view details</div></div>`;
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                    return;
-                }
-                const t = trucks.find(
-                    (t) => Number(t.id) === Number(selectedTruckAdminId),
-                );
-                if (!t) {
-                    selectedTruckAdminId = null;
-                    renderTruckDetail();
-                    return;
-                }
-                const isAdmin = currentUser.role === "Admin";
-                const dis = isAdmin ? "" : "disabled";
-
-                body.innerHTML = `
-      <div class="form-row">
-        <label class="form-label">Plate Number</label>
-        <input type="text" id="td-plate" value="${esc(t.plate)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Brand</label>
-        <input type="text" id="td-brand" value="${esc(t.brand)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Type</label>
-        <input type="text" id="td-type" value="${esc(t.type)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Billing Category</label>
-        <select id="td-billing-category" ${dis}>${billingCategoryOptions(t.billingCategory)}</select>
-      </div>
-      <div class="section-lbl">Status</div>
-      <div>${statusChip(t.active)}</div>`;
-
-                if (isAdmin) {
-                    footer.style.display = "";
-                    footer.innerHTML = `
-        <button class="btn btn-primary btn-sm" onclick="saveTruckDetail()">Save changes</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleTruckActive(${t.id})">${t.active === false ? "Restore" : "Remove"}</button>`;
-                } else {
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                }
-            }
-
-            function saveTruckDetail() {
-                const id = selectedTruckAdminId;
-                const plate = document.getElementById("td-plate").value;
-                const brand = document.getElementById("td-brand").value;
-                const type = document.getElementById("td-type").value;
-                const billingCategory = document.getElementById(
-                    "td-billing-category",
-                ).value;
-                if (!plate.trim()) {
+            function updateTruckField(id, field, value) {
+                const t = trucks.find((x) => x.id === id);
+                if (!t) return;
+                if (field === "plate" && !value.trim()) {
                     showToast("Plate number is required.", "error");
+                    renderTrucksAdmin();
                     return;
                 }
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
-                        const t = trucks.find((t) => t.id === id);
-                        if (t) Object.assign(t, r.truck);
-                        showToast("Truck updated.", "success");
-                        renderTrucksAdmin();
-                        renderTruckDetail();
+                const old = t[field];
+                t[field] = value;
+                bgSave("updateTruck", [id, { [field]: value }], {
+                    onOk: (r) => {
+                        Object.assign(t, r.truck);
                         renderTruckList();
                         renderDefaults();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateTruck(id, { plate, brand, type, billingCategory });
+                    },
+                    revert: () => {
+                        t[field] = old;
+                        renderTrucksAdmin();
+                    },
+                });
             }
 
             function toggleTruckActive(id) {
@@ -148,30 +85,18 @@
                 const verb = makeActive ? "restore" : "remove";
                 if (!confirm(`Are you sure you want to ${verb} ${t.plate}?`))
                     return;
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
+                bgSave("updateTruck", [id, { active: makeActive }], {
+                    onOk: (r) => {
                         Object.assign(t, r.truck);
                         showToast(
                             `${t.plate} ${makeActive ? "restored" : "removed"}.`,
                             "success",
                         );
                         renderTrucksAdmin();
-                        renderTruckDetail();
                         renderTruckList();
                         renderDefaults();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateTruck(id, { active: makeActive });
+                    },
+                });
             }
 
             function openAddTruckModal() {
@@ -227,6 +152,7 @@
                     "employees-show-inactive",
                 ).checked;
                 const tbody = document.getElementById("employees-tbody");
+                const isAdmin = currentUser.role === "Admin";
 
                 const filtered = employees.filter((e) => {
                     if (!showInactive && e.active === false) return false;
@@ -242,137 +168,50 @@
 
                 tbody.innerHTML = filtered
                     .map((e) => {
-                        const selCls =
-                            selectedEmployeeAdminId === e.id
-                                ? " row-selected"
-                                : "";
-                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectEmployeeAdmin(${e.id})">
+                        const f = (field, val) =>
+                            isAdmin
+                                ? `<input class="cell-input" value="${esc(val)}" onchange="updateEmployeeField(${e.id},'${field}',this.value)">`
+                                : esc(val) || "—";
+                        const roleSel = isAdmin
+                            ? `<select class="cell-select" onchange="updateEmployeeField(${e.id},'role',this.value)">
+                 <option value="Driver" ${e.role === "Driver" ? "selected" : ""}>Driver</option>
+                 <option value="Helper" ${e.role === "Helper" ? "selected" : ""}>Helper</option>
+                 <option value="Driver-Helper" ${e.role === "Driver-Helper" ? "selected" : ""}>Driver-Helper</option>
+               </select>`
+                            : `<span class="badge ${roleBadgeClass(e.role)}">${esc(e.role)}</span>`;
+                        return `<tr>
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
-    <td style="font-weight:500">${esc(e.nick)}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(e.firstName) || "—"}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(e.middleName) || "—"}</td>
-    <td style="font-size:11px;color:var(--muted)">${esc(e.lastName) || "—"}</td>
-    <td><span class="badge ${roleBadgeClass(e.role)}">${esc(e.role)}</span></td>
+    <td>${f("nick", e.nick)}</td>
+    <td>${f("firstName", e.firstName)}</td>
+    <td>${f("middleName", e.middleName)}</td>
+    <td>${f("lastName", e.lastName)}</td>
+    <td>${roleSel}</td>
     <td>${statusChip(e.active)}</td>
+    <td>${isAdmin ? rowActionBtn("toggleEmployeeActive", e.id, e.active) : ""}</td>
   </tr>`;
                     })
                     .join("");
             }
 
-            function selectEmployeeAdmin(id) {
-                selectedEmployeeAdminId = Number(id);
-                renderEmployeesAdmin();
-                renderEmployeeDetail();
-            }
-
-            function renderEmployeeDetail() {
-                const body = document.getElementById("employee-detail-body");
-                const footer = document.getElementById(
-                    "employee-detail-footer",
-                );
-
-                if (!selectedEmployeeAdminId) {
-                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🧑</div><div class="sub">Select an employee to view details</div></div>`;
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                    return;
-                }
-                const em = employees.find(
-                    (e) => Number(e.id) === Number(selectedEmployeeAdminId),
-                );
-                if (!em) {
-                    selectedEmployeeAdminId = null;
-                    renderEmployeeDetail();
-                    return;
-                }
-                const isAdmin = currentUser.role === "Admin";
-                const dis = isAdmin ? "" : "disabled";
-
-                body.innerHTML = `
-      <div class="form-row">
-        <label class="form-label">Nickname</label>
-        <input type="text" id="ed-nick" value="${esc(em.nick)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">First Name</label>
-        <input type="text" id="ed-first" value="${esc(em.firstName)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Middle Name</label>
-        <input type="text" id="ed-middle" value="${esc(em.middleName)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Last Name</label>
-        <input type="text" id="ed-last" value="${esc(em.lastName)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Role</label>
-        <select id="ed-role" ${dis}>
-          <option value="Driver" ${em.role === "Driver" ? "selected" : ""}>Driver</option>
-          <option value="Helper" ${em.role === "Helper" ? "selected" : ""}>Helper</option>
-          <option value="Driver-Helper" ${em.role === "Driver-Helper" ? "selected" : ""}>Driver-Helper</option>
-        </select>
-      </div>
-      <div class="section-lbl">Status</div>
-      <div>${statusChip(em.active)}</div>`;
-
-                if (isAdmin) {
-                    footer.style.display = "";
-                    footer.innerHTML = `
-        <button class="btn btn-primary btn-sm" onclick="saveEmployeeDetail()">Save changes</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleEmployeeActive(${em.id})">${em.active === false ? "Restore" : "Remove"}</button>`;
-                } else {
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                }
-            }
-
-            function saveEmployeeDetail() {
-                const id = selectedEmployeeAdminId;
-                const nick = document.getElementById("ed-nick").value;
-                const firstName = document.getElementById("ed-first").value;
-                const middleName =
-                    document.getElementById("ed-middle").value;
-                const lastName = document.getElementById("ed-last").value;
-                const role = document.getElementById("ed-role").value;
-                if (!nick.trim()) {
+            function updateEmployeeField(id, field, value) {
+                const em = employees.find((x) => x.id === id);
+                if (!em) return;
+                if (field === "nick" && !value.trim()) {
                     showToast("Nickname is required.", "error");
+                    renderEmployeesAdmin();
                     return;
                 }
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
-                        const em = employees.find((e) => e.id === id);
-                        if (em)
-                            Object.assign(em, {
-                                nick,
-                                firstName,
-                                middleName,
-                                lastName,
-                                role,
-                            });
-                        showToast("Employee updated.", "success");
-                        renderEmployeesAdmin();
-                        renderEmployeeDetail();
+                const old = em[field];
+                em[field] = value;
+                bgSave("updateEmployee", [id, { [field]: value }], {
+                    onOk: () => {
                         renderEmpList();
-                        renderDefEmpList();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateEmployee(id, {
-                        nick,
-                        firstName,
-                        middleName,
-                        lastName,
-                        role,
-                    });
+                    },
+                    revert: () => {
+                        em[field] = old;
+                        renderEmployeesAdmin();
+                    },
+                });
             }
 
             function toggleEmployeeActive(id) {
@@ -382,31 +221,18 @@
                 const verb = makeActive ? "restore" : "remove";
                 if (!confirm(`Are you sure you want to ${verb} ${em.nick}?`))
                     return;
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
+                bgSave("updateEmployee", [id, { active: makeActive }], {
+                    onOk: () => {
                         em.active = makeActive;
                         showToast(
                             `${em.nick} ${makeActive ? "restored" : "removed"}.`,
                             "success",
                         );
                         renderEmployeesAdmin();
-                        renderEmployeeDetail();
                         renderEmpList();
-                        renderDefEmpList();
                         renderUnassignedCrewStat();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateEmployee(id, { active: makeActive });
+                    },
+                });
             }
 
             function openAddEmployeeModal() {
@@ -447,7 +273,6 @@
                         showToast(`${r.employee.nick} added.`, "success");
                         renderEmployeesAdmin();
                         renderEmpList();
-                        renderDefEmpList();
                         renderUnassignedCrewStat();
                     })
                     .withFailureHandler((e) => {
@@ -471,6 +296,7 @@
                 const tbody = document.getElementById(
                     "billing-categories-tbody",
                 );
+                const isAdmin = currentUser.role === "Admin";
 
                 const filtered = billingCategories.filter(
                     (c) => showInactive || c.active !== false,
@@ -481,106 +307,47 @@
 
                 tbody.innerHTML = filtered
                     .map((c) => {
-                        const selCls =
-                            selectedBillingCategoryId === c.id
-                                ? " row-selected"
-                                : "";
-                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectBillingCategory(${c.id})">
+                        const nameCell = isAdmin
+                            ? `<input class="cell-input" value="${esc(c.name)}" onchange="updateBillingCategoryName(${c.id},this.value)">`
+                            : `<span style="font-family:'DM Mono',monospace">${esc(c.name)}</span>`;
+                        return `<tr>
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${c.id}</td>
-    <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(c.name)}</td>
+    <td>${nameCell}</td>
     <td>${statusChip(c.active)}</td>
+    <td>${isAdmin ? rowActionBtn("toggleBillingCategoryActive", c.id, c.active) : ""}</td>
   </tr>`;
                     })
                     .join("");
             }
 
-            function selectBillingCategory(id) {
-                selectedBillingCategoryId = Number(id);
-                renderBillingCategoriesAdmin();
-                renderBillingCategoryDetail();
-            }
-
-            function renderBillingCategoryDetail() {
-                const body = document.getElementById(
-                    "billing-category-detail-body",
-                );
-                const footer = document.getElementById(
-                    "billing-category-detail-footer",
-                );
-
-                if (!selectedBillingCategoryId) {
-                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🏷️</div><div class="sub">Select a category to view details</div></div>`;
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                    return;
-                }
-                const c = billingCategories.find(
-                    (c) =>
-                        Number(c.id) === Number(selectedBillingCategoryId),
-                );
-                if (!c) {
-                    selectedBillingCategoryId = null;
-                    renderBillingCategoryDetail();
-                    return;
-                }
-                const isAdmin = currentUser.role === "Admin";
-                const dis = isAdmin ? "" : "disabled";
-
-                body.innerHTML = `
-      <div class="form-row">
-        <label class="form-label">Name</label>
-        <input type="text" id="bcd-name" value="${esc(c.name)}" ${dis}>
-      </div>
-      <div class="section-lbl">Status</div>
-      <div>${statusChip(c.active)}</div>`;
-
-                if (isAdmin) {
-                    footer.style.display = "";
-                    footer.innerHTML = `
-        <button class="btn btn-primary btn-sm" onclick="saveBillingCategoryDetail()">Save changes</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleBillingCategoryActive(${c.id})">${c.active === false ? "Restore" : "Remove"}</button>`;
-                } else {
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                }
-            }
-
-            function saveBillingCategoryDetail() {
-                const id = selectedBillingCategoryId;
-                const name = document.getElementById("bcd-name").value;
+            function updateBillingCategoryName(id, name) {
+                const bc = billingCategories.find((c) => c.id === id);
+                if (!bc) return;
                 if (!name.trim()) {
                     showToast("Name is required.", "error");
+                    renderBillingCategoriesAdmin();
                     return;
                 }
-                const bc = billingCategories.find((c) => c.id === id);
-                const oldName = bc ? bc.name : null;
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
-                        if (bc) Object.assign(bc, r.billingCategory);
+                const oldName = bc.name;
+                bc.name = name;
+                bgSave("updateBillingCategory", [id, { name }], {
+                    onOk: (r) => {
+                        Object.assign(bc, r.billingCategory);
+                        // Cascade the rename onto any trucks that carried the
+                        // old name, so the Trucks panel stays in sync.
                         if (oldName && oldName !== r.billingCategory.name) {
                             trucks.forEach((t) => {
                                 if (t.billingCategory === oldName)
-                                    t.billingCategory =
-                                        r.billingCategory.name;
+                                    t.billingCategory = r.billingCategory.name;
                             });
                         }
-                        showToast("Billing category updated.", "success");
-                        renderBillingCategoriesAdmin();
-                        renderBillingCategoryDetail();
                         renderTrucksAdmin();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateBillingCategory(id, { name });
+                    },
+                    revert: () => {
+                        bc.name = oldName;
+                        renderBillingCategoriesAdmin();
+                    },
+                });
             }
 
             function toggleBillingCategoryActive(id) {
@@ -590,28 +357,16 @@
                 const verb = makeActive ? "restore" : "remove";
                 if (!confirm(`Are you sure you want to ${verb} ${c.name}?`))
                     return;
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
+                bgSave("updateBillingCategory", [id, { active: makeActive }], {
+                    onOk: (r) => {
                         Object.assign(c, r.billingCategory);
                         showToast(
                             `${c.name} ${makeActive ? "restored" : "removed"}.`,
                             "success",
                         );
                         renderBillingCategoriesAdmin();
-                        renderBillingCategoryDetail();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateBillingCategory(id, { active: makeActive });
+                    },
+                });
             }
 
             function openAddBillingCategoryModal() {
@@ -656,6 +411,7 @@
                     "route-type-map-show-inactive",
                 ).checked;
                 const tbody = document.getElementById("route-type-map-tbody");
+                const isAdmin = currentUser.role === "Admin";
 
                 const filtered = routeTypeMap.filter(
                     (m) => showInactive || m.active !== false,
@@ -666,112 +422,47 @@
 
                 tbody.innerHTML = filtered
                     .map((m) => {
-                        const selCls =
-                            selectedRouteTypeMapId === m.id
-                                ? " row-selected"
-                                : "";
-                        return `<tr class="${selCls.trim()}" style="cursor:pointer" onclick="selectRouteTypeMap(${m.id})">
+                        const codeCell = isAdmin
+                            ? `<input class="cell-input" value="${esc(m.fileTypeCode)}" onchange="updateRouteTypeMapField(${m.id},'fileTypeCode',this.value)">`
+                            : `<span style="font-family:'DM Mono',monospace">${esc(m.fileTypeCode)}</span>`;
+                        const catCell = isAdmin
+                            ? `<select class="cell-select" onchange="updateRouteTypeMapField(${m.id},'billingCategory',this.value)">${billingCategoryOptions(m.billingCategory)}</select>`
+                            : `<span style="font-family:'DM Mono',monospace">${esc(m.billingCategory)}</span>`;
+                        return `<tr>
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${m.id}</td>
-    <td style="font-weight:500;font-family:'DM Mono',monospace">${esc(m.fileTypeCode)}</td>
-    <td style="font-family:'DM Mono',monospace">${esc(m.billingCategory)}</td>
+    <td>${codeCell}</td>
+    <td>${catCell}</td>
     <td>${statusChip(m.active)}</td>
+    <td>${isAdmin ? rowActionBtn("toggleRouteTypeMapActive", m.id, m.active) : ""}</td>
   </tr>`;
                     })
                     .join("");
             }
 
-            function selectRouteTypeMap(id) {
-                selectedRouteTypeMapId = Number(id);
-                renderRouteTypeMapAdmin();
-                renderRouteTypeMapDetail();
-            }
-
-            function renderRouteTypeMapDetail() {
-                const body = document.getElementById(
-                    "route-type-map-detail-body",
-                );
-                const footer = document.getElementById(
-                    "route-type-map-detail-footer",
-                );
-
-                if (!selectedRouteTypeMapId) {
-                    body.innerHTML = `<div class="empty-board" style="padding:24px 0"><div class="icon">🗺️</div><div class="sub">Select a mapping to view details</div></div>`;
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                    return;
-                }
-                const m = routeTypeMap.find(
-                    (m) => Number(m.id) === Number(selectedRouteTypeMapId),
-                );
-                if (!m) {
-                    selectedRouteTypeMapId = null;
-                    renderRouteTypeMapDetail();
-                    return;
-                }
-                const isAdmin = currentUser.role === "Admin";
-                const dis = isAdmin ? "" : "disabled";
-
-                body.innerHTML = `
-      <div class="form-row">
-        <label class="form-label">File type code</label>
-        <input type="text" id="rtmd-code" value="${esc(m.fileTypeCode)}" ${dis}>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Billing category</label>
-        <select id="rtmd-category" ${dis}>${billingCategoryOptions(m.billingCategory)}</select>
-      </div>
-      <div class="section-lbl">Status</div>
-      <div>${statusChip(m.active)}</div>`;
-
-                if (isAdmin) {
-                    footer.style.display = "";
-                    footer.innerHTML = `
-        <button class="btn btn-primary btn-sm" onclick="saveRouteTypeMapDetail()">Save changes</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="toggleRouteTypeMapActive(${m.id})">${m.active === false ? "Restore" : "Remove"}</button>`;
-                } else {
-                    footer.style.display = "none";
-                    footer.innerHTML = "";
-                }
-            }
-
-            function saveRouteTypeMapDetail() {
-                const id = selectedRouteTypeMapId;
-                const fileTypeCode = document
-                    .getElementById("rtmd-code")
-                    .value.trim();
-                const billingCategory =
-                    document.getElementById("rtmd-category").value;
-                if (!fileTypeCode) {
-                    showToast("File type code is required.", "error");
-                    return;
-                }
-                if (!billingCategory) {
-                    showToast("Billing category is required.", "error");
-                    return;
-                }
+            function updateRouteTypeMapField(id, field, value) {
                 const m = routeTypeMap.find((x) => x.id === id);
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
-                        if (m) Object.assign(m, r.mapping);
-                        showToast("Mapping updated.", "success");
+                if (!m) return;
+                if (!value) {
+                    showToast(
+                        field === "fileTypeCode"
+                            ? "File type code is required."
+                            : "Billing category is required.",
+                        "error",
+                    );
+                    renderRouteTypeMapAdmin();
+                    return;
+                }
+                const old = m[field];
+                m[field] = value;
+                bgSave("updateRouteTypeMapping", [id, { [field]: value }], {
+                    onOk: (r) => {
+                        Object.assign(m, r.mapping);
+                    },
+                    revert: () => {
+                        m[field] = old;
                         renderRouteTypeMapAdmin();
-                        renderRouteTypeMapDetail();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateRouteTypeMapping(id, {
-                        fileTypeCode,
-                        billingCategory,
-                    });
+                    },
+                });
             }
 
             function toggleRouteTypeMapActive(id) {
@@ -785,28 +476,16 @@
                     )
                 )
                     return;
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
-                        }
+                bgSave("updateRouteTypeMapping", [id, { active: makeActive }], {
+                    onOk: (r) => {
                         Object.assign(m, r.mapping);
                         showToast(
                             `${m.fileTypeCode} ${makeActive ? "restored" : "removed"}.`,
                             "success",
                         );
                         renderRouteTypeMapAdmin();
-                        renderRouteTypeMapDetail();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .updateRouteTypeMapping(id, { active: makeActive });
+                    },
+                });
             }
 
             function openAddRouteTypeMapModal() {

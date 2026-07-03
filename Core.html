@@ -35,14 +35,13 @@
 
             // Dispatch state
             let dispatchData = null; // { trips, date }
-            let selectedTripId = null;
             let statusFilter = "all";
             let selectedForGroup = new Set(); // trip ids checked for convoy grouping
             let dispatchView = "table"; // "table" | "board" (crew drag-and-drop)
             let saving = false;
             let todayRosterExpanded = false;
 
-            // Roster state
+            // Roster state (Today's Roster assignment tool)
             let selectedRosterTruckId = null;
             let selectedRosterEmpId = null;
             let empFilter = "all";
@@ -50,20 +49,6 @@
             // Import state
             let importRows = []; // parsed from xlsx
             let importExcluded = new Set(); // indices excluded by dispatcher
-
-            // Default assignments edit state
-            let selectedDefTruckId = null;
-            let selectedDefEmpId = null;
-            let defEmpFilter = "all";
-
-            // Outlets admin state
-            let selectedOutletId = null;
-
-            // Trucks/Employees/Billing Categories admin state
-            let selectedTruckAdminId = null;
-            let selectedEmployeeAdminId = null;
-            let selectedBillingCategoryId = null;
-            let selectedRouteTypeMapId = null;
 
             // ── AUTH STATE ────────────────────────────────────────────
             // Session token from a verified Google sign-in (see Auth.gs). It is
@@ -137,6 +122,34 @@
                     },
                 });
                 return proxy;
+            }
+
+            // ── OPTIMISTIC SAVE ───────────────────────────────────────
+            // Inline edits apply to the local model and re-render immediately
+            // (feels instant), then persist in the background. On failure we
+            // run `revert` to undo the local change and re-render.
+            // ponytail: last-write-wins, no request queue — fine for this
+            // low-concurrency ops tool; upgrade to per-record locking only if
+            // two dispatchers start racing on the same trip.
+            function bgSave(rpcName, args, opts) {
+                opts = opts || {};
+                setSyncing(true);
+                srv()
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (r && r.success === false) {
+                            showToast(r.error || "Save failed", "error");
+                            if (opts.revert) opts.revert();
+                            return;
+                        }
+                        if (opts.onOk) opts.onOk(r);
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + (e && e.message), "error");
+                        if (opts.revert) opts.revert();
+                    })
+                    [rpcName](...args);
             }
 
             // ── BOOT ──────────────────────────────────────────────────
@@ -242,8 +255,6 @@
                 renderEmpList();
                 renderUnassignedCrewStat();
                 renderDefaults();
-                renderDefEmpList();
-                renderDefDetail();
                 renderOutlets();
                 populateAddTripSelects();
                 loadDispatch();
@@ -382,8 +393,6 @@
                 }
                 if (name === "roster") {
                     renderDefaults();
-                    renderDefEmpList();
-                    renderDefDetail();
                 }
                 if (name === "outlets") renderOutlets();
                 if (name === "trucks") renderTrucksAdmin();

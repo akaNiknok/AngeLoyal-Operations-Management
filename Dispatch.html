@@ -9,7 +9,6 @@
                         dispatchData = data;
                         selectedForGroup.clear();
                         renderDispatch();
-                        if (selectedTripId) renderSidebar();
                         setSyncing(false);
                     })
                     .withFailureHandler((e) => {
@@ -112,6 +111,7 @@
                     .querySelectorAll("#dispatch-table .th-select")
                     .forEach((th) => (th.style.display = showSelect ? "" : "none"));
 
+                const canE = canEdit();
                 tbody.innerHTML = trips
                     .map((t, i) => {
                         const sourceCls =
@@ -120,33 +120,36 @@
                                 : t.source === "Carry-over"
                                   ? "source-carryover"
                                   : "";
-                        const selCls =
-                            t.id === selectedTripId ? "selected" : "";
 
-                        const statusCls = statusChipClass(t.tripStatus);
-                        const statusLabel = shortStatus(t.tripStatus);
-
-                        const outletName = (outletMap[t.outletId] || {}).outletName || "";
+                        const outlet = outletMap[t.outletId] || {};
+                        const outletName = outlet.outletName || "";
+                        const custGroup = outlet.customerGroup || "";
                         const truckPlate = (truckMap[t.truckId] || {}).plate || "";
                         const assignedTruckBillingCat = (truckMap[t.truckId] || {}).billingCategory || "";
                         const driverNick = (empMap[t.driverId] || {}).nick || "";
-                        const helperDetails = (t.helperIds || [])
-                            .map((hid) => empMap[hid])
-                            .filter(Boolean);
+                        const helperNicks = (t.helperIds || [])
+                            .map((hid) => (empMap[hid] || {}).nick)
+                            .filter(Boolean)
+                            .join(", ");
 
-                        const driverHtml = driverNick
-                            ? `<div class="crew-cell">
-           <span class="crew-driver">${esc(driverNick)}</span>
-           ${helperDetails.length ? `<span class="crew-helper">${esc(helperDetails.map((h) => h.nick).join(", "))}</span>` : ""}
-         </div>`
+                        // Crew is a single unit: pick a truck and its default
+                        // driver + helpers ride along. The sub-line shows the
+                        // actual assigned crew (may differ = substitution).
+                        const crewSub = driverNick
+                            ? `<span class="crew-driver">${esc(driverNick)}</span>${helperNicks ? `<span class="crew-helper">+${esc(helperNicks)}</span>` : ""}`
                             : `<span class="crew-empty">Unassigned</span>`;
+                        const crewCell = canE
+                            ? `<select class="cell-select" onchange="assignCrew(${t.id}, this.value)">${truckCrewOptions(t.truckId)}</select>
+         <div class="crew-cell">${crewSub}</div>`
+                            : `<div class="crew-cell">${crewSub}</div>`;
 
-                        let wbHtml = '<span class="wb-none">—</span>';
-                        if (t.waybillConfirmed) {
-                            wbHtml = `<span class="wb-confirmed">${esc(t.waybillConfirmed)}</span>`;
-                        } else if (t.waybillSuggested) {
-                            wbHtml = `<span class="wb-suggested">${esc(t.waybillSuggested)}</span>`;
-                        }
+                        const statusCell = canE
+                            ? `<select class="cell-select ${statusChipClass(t.tripStatus)}" onchange="changeStatus(${t.id}, this.value)">${statusSelectOptions(t.tripStatus)}</select>`
+                            : `<span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span>`;
+
+                        const remarksCell = canE
+                            ? `<input class="cell-input" type="text" value="${esc(t.remarks || "")}" placeholder="—" onchange="changeRemarks(${t.id}, this.value)">`
+                            : `<span class="crew-helper">${esc(t.remarks || "")}</span>`;
 
                         const billingCat = t.truckBillingCategory || "";
                         const foFull =
@@ -160,10 +163,14 @@
                             ? `<span class="convoy-badge ${cgCls}">C${esc(t.convoyGroup)}</span>`
                             : "";
                         const selectTd = showSelect
-                            ? `<td class="td-select" onclick="event.stopPropagation()"><input type="checkbox" ${selectedForGroup.has(t.id) ? "checked" : ""} onchange="toggleConvoySelect(${t.id}, this)"></td>`
+                            ? `<td class="td-select"><input type="checkbox" ${selectedForGroup.has(t.id) ? "checked" : ""} onchange="toggleConvoySelect(${t.id}, this)"></td>`
                             : "";
+                        const delBtn =
+                            canE && t.source === "Import"
+                                ? ` <button class="row-del" title="Remove trip" onclick="confirmDeleteTrip(${t.id})">✕</button>`
+                                : "";
 
-                        return `<tr class="${sourceCls} ${selCls} ${foGroupCls[i]} ${cgCls}" onclick="selectTrip(${t.id})">
+                        return `<tr class="${sourceCls} ${foGroupCls[i]} ${cgCls}">
       ${selectTd}
       <td class="td-fo">${cgBadge}${esc(foFull) || "—"}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
@@ -172,12 +179,14 @@
       <td class="td-qty">${t.cbm || "—"}</td>
       <td>${esc(t.tier) || "—"}</td>
       <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(billingCat) || "—"}</span></td>
-      <td class="td-plate col-divider">${esc(truckPlate) || "—"}</td>
+      <td class="td-crew col-divider">${crewCell}</td>
       <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(assignedTruckBillingCat) || "—"}</span></td>
-      <td>${driverHtml}</td>
-      <td class="col-divider"><span class="status-chip ${statusCls}">${statusLabel}</span></td>
-      <td class="td-wb">${wbHtml}</td>
-      <td><span style="font-size:10px;color:var(--hint)">${esc(t.source)}</span></td>
+      <td class="td-plate">${esc(truckPlate) || "—"}</td>
+      <td><span class="status-chip" style="background:var(--bg);color:var(--muted)">${esc(custGroup) || "—"}</span></td>
+      <td class="td-status col-divider">${statusCell}</td>
+      <td class="td-wb">${waybillCellHtml(t, canE)}</td>
+      <td class="td-remarks">${remarksCell}</td>
+      <td><span style="font-size:10px;color:var(--hint)">${esc(t.source)}</span>${delBtn}</td>
     </tr>`;
                     })
                     .join("");
@@ -259,400 +268,186 @@
                 loadDispatch();
             }
 
-            // ── TRIP SELECTION & SIDEBAR ──────────────────────────────
-            function selectTrip(id) {
-                if (selectedTripId === id) {
-                    closeSidebar();
-                    return;
-                }
-                selectedTripId = id;
-                renderDispatch(); // re-highlight row
-                renderSidebar();
-                document.getElementById("trip-sidebar").style.display = "";
-            }
-
-            function closeSidebar() {
-                selectedTripId = null;
-                document.getElementById("trip-sidebar").style.display = "none";
-                renderDispatch();
-            }
-
-            function renderSidebar() {
-                if (!selectedTripId || !dispatchData) return;
-                const trip = (dispatchData.trips || []).find(
-                    (t) => t.id === selectedTripId,
-                );
-                if (!trip) return;
-
-                const outletMap = indexById(outlets);
-                const outletName = (outletMap[trip.outletId] || {}).outletName || "";
-
-                document.getElementById("sb-title").textContent =
-                    outletName || `Trip #${trip.id}`;
-
-                const foFull =
-                    trip.foNumber +
-                    (trip.foSplitSuffix ? "-" + trip.foSplitSuffix : "");
-
-                let bodyHtml = `
-    <div class="field-group">
-      <div class="field-label">FO Number</div>
-      <div class="field-value mono">${esc(foFull) || "—"}</div>
-      ${trip.convoyGroup ? `<div class="field-value muted" style="font-size:11px">Convoy C${esc(trip.convoyGroup)} — travels with its group</div>` : ""}
-    </div>
-    <div class="field-group">
-      <div class="field-label">Outlet</div>
-      <div class="field-value">${esc(outletName) || "—"}</div>
-      <div class="field-value muted" style="font-size:11px">${esc(trip.area) || ""}</div>
-    </div>
-    <div class="field-group" style="display:flex;gap:16px">
-      <div>
-        <div class="field-label">Qty</div>
-        <div class="field-value mono">${trip.quantity || "—"}</div>
-      </div>
-      <div>
-        <div class="field-label">CBM</div>
-        <div class="field-value mono">${trip.cbm || "—"}</div>
-      </div>
-      <div>
-        <div class="field-label">Type</div>
-        <div class="field-value mono">${esc(trip.truckBillingCategory) || "—"}</div>
-      </div>
-    </div>
-
-    <hr style="border:none;border-top:1px solid var(--border);margin:10px 0">
-
-    <div class="field-label">Assign truck</div>
-    <div class="assign-row" style="margin-bottom:10px">
-      <select id="sb-truck" onchange="handleSbTruckChange()">${truckOptions(trip.truckId)}</select>
-    </div>
-
-    <div class="field-label">Assign driver</div>
-    <div class="assign-row" style="margin-bottom:10px">
-      <select id="sb-driver">${driverOptions(trip.driverId)}</select>
-    </div>
-
-    <div class="field-label">Helper(s)</div>
-    <div class="assign-row" style="margin-bottom:10px">
-      <select id="sb-helper" multiple size="3" onchange="enforceHelperCap(this)">${helperOptions(trip.helperIds)}</select>
-    </div>
-
-    <hr style="border:none;border-top:1px solid var(--border);margin:10px 0">
-
-    <div class="field-label">Trip status</div>
-    <div class="status-select-grid">
-      ${statusOptions(trip.tripStatus)}
-    </div>
-
-    <div style="margin-top:10px">
-      <div class="field-label">Remarks</div>
-      <textarea class="remarks-area" id="sb-remarks">${esc(trip.remarks || "")}</textarea>
-    </div>
-
-    <hr style="border:none;border-top:1px solid var(--border);margin:10px 0">
-
-    <div class="field-label">Waybill</div>
-    ${waybillSectionHtml(trip)}
-
-    <div style="margin-top:4px;font-size:10px;color:var(--hint)">
-      Added: ${esc(trip.addedAt || "")}<br>
-      By: ${esc(trip.addedBy || "")}
-      ${trip.parentTripId ? `<br>Carry-over from Trip #${trip.parentTripId}` : ""}
-    </div>
-  `;
-
-                document.getElementById("sb-body").innerHTML = bodyHtml;
-
-                // Footer save button
-                const canE = canEdit();
-                document.getElementById("sb-footer").innerHTML = canE
-                    ? `<button class="btn btn-primary" style="width:100%" onclick="saveSidebar(${trip.id})">Save changes</button>
-       <button class="btn btn-danger btn-sm" style="width:100%;margin-top:2px" onclick="confirmDeleteTrip(${trip.id})" ${trip.source !== "Import" ? 'style="display:none"' : ""}>Remove this trip</button>`
-                    : `<div style="font-size:11px;color:var(--hint);text-align:center">View only — your role cannot edit trips.</div>`;
-            }
-
-            function waybillSectionHtml(trip) {
-                if (trip.waybillConfirmed) {
-                    return `<div class="field-value mono wb-confirmed">${esc(trip.waybillConfirmed)}</div>
-            <div style="font-size:10px;color:var(--green);margin-top:3px">✓ Confirmed</div>`;
-                }
-                const suggested = trip.waybillSuggested || "";
-                const prefixOpts = waybillPrefixes
-                    .map(
-                        (p) =>
-                            `<option value="${p.id}" ${suggested.startsWith(p.prefix) ? "selected" : ""}>${esc(p.prefix)} — ${esc(p.companyName)}</option>`,
-                    )
-                    .join("");
-                const canConfirm = canEdit() && !!trip.suggestedWaybillId;
-                return `<div class="wb-confirm-row">
-    <input type="text" id="sb-wb-number" value="${esc(suggested)}" placeholder="e.g. AY-10761" style="font-family:'DM Mono',monospace;font-size:12px">
-    <button class="btn btn-ghost btn-sm" onclick="confirmWaybillFromSidebar(${trip.id})" ${canConfirm ? "" : "disabled"}>Confirm</button>
-  </div>
-  <div style="font-size:10px;color:var(--hint);margin-top:3px">${suggested ? "Suggested — edit if needed, then confirm to lock." : "No waybill suggested yet."}</div>`;
-            }
-
-            function statusOptions(current) {
-                const opts = [
-                    ["Prepping", "sc-prepping", "Prepping"],
-                    ["Scheduled", "sc-scheduled", "Scheduled"],
-                    ["Preload", "sc-preload", "Preload"],
-                    ["Delivered", "sc-delivered", "Delivered"],
-                    ["Undelivered", "sc-undelivered", "Undelivered"],
-                    ["Foul Trip - No Redeliver", "sc-fouln", "Foul – No RD"],
-                    ["Foul Trip - For Redeliver", "sc-foutr", "Foul – For RD"],
-                    ["Redeliver", "sc-redeliver", "Redeliver"],
-                    ["Two-Day Trip", "sc-twoday", "Two-Day"],
-                ];
-                return opts
-                    .map(
-                        ([val, cls, lbl]) =>
-                            `<div class="status-option ${cls} ${current === val ? "active" : ""}" onclick="selectStatusOption(this,'${val}')">${lbl}</div>`,
-                    )
-                    .join("");
-            }
-
-            function selectStatusOption(el, val) {
-                document
-                    .querySelectorAll(".status-option")
-                    .forEach((o) => o.classList.remove("active"));
-                el.classList.add("active");
-                // Show warning for carry-over statuses
-                const warnEl = document.getElementById("sb-carryover-warn");
-                const isCarry =
-                    val === "Foul Trip - For Redeliver" || val === "Redeliver";
-                if (warnEl) warnEl.style.display = isCarry ? "" : "none";
-            }
-
-            function truckOptions(selectedId) {
+            // ── INLINE TRIP EDITING ───────────────────────────────────
+            // Options for the crew <select>: one per active truck, labelled
+            // with its default driver so a dispatcher picks a whole crew, not
+            // a bare truck.
+            function truckCrewOptions(selectedTruckId) {
+                const empMap = indexById(employees);
                 const opts = trucks
                     .filter((t) => t.active !== false)
-                    .map(
-                        (t) =>
-                            `<option value="${t.id}" ${Number(t.id) === Number(selectedId) ? "selected" : ""}>${esc(t.plate)} — ${esc(t.type)}</option>`,
-                    )
+                    .map((t) => {
+                        const def = defaultAssignments.find(
+                            (a) => Number(a.truckId) === Number(t.id),
+                        );
+                        const dnick =
+                            def && def.defaultDriverId
+                                ? (empMap[def.defaultDriverId] || {}).nick
+                                : "";
+                        const label =
+                            esc(t.plate) + (dnick ? " · " + esc(dnick) : "");
+                        return `<option value="${t.id}" ${Number(t.id) === Number(selectedTruckId) ? "selected" : ""}>${label}</option>`;
+                    })
                     .join("");
                 return `<option value="">— Unassigned —</option>${opts}`;
             }
 
-            function driverOptions(selectedId) {
-                const opts = employees
-                    .filter(
-                        (e) =>
-                            (e.role === "Driver" ||
-                                e.role === "Driver-Helper") &&
-                            e.active !== false,
-                    )
+            function statusSelectOptions(current) {
+                const vals = [
+                    "Prepping",
+                    "Scheduled",
+                    "Preload",
+                    "Delivered",
+                    "Undelivered",
+                    "Foul Trip - No Redeliver",
+                    "Foul Trip - For Redeliver",
+                    "Redeliver",
+                    "Two-Day Trip",
+                ];
+                return vals
                     .map(
-                        (e) =>
-                            `<option value="${e.id}" ${Number(e.id) === Number(selectedId) ? "selected" : ""}>${esc(e.nick)}</option>`,
-                    )
-                    .join("");
-                return `<option value="">— Unassigned —</option>${opts}`;
-            }
-
-            function helperOptions(selectedIds) {
-                const selSet = new Set((selectedIds || []).map(Number));
-                return employees
-                    .filter(
-                        (e) =>
-                            (e.role === "Helper" ||
-                                e.role === "Driver-Helper") &&
-                            e.active !== false,
-                    )
-                    .map(
-                        (e) =>
-                            `<option value="${e.id}" ${selSet.has(Number(e.id)) ? "selected" : ""}>${esc(e.nick)}</option>`,
+                        (v) =>
+                            `<option value="${esc(v)}" ${current === v ? "selected" : ""}>${esc(shortStatus(v))}</option>`,
                     )
                     .join("");
             }
 
-            // Trips carry at most 2 helpers — drop the oldest extra selection.
-            function enforceHelperCap(sel) {
-                const selected = Array.from(sel.selectedOptions);
-                if (selected.length > 2) {
-                    selected[0].selected = false;
-                    showToast("A trip can have at most 2 helpers.", "warning");
+            function waybillCellHtml(t, canE) {
+                if (t.waybillConfirmed) {
+                    return `<span class="wb-confirmed">${esc(t.waybillConfirmed)}</span>`;
                 }
+                const suggested = t.waybillSuggested || "";
+                if (canE && t.suggestedWaybillId) {
+                    return `<span class="wb-inline"><input id="wb-in-${t.id}" type="text" class="cell-input wb-in" value="${esc(suggested)}" placeholder="AY-…"><button class="row-confirm" onclick="confirmWaybillInline(${t.id})">✓</button></span>`;
+                }
+                return suggested
+                    ? `<span class="wb-suggested">${esc(suggested)}</span>`
+                    : `<span class="wb-none">—</span>`;
             }
 
-            function handleSbTruckChange() {
-                // When truck changes, pre-fill driver from Default Assignments
-                const truckId = Number(
-                    document.getElementById("sb-truck").value,
-                );
-                if (!truckId) return;
-                const def = defaultAssignments.find(
-                    (d) => Number(d.truckId) === truckId,
-                );
-                if (!def) return;
-                const driverSel = document.getElementById("sb-driver");
-                if (driverSel && def.defaultDriverId) {
-                    driverSel.value = def.defaultDriverId;
-                }
-            }
-
-            function saveSidebar(tripId) {
-                if (!canEdit() || saving) return;
+            // Assign a whole crew (truck + its default driver & helpers) to a
+            // trip in one move. Optimistic: apply + re-render immediately.
+            function assignCrew(tripId, truckIdRaw) {
                 const trip = (dispatchData.trips || []).find(
                     (t) => t.id === tripId,
                 );
                 if (!trip) return;
-
-                const newTruckId =
-                    Number(document.getElementById("sb-truck").value) || null;
-                const newDriverId =
-                    Number(document.getElementById("sb-driver").value) || null;
-                const newHelperIds = Array.from(
-                    document.getElementById("sb-helper").selectedOptions,
-                )
-                    .map((o) => Number(o.value))
-                    .filter(Boolean);
-                const newRemarks = document.getElementById("sb-remarks").value;
-                const activeStatusEl = document.querySelector(
-                    ".status-option.active",
-                );
-                const newStatus = activeStatusEl
-                    ? activeStatusEl.textContent.trim()
-                    : null;
-
-                // Map short labels back to full status values
-                const statusMap = {
-                    Prepping: "Prepping",
-                    Scheduled: "Scheduled",
-                    Preload: "Preload",
-                    Delivered: "Delivered",
-                    Undelivered: "Undelivered",
-                    "Foul – No RD": "Foul Trip - No Redeliver",
-                    "Foul – For RD": "Foul Trip - For Redeliver",
-                    Redeliver: "Redeliver",
-                    "Two-Day": "Two-Day Trip",
-                };
-                const fullStatus = statusMap[newStatus] || newStatus;
-
-                // Check for duplicate driver assignment
-                const driverConflict =
-                    newDriverId &&
-                    (dispatchData.trips || []).some(
-                        (t) =>
-                            t.id !== tripId &&
-                            t.driverId === newDriverId &&
-                            !["Delivered", "Foul Trip - No Redeliver"].includes(
-                                t.tripStatus,
-                            ),
+                const truckId = Number(truckIdRaw) || null;
+                let driverId = null;
+                let helperIds = [];
+                if (truckId) {
+                    const def = defaultAssignments.find(
+                        (a) => Number(a.truckId) === truckId,
                     );
-                if (driverConflict) {
-                    const d = employees.find(
-                        (e) => Number(e.id) === newDriverId,
-                    );
-                    const outletMap = indexById(outlets);
-                    const conflict = (dispatchData.trips || []).find(
-                        (t) => t.id !== tripId && t.driverId === newDriverId,
-                    );
-                    const conflictOutlet = conflict
-                        ? (outletMap[conflict.outletId] || {}).outletName
-                        : "";
-                    if (
-                        !confirm(
-                            `⚠ ${d?.nick || "This driver"} is already assigned to "${conflictOutlet || "another trip"}". Assign anyway?`,
-                        )
-                    )
-                        return;
+                    if (def) {
+                        driverId =
+                            def.defaultDriverId != null
+                                ? Number(def.defaultDriverId)
+                                : null;
+                        helperIds = (def.defaultHelperIds || []).map(Number);
+                    }
                 }
-
-                saving = true;
-                setSyncing(true);
-
-                const changes = {
-                    truckId: newTruckId,
-                    driverId: newDriverId,
-                    helperIds: newHelperIds,
-                    tripStatus: fullStatus,
-                    remarks: newRemarks,
+                const old = {
+                    truckId: trip.truckId,
+                    driverId: trip.driverId,
+                    helperIds: trip.helperIds,
+                    truckBillingCategory: trip.truckBillingCategory,
                 };
-
-                srv()
-                    .withSuccessHandler((r) => {
-                        saving = false;
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Save failed: " + r.error, "error");
-                            return;
+                Object.assign(trip, { truckId, driverId, helperIds });
+                renderDispatch();
+                bgSave("saveTripChanges", [tripId, { truckId, driverId, helperIds }], {
+                    onOk: (r) => {
+                        if (r.trip) {
+                            Object.assign(trip, r.trip);
+                            renderDispatch();
                         }
-                        Object.assign(trip, r.trip);
                         if (r.routeFrequencyWarning) {
                             showToast(
                                 `⚠ Driver assigned to ${r.routeFrequencyWarning.outletName} ${r.routeFrequencyWarning.count}× in last 21 days`,
                                 "warning",
                             );
                         }
+                    },
+                    revert: () => {
+                        Object.assign(trip, old);
+                        renderDispatch();
+                    },
+                });
+            }
+
+            function changeStatus(tripId, status) {
+                const trip = (dispatchData.trips || []).find(
+                    (t) => t.id === tripId,
+                );
+                if (!trip) return;
+                const old = trip.tripStatus;
+                trip.tripStatus = status;
+                renderDispatch();
+                bgSave("saveTripChanges", [tripId, { tripStatus: status }], {
+                    onOk: (r) => {
+                        if (r.trip) {
+                            Object.assign(trip, r.trip);
+                            renderDispatch();
+                        }
                         if (r.newTripId) {
                             showToast(
                                 `Carry-over trip created for next day (ID ${r.newTripId}).`,
                                 "success",
                             );
+                            loadDispatch();
                         }
-                        if (!r.routeFrequencyWarning && !r.newTripId) {
-                            showToast("Saved.", "success");
-                        }
+                    },
+                    revert: () => {
+                        trip.tripStatus = old;
                         renderDispatch();
-                        renderSidebar();
-                    })
-                    .withFailureHandler((e) => {
-                        saving = false;
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .saveTripChanges(tripId, changes);
+                    },
+                });
             }
 
-            function confirmWaybillFromSidebar(tripId) {
+            function changeRemarks(tripId, val) {
+                const trip = (dispatchData.trips || []).find(
+                    (t) => t.id === tripId,
+                );
+                if (!trip || (trip.remarks || "") === val) return;
+                const old = trip.remarks || "";
+                trip.remarks = val;
+                // No re-render — keep the input focused.
+                bgSave("saveTripChanges", [tripId, { remarks: val }], {
+                    onOk: (r) => {
+                        if (r.trip) trip.remarks = r.trip.remarks;
+                    },
+                    revert: () => {
+                        trip.remarks = old;
+                        renderDispatch();
+                    },
+                });
+            }
+
+            function confirmWaybillInline(tripId) {
                 if (!canEdit()) return;
-                const wbInput = document.getElementById("sb-wb-number");
-                if (!wbInput) return;
-                const customNumber = wbInput.value.trim();
+                const input = document.getElementById("wb-in-" + tripId);
+                if (!input) return;
+                const customNumber = input.value.trim();
                 if (!customNumber) {
                     showToast("Enter a waybill number first.", "warning");
                     return;
                 }
-
                 const trip = (dispatchData.trips || []).find(
                     (t) => t.id === tripId,
                 );
-                if (!trip) return;
-                if (!trip.suggestedWaybillId) {
-                    showToast(
-                        "No waybill to confirm for this trip yet.",
-                        "warning",
-                    );
+                if (!trip || !trip.suggestedWaybillId) {
+                    showToast("No waybill to confirm for this trip yet.", "warning");
                     return;
                 }
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast(
-                                "Waybill confirm failed: " + r.error,
-                                "error",
-                            );
-                            return;
-                        }
+                bgSave("confirmWaybill", [trip.suggestedWaybillId, customNumber], {
+                    onOk: (r) => {
                         trip.waybillConfirmed = r.waybillNumber;
                         trip.waybillSuggested = "";
                         trip.suggestedWaybillId = null;
-                        showToast(
-                            `Waybill ${r.waybillNumber} confirmed.`,
-                            "success",
-                        );
+                        showToast(`Waybill ${r.waybillNumber} confirmed.`, "success");
                         renderDispatch();
-                        renderSidebar();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .confirmWaybill(trip.suggestedWaybillId, customNumber);
+                    },
+                });
             }
 
             function confirmDeleteTrip(tripId) {
@@ -670,7 +465,6 @@
                             showToast("Delete failed: " + r.error, "error");
                             return;
                         }
-                        closeSidebar();
                         showToast("Trip removed.", "success");
                         loadDispatch();
                     })

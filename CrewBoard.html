@@ -1,11 +1,11 @@
 <script>
-            // ── CREW BOARD (drag-and-drop truck assignment) ───────────
-            // Alternate view of the dispatch panel: a rail of unassigned
-            // trips and one card per truck; dragging a trip chip onto a
-            // card assigns the truck (+ default driver when the trip has
-            // none, same as the sidebar's truck change). Dropping back on
-            // the rail unassigns. Every drop saves through saveTripChanges;
-            // the sidebar stays the fine-detail editor (chip click opens it).
+            // ── CREW BOARD (drag-and-drop crew assignment) ────────────
+            // Alternate view of the dispatch panel. A rail of draggable crew
+            // cards (one per active truck, showing its default driver/helpers)
+            // on the left; the trips are drop targets on the right. Dragging a
+            // crew onto a trip assigns that truck + its whole default crew.
+            // Every drop reuses assignCrew() — optimistic, saves in the
+            // background — so it feels instant.
 
             function switchDispatchView(mode) {
                 dispatchView = mode;
@@ -21,18 +21,57 @@
                 if (mode === "board") renderCrewBoard();
             }
 
-            function cbChipHtml(t, outletMap, convoyCls) {
+            function cbCrewCardHtml(tk, empMap) {
+                const def = defaultAssignments.find(
+                    (a) => Number(a.truckId) === Number(tk.id),
+                );
+                const driver =
+                    def && def.defaultDriverId
+                        ? (empMap[def.defaultDriverId] || {}).nick
+                        : "";
+                const helpers = def
+                    ? (def.defaultHelperIds || [])
+                          .map((h) => (empMap[h] || {}).nick)
+                          .filter(Boolean)
+                    : [];
+                const drag = canEdit()
+                    ? `draggable="true" ondragstart="cbCrewDragStart(event, ${tk.id})"`
+                    : "";
+                // Driver / helper on top, plate below (swapped from the old card).
+                const crewLine = driver
+                    ? `<span class="cb-crew-driver">${esc(driver)}</span>${helpers.length ? ` <span class="cb-crew-helpers">+ ${esc(helpers.join(", "))}</span>` : ""}`
+                    : `<span class="cb-crew-default">no default crew</span>`;
+                return `<div class="cb-crew-card" ${drag} title="Drag onto a trip to assign">
+      <div class="cb-crew-line">${crewLine}</div>
+      <div class="cb-crew-plate">${esc(tk.plate)} · ${esc(tk.billingCategory || tk.type || "")}</div>
+    </div>`;
+            }
+
+            function cbTripCardHtml(t, outletMap, empMap, truckMap, convoyCls) {
                 const outletName =
                     (outletMap[t.outletId] || {}).outletName || "—";
                 const cgCls = t.convoyGroup ? convoyCls[t.convoyGroup] : "";
-                const drag = canEdit()
-                    ? `draggable="true" ondragstart="cbDragStart(event, ${t.id})"`
+                const driver = (empMap[t.driverId] || {}).nick || "";
+                const helpers = (t.helperIds || [])
+                    .map((h) => (empMap[h] || {}).nick)
+                    .filter(Boolean);
+                const assigned = t.truckId
+                    ? `<span class="cb-tc-plate">${esc((truckMap[t.truckId] || {}).plate || "?")}</span>
+         <span class="cb-tc-driver">${esc(driver || "no driver")}</span>${helpers.length ? ` <span class="cb-crew-helpers">+ ${esc(helpers.join(", "))}</span>` : ""}
+         ${canEdit() ? `<button class="cb-unassign" onclick="cbUnassign(${t.id})" title="Unassign crew">✕</button>` : ""}`
+                    : `<span class="cb-tc-empty">drop a crew here</span>`;
+                const dz = canEdit()
+                    ? `ondragover="cbDragOver(event)" ondragleave="cbDragLeave(event)" ondrop="cbTripDrop(event, ${t.id})"`
                     : "";
-                return `<div class="cb-chip ${cgCls}" ${drag} onclick="selectTrip(${t.id})" title="${esc(outletName)}">
-      <span class="cb-chip-fo">${t.convoyGroup ? `<span class="convoy-badge ${cgCls}">C${esc(t.convoyGroup)}</span>` : ""}${esc(t.foNumber) || "—"}</span>
-      <span class="cb-chip-outlet">${esc(outletName)}</span>
-      <span class="cb-chip-meta">${t.cbm ? t.cbm + " cbm" : ""} <span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span></span>
-    </div>`;
+                return `<div class="cb-truck ${cgCls}" ${dz}>
+        <div class="cb-truck-head">
+          <span class="cb-chip-fo">${t.convoyGroup ? `<span class="convoy-badge ${cgCls}">C${esc(t.convoyGroup)}</span>` : ""}${esc(t.foNumber) || "—"}</span>
+          <span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span>
+        </div>
+        <div class="cb-chip-outlet">${esc(outletName)}</div>
+        <div class="cb-chip-meta">${t.area ? esc(t.area) + " · " : ""}${t.cbm ? t.cbm + " cbm" : ""}</div>
+        <div class="cb-tc-crew">${assigned}</div>
+      </div>`;
             }
 
             function renderCrewBoard() {
@@ -40,6 +79,7 @@
                 const trips = dispatchData.trips || [];
                 const outletMap = indexById(outlets);
                 const empMap = indexById(employees);
+                const truckMap = indexById(trucks);
 
                 // Same convoy palette assignment as the table view.
                 const convoyCls = {};
@@ -49,78 +89,30 @@
                             "cg-" + (Object.keys(convoyCls).length % 6);
                 });
 
-                const unassigned = trips.filter((t) => !t.truckId);
-                document.getElementById("cb-rail-count").textContent =
-                    unassigned.length;
-                document.getElementById("cb-rail-list").innerHTML =
-                    unassigned.length
-                        ? unassigned
-                              .map((t) => cbChipHtml(t, outletMap, convoyCls))
-                              .join("")
-                        : `<div class="cb-empty">All trips have a truck 🎉</div>`;
-
-                const byTruck = {};
-                trips.forEach((t) => {
-                    if (!t.truckId) return;
-                    (byTruck[t.truckId] = byTruck[t.truckId] || []).push(t);
-                });
-
-                // Trucks with trips first (board order), then free active trucks.
                 const active = trucks.filter((tk) => tk.active !== false);
-                const withTrips = active.filter((tk) => byTruck[tk.id]);
-                const free = active.filter((tk) => !byTruck[tk.id]);
+                document.getElementById("cb-rail-count").textContent =
+                    active.length;
+                document.getElementById("cb-rail-list").innerHTML = active.length
+                    ? active.map((tk) => cbCrewCardHtml(tk, empMap)).join("")
+                    : `<div class="cb-empty">No active trucks.</div>`;
 
-                const cardHtml = (tk) => {
-                    const tripChips = (byTruck[tk.id] || [])
-                        .map((t) => cbChipHtml(t, outletMap, convoyCls))
-                        .join("");
-                    // Crew: today's assignment if any trip has one, else the
-                    // roster default (shown grayed, it auto-fills on drop).
-                    const withDriver = (byTruck[tk.id] || []).find(
-                        (t) => t.driverId,
-                    );
-                    let crewHtml;
-                    if (withDriver) {
-                        const d = empMap[withDriver.driverId] || {};
-                        const helpers = (withDriver.helperIds || [])
-                            .map((h) => (empMap[h] || {}).nick)
-                            .filter(Boolean);
-                        crewHtml = `<span class="cb-crew-driver">${esc(d.nick || "?")}</span>${helpers.length ? ` <span class="cb-crew-helpers">+ ${esc(helpers.join(", "))}</span>` : ""}`;
-                    } else {
-                        const def = defaultAssignments.find(
-                            (a) => a.truckId === tk.id,
-                        );
-                        const dd =
-                            def && def.defaultDriverId
-                                ? (empMap[def.defaultDriverId] || {}).nick
-                                : "";
-                        crewHtml = dd
-                            ? `<span class="cb-crew-default">${esc(dd)} (default)</span>`
-                            : `<span class="cb-crew-default">no crew</span>`;
-                    }
-                    const dz = canEdit()
-                        ? `ondragover="cbDragOver(event)" ondragleave="cbDragLeave(event)" ondrop="cbDrop(event, ${tk.id})"`
-                        : "";
-                    return `<div class="cb-truck" ${dz}>
-        <div class="cb-truck-head">
-          <span class="cb-truck-plate">${esc(tk.plate)}</span>
-          <span class="cb-truck-type">${esc(tk.billingCategory || tk.type || "")}</span>
-        </div>
-        <div class="cb-crew">${crewHtml}</div>
-        <div class="cb-chips">${tripChips || '<div class="cb-empty">drop trips here</div>'}</div>
-      </div>`;
-                };
-
-                document.getElementById("cb-cards").innerHTML = [
-                    ...withTrips,
-                    ...free,
-                ]
-                    .map(cardHtml)
-                    .join("");
+                document.getElementById("cb-cards").innerHTML = trips.length
+                    ? trips
+                          .map((t) =>
+                              cbTripCardHtml(
+                                  t,
+                                  outletMap,
+                                  empMap,
+                                  truckMap,
+                                  convoyCls,
+                              ),
+                          )
+                          .join("")
+                    : `<div class="cb-empty">No trips for this date.</div>`;
             }
 
-            function cbDragStart(e, tripId) {
-                e.dataTransfer.setData("text/plain", String(tripId));
+            function cbCrewDragStart(e, truckId) {
+                e.dataTransfer.setData("text/plain", String(truckId));
                 e.dataTransfer.effectAllowed = "move";
             }
             function cbDragOver(e) {
@@ -130,49 +122,13 @@
             function cbDragLeave(e) {
                 e.currentTarget.classList.remove("cb-drop-hover");
             }
-            function cbDrop(e, truckId) {
+            function cbTripDrop(e, tripId) {
                 e.preventDefault();
                 e.currentTarget.classList.remove("cb-drop-hover");
-                const tripId = Number(e.dataTransfer.getData("text/plain"));
-                if (tripId) handleTripDrop(tripId, truckId);
+                const truckId = Number(e.dataTransfer.getData("text/plain"));
+                if (truckId) assignCrew(tripId, truckId);
             }
-
-            function handleTripDrop(tripId, truckId) {
-                const trip = (dispatchData.trips || []).find(
-                    (t) => t.id === tripId,
-                );
-                if (!trip || trip.truckId === truckId) return;
-
-                const changes = { truckId: truckId };
-                // Mirror the sidebar's truck change: pre-fill the default
-                // driver only when the trip has none yet.
-                if (truckId && !trip.driverId) {
-                    const def = defaultAssignments.find(
-                        (a) => a.truckId === truckId,
-                    );
-                    if (def && def.defaultDriverId)
-                        changes.driverId = def.defaultDriverId;
-                }
-                if (!truckId) changes.truckId = null;
-
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast(r.error, "error");
-                            return;
-                        }
-                        Object.assign(trip, r.trip);
-                        if (r.routeFrequencyWarning) {
-                            showToast(
-                                `${r.routeFrequencyWarning.count} deliveries to ${r.routeFrequencyWarning.outletName} in 21 days for this driver.`,
-                                "warning",
-                            );
-                        }
-                        renderDispatch();
-                        if (selectedTripId === tripId) renderSidebar();
-                    })
-                    .saveTripChanges(tripId, changes);
+            function cbUnassign(tripId) {
+                assignCrew(tripId, "");
             }
         </script>

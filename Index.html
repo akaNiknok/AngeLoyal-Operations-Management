@@ -446,13 +446,17 @@
                                         <th style="width: 90px">
                                             Billing Cat.
                                         </th>
-                                        <th class="col-divider" style="width: 90px">Plate</th>
-                                        <th style="width: 50px">Type</th>
-                                        <th style="width: 130px">
+                                        <th class="col-divider" style="width: 160px">
                                             Driver / Helper
+                                        </th>
+                                        <th style="width: 50px">Type</th>
+                                        <th style="width: 90px">Plate</th>
+                                        <th style="width: 90px">
+                                            Customer Group
                                         </th>
                                         <th class="col-divider" style="width: 120px">Status</th>
                                         <th style="width: 120px">Waybill</th>
+                                        <th style="width: 140px">Remarks</th>
                                         <th style="width: 60px">Source</th>
                                     </tr>
                                 </thead>
@@ -460,16 +464,11 @@
                             </table>
                         </div>
 
-                        <!-- Crew board (drag-and-drop alternate view) -->
+                        <!-- Crew board (drag a crew onto a trip to assign) -->
                         <div id="crew-board" style="display: none">
-                            <div
-                                class="cb-rail"
-                                ondragover="cbDragOver(event)"
-                                ondragleave="cbDragLeave(event)"
-                                ondrop="cbDrop(event, null)"
-                            >
+                            <div class="cb-rail">
                                 <div class="col-head">
-                                    Unassigned trips
+                                    Crews
                                     <span id="cb-rail-count"></span>
                                 </div>
                                 <div
@@ -479,27 +478,6 @@
                             </div>
                             <div class="cb-cards" id="cb-cards"></div>
                         </div>
-                    </div>
-
-                    <!-- Trip sidebar (hidden until row selected) -->
-                    <div
-                        class="trip-sidebar"
-                        id="trip-sidebar"
-                        style="display: none"
-                    >
-                        <div class="sidebar-head">
-                            <span class="sidebar-head-title" id="sb-title"
-                                >Trip detail</span
-                            >
-                            <button
-                                class="sidebar-close"
-                                onclick="closeSidebar()"
-                            >
-                                ✕
-                            </button>
-                        </div>
-                        <div class="sidebar-body" id="sb-body"></div>
-                        <div class="sidebar-footer" id="sb-footer"></div>
                     </div>
                 </div>
 
@@ -750,87 +728,6 @@
                             <tbody id="defaults-tbody"></tbody>
                         </table>
                     </div>
-
-                    <div class="col-right">
-                        <div class="detail-col">
-                            <div class="col-head">Default crew</div>
-                            <div class="detail-body" id="def-detail-body">
-                                <div class="empty-board" style="padding: 24px 0">
-                                    <div class="icon">🚚</div>
-                                    <div class="sub">
-                                        Select a truck to edit its default
-                                        crew
-                                    </div>
-                                </div>
-                            </div>
-                            <div
-                                class="assign-bar"
-                                id="def-assign-bar"
-                                style="display: none"
-                            >
-                                <button
-                                    class="assign-btn disabled"
-                                    id="def-assign-btn"
-                                    onclick="doDefAssign()"
-                                >
-                                    Assign employee
-                                </button>
-                                <button
-                                    class="assign-btn primary"
-                                    id="def-assign-btn2"
-                                    style="display: none"
-                                ></button>
-                                <div
-                                    class="assign-hint"
-                                    id="def-assign-hint"
-                                ></div>
-                            </div>
-                        </div>
-
-                        <div class="emp-col">
-                            <div class="col-head">
-                                <span>Employees</span>
-                                <span
-                                    id="def-emp-count-label"
-                                    style="font-weight: 400"
-                                ></span>
-                            </div>
-                            <div class="emp-filter-bar">
-                                <button
-                                    class="pill active"
-                                    onclick="setDefEmpFilter('all', this)"
-                                >
-                                    All
-                                </button>
-                                <button
-                                    class="pill"
-                                    onclick="setDefEmpFilter('Driver', this)"
-                                >
-                                    Drivers
-                                </button>
-                                <button
-                                    class="pill"
-                                    onclick="setDefEmpFilter('Helper', this)"
-                                >
-                                    Helpers
-                                </button>
-                                <button
-                                    class="pill"
-                                    onclick="setDefEmpFilter('unassigned', this)"
-                                >
-                                    Unassigned
-                                </button>
-                            </div>
-                            <div class="col-search">
-                                <input
-                                    id="def-emp-search"
-                                    placeholder="Search employee…"
-                                    oninput="renderDefEmpList()"
-                                />
-                            </div>
-                            <div class="list-scroll" id="def-emp-list"></div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -870,22 +767,6 @@
                             </thead>
                             <tbody id="outlets-tbody"></tbody>
                         </table>
-                    </div>
-                    <div class="admin-detail-col">
-                        <div class="col-head">Outlet detail</div>
-                        <div class="detail-body" id="outlet-detail-body">
-                            <div class="empty-board" style="padding: 24px 0">
-                                <div class="icon">🏬</div>
-                                <div class="sub">
-                                    Select an outlet to view details
-                                </div>
-                            </div>
-                        </div>
-                        <div
-                            class="detail-footer"
-                            id="outlet-detail-footer"
-                            style="display: none"
-                        ></div>
                     </div>
                 </div>
             </div>
@@ -933,26 +814,11 @@
                                     <th>Type</th>
                                     <th>Billing Category</th>
                                     <th style="width: 90px">Status</th>
+                                    <th style="width: 90px"></th>
                                 </tr>
                             </thead>
                             <tbody id="trucks-tbody"></tbody>
                         </table>
-                    </div>
-                    <div class="admin-detail-col">
-                        <div class="col-head">Truck detail</div>
-                        <div class="detail-body" id="truck-detail-body">
-                            <div class="empty-board" style="padding: 24px 0">
-                                <div class="icon">🚚</div>
-                                <div class="sub">
-                                    Select a truck to view details
-                                </div>
-                            </div>
-                        </div>
-                        <div
-                            class="detail-footer"
-                            id="truck-detail-footer"
-                            style="display: none"
-                        ></div>
                     </div>
                 </div>
             </div>
@@ -1001,26 +867,11 @@
                                     <th>Last Name</th>
                                     <th style="width: 90px">Role</th>
                                     <th style="width: 90px">Status</th>
+                                    <th style="width: 90px"></th>
                                 </tr>
                             </thead>
                             <tbody id="employees-tbody"></tbody>
                         </table>
-                    </div>
-                    <div class="admin-detail-col">
-                        <div class="col-head">Employee detail</div>
-                        <div class="detail-body" id="employee-detail-body">
-                            <div class="empty-board" style="padding: 24px 0">
-                                <div class="icon">🧑</div>
-                                <div class="sub">
-                                    Select an employee to view details
-                                </div>
-                            </div>
-                        </div>
-                        <div
-                            class="detail-footer"
-                            id="employee-detail-footer"
-                            style="display: none"
-                        ></div>
                     </div>
                 </div>
             </div>
@@ -1058,29 +909,11 @@
                                     <th style="width: 40px">ID</th>
                                     <th>Name</th>
                                     <th style="width: 90px">Status</th>
+                                    <th style="width: 90px"></th>
                                 </tr>
                             </thead>
                             <tbody id="billing-categories-tbody"></tbody>
                         </table>
-                    </div>
-                    <div class="admin-detail-col">
-                        <div class="col-head">Category detail</div>
-                        <div
-                            class="detail-body"
-                            id="billing-category-detail-body"
-                        >
-                            <div class="empty-board" style="padding: 24px 0">
-                                <div class="icon">🏷️</div>
-                                <div class="sub">
-                                    Select a category to view details
-                                </div>
-                            </div>
-                        </div>
-                        <div
-                            class="detail-footer"
-                            id="billing-category-detail-footer"
-                            style="display: none"
-                        ></div>
                     </div>
                 </div>
             </div>
@@ -1119,29 +952,11 @@
                                     <th>File Type</th>
                                     <th>Billing Category</th>
                                     <th style="width: 90px">Status</th>
+                                    <th style="width: 90px"></th>
                                 </tr>
                             </thead>
                             <tbody id="route-type-map-tbody"></tbody>
                         </table>
-                    </div>
-                    <div class="admin-detail-col">
-                        <div class="col-head">Mapping detail</div>
-                        <div
-                            class="detail-body"
-                            id="route-type-map-detail-body"
-                        >
-                            <div class="empty-board" style="padding: 24px 0">
-                                <div class="icon">🗺️</div>
-                                <div class="sub">
-                                    Select a mapping to view details
-                                </div>
-                            </div>
-                        </div>
-                        <div
-                            class="detail-footer"
-                            id="route-type-map-detail-footer"
-                            style="display: none"
-                        ></div>
                     </div>
                 </div>
             </div>
