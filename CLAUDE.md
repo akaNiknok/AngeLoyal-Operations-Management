@@ -78,12 +78,13 @@ Full details in [`DEPLOY.md`](DEPLOY.md). The repo is wired to Apps Script via [
 
 ```sh
 npm run push      # push to the Apps Script editor (dev/HEAD only)
-npm run release   # push --force + redeploy the LIVE web app  ← use to go live
+npm run release   # push --force + redeploy the LIVE web app  ← ONLY from main
 npm run open      # open the script editor
+npm test          # run local test suite (no clasp, no live Sheet, no npm install)
 npm run fetch-data         # snapshot live sheets → data/ (gitignored, real data)
 ```
 
-> The live app is served from a **versioned deployment**, not HEAD. `npm run push` alone does NOT update what users see — run `npm run release`.
+> The live app is served from a **versioned deployment**, not HEAD. `npm run push` alone does NOT update what users see. Going live = a tagged release from `main` followed by `npm run release` — never run it from `develop` or a feature branch (see the gitflow section in [`DEPLOY.md`](DEPLOY.md#git-workflow-gitflow)).
 
 - `.clasp.json` holds the (non-secret) Script ID. `.claspignore` keeps `Docs/` and sample files out of Apps Script.
 - `data/`, `.env`, `*.xlsx`, `*.pdf` are gitignored — they contain real operational data. `DEV_DUMP_TOKEN` (in `.env`) is a password-equivalent.
@@ -94,5 +95,17 @@ npm run fetch-data         # snapshot live sheets → data/ (gitignored, real da
 - Keep the schema doc and code in lockstep. A new feature usually means: a new sheet/columns in `Docs/Schema.md` → constants in `Code.gs` → reader in `DataReaders.gs` → writer (+ `_requirePermission` + `_auditLog`) in `DataWriters.gs` → UI partial + `Core.html` state/boot wiring.
 - Match the surrounding style: the `_`-prefixed helpers are private; reader functions return plain objects with camelCase keys; writers return `{ success, ... } | { success:false, error }`.
 - Only commit/push when asked.
-- One feature branch per task; **merge commit** PRs (Conventional Commits style on branch commits) and branch fresh off updated `main` each time. Full rationale + repo settings in [`DEPLOY.md`](DEPLOY.md#git--pr-workflow).
+- **Gitflow**: one feature branch per task (`feat/<task>`, `fix/<task>`) off updated `develop`, **merge commit** PRs back into `develop` (Conventional Commits on branch commits). `main` is production-only: release merges from `develop` and `hotfix/*` branches, each tagged `vX.Y.Z` + GitHub Release, then `npm run release`. Versioning: major = phase, minor = feature release, patch = hotfix. Full steps in [`DEPLOY.md`](DEPLOY.md#git-workflow-gitflow).
 - Money, payroll, and billing logic are contractually sensitive and Phase 2's hardest part — favor correctness, date-locking, and an audit trail over cleverness.
+
+## Session handoff (HANDOFF.md)
+
+Long conversations burn uncached tokens; the user may clear context and start a fresh session at any point where you're waiting on them. So: **whenever you end a turn needing human input** — a question, an approval, a review of finished work, or acting on subagent results — **write `HANDOFF.md` at the repo root first** (gitignored, overwrite freely). It must let a zero-context session resume without this conversation:
+
+- **Task & goal** — what was asked, in one or two sentences.
+- **State** — what's done and verified (branch, commits, files touched, test results), what's in flight.
+- **Blocked on** — the exact question/decision the human owes, with the options and your recommendation.
+- **Next steps** — the precise actions to take once unblocked, with file paths.
+- **Gotchas** — anything non-obvious learned this session that a fresh session would re-derive.
+
+At session start, if `HANDOFF.md` exists, read it and treat it as the resume point; delete it once its contents are absorbed or resolved.

@@ -118,12 +118,15 @@ When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google acc
 
 ## Day-to-day workflow
 ```sh
-git pull                # get latest code
-# ... make changes to Code.gs / Index.html ...
-git add -A && git commit -m "..."
-git push                # back up to GitHub
-npm run release         # push + redeploy the live web app
+git checkout develop && git pull   # branch off updated develop
+git checkout -b feat/<task>
+# ... make changes ...
+git add -A && git commit -m "feat: ..."
+git push -u origin feat/<task>     # open a PR into develop
+npm run push                       # test in the Apps Script editor / dev URL
 ```
+
+Going live is a separate step — see [Git workflow (gitflow)](#git-workflow-gitflow) below. Only `main` gets `npm run release`.
 
 - `npm run push` — pushes local files to the **Apps Script editor** (updates the "head" / dev version, what you see when you open the script editor). This alone does **not** update the live web app.
 - `npm run deploy` — creates a new version and updates the **live web app deployment** to point at it. The deployment ID is the one used by the AngeLoyal OMS web app: `AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0` (`https://script.google.com/macros/s/AKfycby8.../exec`).
@@ -133,15 +136,28 @@ npm run release         # push + redeploy the live web app
 
 > The live AngeLoyal OMS web app is served from a **versioned deployment**, not `HEAD`. `npm run push` updates the editor/dev copy only — always run `npm run release` (or `npm run deploy` after pushing) to make changes visible to actual users.
 
-## Git & PR workflow
-This is a solo project developed mostly through Claude Code, with **one feature branch per task** (e.g. `claude/<task>`). The merge convention is:
+## Git workflow (gitflow)
+This is a solo project developed mostly through Claude Code, on a simplified gitflow:
 
-- **Merge commit** every PR. This preserves the branch as a named grouping in `main`'s history — useful when multiple sessions run in parallel on different branches, since the merge commit brackets which commits belong together.
-- Commit messages on the branch should follow Conventional Commits (`test:`, `feat:`, `fix:`, …) so `main` stays changelog-friendly.
-- **Delete the head branch after merge** (GitHub can do this automatically). Web/remote Claude branches are ephemeral anyway.
-- **Always start a new task from a fresh branch off the updated `main`.**
+- **`main` = production.** It mirrors what the live web app deployment serves. Nothing lands here except release merges from `develop` and hotfixes. **`npm run release` is only ever run from `main`** — never from `develop` or a feature branch.
+- **`develop` = integration.** All day-to-day work targets it. Use `npm run push` from here to test in the Apps Script editor/`/dev` URL; never `npm run release`.
+- **Feature branches** (`feat/<task>`, `fix/<task>`, one per task) branch off the updated `develop` and merge back via PR.
+- **Hotfix branches** (`hotfix/<task>`) branch off `main` for urgent production fixes: PR into `main`, tag + release (below), then merge `main` back into `develop`.
 
-Recommended GitHub repo settings (**Settings → General → Pull Requests**): allow **only** merge commits (disable squash merging and rebase merging), and enable "Automatically delete head branches".
+### Releases (tags + GitHub Releases)
+Every deploy to the live web app gets a tag and a GitHub Release, so the deployed state is always identifiable:
+
+1. PR `develop` → `main` (merge commit), titled `release: vX.Y.Z`.
+2. On `main`: `git tag vX.Y.Z && git push --tags`
+3. `gh release create vX.Y.Z --generate-notes` (edit notes if the auto-generated ones are noisy).
+4. `npm run release` — the live app now matches the tag.
+
+Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Payroll, v3 = Visibility & Alerts), **minor** = feature release, **patch** = hotfix. The latest tag on `main` is what's live; if it isn't, run `npm run release` from that tag's commit.
+
+### PR conventions
+- **Merge commit** every PR (preserves the branch as a named grouping in history). Repo settings: allow **only** merge commits, enable "Automatically delete head branches".
+- Commit messages follow Conventional Commits (`feat:`, `fix:`, `test:`, …) so `--generate-notes` stays changelog-friendly.
+- Always start a new task from a fresh branch off the updated `develop`.
 
 ## Notes
 - `.claspignore` restricts what gets pushed to `Code.gs`, `Index.html`, and `appsscript.json` — the `Docs/` and `Sample Files/` folders stay local/Git only and are never sent to Apps Script.

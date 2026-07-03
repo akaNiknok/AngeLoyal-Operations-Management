@@ -2,6 +2,9 @@
 # Regenerate on demand with `npm run backlog:sync` (see CLAUDE.md).
 BACKLOG.md
 
+# Session-local resume file written by Claude when blocked on human input (see CLAUDE.md)
+HANDOFF.md
+
 *.xlsx
 *.pdf
 node_modules/
