@@ -623,7 +623,8 @@
             }
             table.dispatch-table tbody td:first-child {
                 z-index: 1;
-                background: var(--surface);
+                background: var(--bg);
+                border-bottom: 1px solid var(--border);
             }
             table.dispatch-table tbody tr.fo-grp-1 td:first-child {
                 background: #eceae1;
@@ -645,14 +646,8 @@
             table.dispatch-table tbody tr.fo-grp-1 {
                 background: #eceae1;
             }
-            /* Hover needs to read clearly against both the white rows and the
-               fo-grp-1 stripe, so each gets its own (cooler / darker) shade
-               rather than one light tone that blends into both. */
             table.dispatch-table tbody tr:hover {
                 background: #eef1f5;
-            }
-            table.dispatch-table tbody tr.fo-grp-1:hover {
-                background: #e0ddce;
             }
             table.dispatch-table tbody tr.selected {
                 background: var(--blue-bg);
@@ -1000,12 +995,18 @@
             /* Assigned-crew card inside the dispatch table's Crew column. */
             .crew-card {
                 display: flex;
-                flex-direction: column;
-                gap: 2px;
+                align-items: center;
+                gap: 5px;
             }
             .crew-card.empty {
                 min-height: 22px;
-                justify-content: center;
+            }
+            .crew-card-body {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                min-width: 0;
+                flex: 1;
             }
             .crew-card-top {
                 display: flex;

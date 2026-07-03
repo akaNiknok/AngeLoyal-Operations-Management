@@ -149,8 +149,11 @@
                             : "";
                         const crewCell = truckPlate
                             ? `<div class="crew-card">
-           <div class="crew-card-crew">${crewSub}</div>
-           <div class="crew-card-top">${colorChip(assignedTruckBillingCat)}<span class="crew-card-plate">${esc(truckPlate)}</span>${unassignBtn}</div>
+           <div class="crew-card-body">
+             <div class="crew-card-crew">${crewSub}</div>
+             <div class="crew-card-top">${colorChip(assignedTruckBillingCat)}<span class="crew-card-plate">${esc(truckPlate)}</span></div>
+           </div>
+           ${unassignBtn}
          </div>`
                             : `<div class="crew-card empty"><span class="crew-empty">Unassigned${canE ? " — drag a crew here" : ""}</span></div>`;
 
