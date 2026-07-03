@@ -67,15 +67,9 @@
                 );
             }
 
-            function renderUnassignedCrewStat() {
-                const cell = document.getElementById("ds-unassigned-crew");
-                if (cell) cell.textContent = getUnassignedCrew().length;
-            }
-
             function rerenderRoster() {
                 renderTruckList();
                 renderEmpList();
-                renderUnassignedCrewStat();
                 renderCrewRail(); // keep the dispatch Crew Rail in sync if open
             }
 

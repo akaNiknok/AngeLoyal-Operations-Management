@@ -255,15 +255,6 @@
                             Carry-over
                         </button>
                     </div>
-                    <div class="tb-sep"></div>
-                    <button
-                        class="btn btn-ghost btn-sm"
-                        id="btn-crew-rail"
-                        onclick="toggleCrewRail()"
-                        title="Show a rail of crews to drag onto trip rows"
-                    >
-                        ☰ Crews
-                    </button>
                     <div class="tb-spacer"></div>
                     <button
                         class="btn btn-ghost btn-sm"
@@ -349,6 +340,15 @@
                             </button>
                         </div>
                     </div>
+                    <div class="tb-sep"></div>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-crew-rail"
+                        onclick="toggleCrewRail()"
+                        title="Show a rail of crews to drag onto trip rows"
+                    >
+                        ☰ Crews
+                    </button>
                 </div>
 
                 <!-- Stat bar -->
@@ -451,28 +451,43 @@
                     <div class="cb-rail" id="crew-rail" style="display: none">
                         <div class="col-head">
                             Crews
-                            <span
-                                id="cb-rail-count"
-                                style="font-weight: 400"
-                            ></span>
+                            <div class="cb-rail-head-actions">
+                                <span
+                                    id="cb-rail-count"
+                                    style="font-weight: 400"
+                                ></span>
+                                <span
+                                    class="cb-rail-sort-wrap"
+                                    title="Change sort order"
+                                >
+                                    <span class="cb-rail-sort-icon"
+                                        >⇅</span
+                                    >
+                                    <select
+                                        class="cb-rail-sort"
+                                        id="cb-rail-sort"
+                                        onchange="setCrewRailSort(this.value)"
+                                    >
+                                        <option value="driver">
+                                            Sort: Driver A–Z
+                                        </option>
+                                        <option value="plate">
+                                            Sort: Plate A–Z
+                                        </option>
+                                        <option value="type">
+                                            Sort: Truck type
+                                        </option>
+                                    </select>
+                                </span>
+                                <button
+                                    class="cb-rail-icon-btn"
+                                    onclick="switchPanel('roster')"
+                                    title="Edit roster: open the Truck Roster to change default crews"
+                                >
+                                    ↗
+                                </button>
+                            </div>
                         </div>
-                        <select
-                            class="cb-rail-sort"
-                            id="cb-rail-sort"
-                            onchange="setCrewRailSort(this.value)"
-                        >
-                            <option value="driver">Sort: Driver A–Z</option>
-                            <option value="plate">Sort: Plate A–Z</option>
-                            <option value="type">Sort: Truck type</option>
-                        </select>
-                        <button
-                            class="btn btn-ghost btn-sm"
-                            style="margin: 0 8px 8px"
-                            onclick="switchPanel('roster')"
-                            title="Open the Truck Roster to change default crews"
-                        >
-                            Edit roster ↗
-                        </button>
                         <div class="cb-rail-list" id="cb-rail-list"></div>
                     </div>
                 </div>
@@ -589,7 +604,7 @@
             <!-- ══════════════════════════════════════
        PANEL: TRUCK ROSTER (default crew template)
   ══════════════════════════════════════ -->
-            <div class="panel" id="panel-roster">
+            <div class="panel panel-narrow" id="panel-roster">
                 <div class="toolbar">
                     <span
                         class="tb-label"
@@ -646,7 +661,7 @@
             <!-- ══════════════════════════════════════
        PANEL: OUTLETS (admin)
   ══════════════════════════════════════ -->
-            <div class="panel" id="panel-outlets">
+            <div class="panel panel-narrow" id="panel-outlets">
                 <div class="toolbar">
                     <input
                         type="text"
@@ -686,7 +701,7 @@
             <!-- ══════════════════════════════════════
        PANEL: TRUCKS (admin)
   ══════════════════════════════════════ -->
-            <div class="panel" id="panel-trucks">
+            <div class="panel panel-narrow" id="panel-trucks">
                 <div class="toolbar">
                     <input
                         type="text"
@@ -738,7 +753,7 @@
             <!-- ══════════════════════════════════════
        PANEL: EMPLOYEES (admin)
   ══════════════════════════════════════ -->
-            <div class="panel" id="panel-employees">
+            <div class="panel panel-narrow" id="panel-employees">
                 <div class="toolbar">
                     <input
                         type="text"
@@ -791,7 +806,7 @@
             <!-- ══════════════════════════════════════
        PANEL: BILLING CATEGORIES (admin)
   ══════════════════════════════════════ -->
-            <div class="panel" id="panel-billing-categories">
+            <div class="panel panel-narrow" id="panel-billing-categories">
                 <div class="toolbar">
                     <span class="tb-label" id="billing-categories-count"></span>
                     <label
@@ -833,7 +848,7 @@
             <!-- ══════════════════════════════════════
        PANEL: ROUTE TYPE MAP (admin)
   ══════════════════════════════════════ -->
-            <div class="panel" id="panel-route-type-map">
+            <div class="panel panel-narrow" id="panel-route-type-map">
                 <div class="toolbar">
                     <span class="tb-label" id="route-type-map-count"></span>
                     <label

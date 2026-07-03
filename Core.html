@@ -250,7 +250,6 @@
             function onMasterDataReady() {
                 renderTruckList();
                 renderEmpList();
-                renderUnassignedCrewStat();
                 renderOutlets();
                 populateAddTripSelects();
                 loadDispatch();
@@ -388,7 +387,6 @@
                 if (name === "roster") {
                     renderTruckList();
                     renderEmpList();
-                    renderUnassignedCrewStat();
                 }
                 if (name === "outlets") renderOutlets();
                 if (name === "trucks") renderTrucksAdmin();

@@ -228,7 +228,6 @@
                         );
                         renderEmployeesAdmin();
                         renderEmpList();
-                        renderUnassignedCrewStat();
                     },
                 });
             }
@@ -271,7 +270,6 @@
                         showToast(`${r.employee.nick} added.`, "success");
                         renderEmployeesAdmin();
                         renderEmpList();
-                        renderUnassignedCrewStat();
                     })
                     .withFailureHandler((e) => {
                         setSyncing(false);

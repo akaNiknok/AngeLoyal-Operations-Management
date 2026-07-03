@@ -62,7 +62,8 @@
                     (t) => !t.waybillSuggested && !t.waybillConfirmed,
                 ).length;
                 document.getElementById("ds-nowb").textContent = noWb;
-                renderUnassignedCrewStat();
+                document.getElementById("ds-unassigned-crew").textContent =
+                    all.filter((t) => !t.truckId).length;
                 updateConvoyButtons();
                 renderCrewRail();
 
