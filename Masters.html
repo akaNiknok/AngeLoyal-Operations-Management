@@ -40,8 +40,8 @@
                                 ? `<input class="cell-input" value="${esc(val)}" onchange="updateTruckField(${t.id},'${field}',this.value)">`
                                 : esc(val) || "—";
                         const cat = isAdmin
-                            ? `<select class="cell-select" onchange="updateTruckField(${t.id},'billingCategory',this.value)">${billingCategoryOptions(t.billingCategory)}</select>`
-                            : esc(t.billingCategory) || "—";
+                            ? `<div class="cat-cell">${catSwatch(t.billingCategory)}<select class="cell-select" onchange="updateTruckField(${t.id},'billingCategory',this.value)">${billingCategoryOptions(t.billingCategory)}</select></div>`
+                            : colorChip(t.billingCategory);
                         return `<tr>
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
     <td style="font-family:'DM Mono',monospace">${f("plate", t.plate)}</td>
@@ -68,6 +68,7 @@
                 bgSave("updateTruck", [id, { [field]: value }], {
                     onOk: (r) => {
                         Object.assign(t, r.truck);
+                        if (field === "billingCategory") renderTrucksAdmin();
                         renderTruckList();
                         renderDefaults();
                     },
@@ -308,8 +309,8 @@
                 tbody.innerHTML = filtered
                     .map((c) => {
                         const nameCell = isAdmin
-                            ? `<input class="cell-input" value="${esc(c.name)}" onchange="updateBillingCategoryName(${c.id},this.value)">`
-                            : `<span style="font-family:'DM Mono',monospace">${esc(c.name)}</span>`;
+                            ? `<div class="cat-cell">${catSwatch(c.name)}<input class="cell-input" value="${esc(c.name)}" onchange="updateBillingCategoryName(${c.id},this.value)"></div>`
+                            : colorChip(c.name);
                         return `<tr>
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${c.id}</td>
     <td>${nameCell}</td>
@@ -341,6 +342,7 @@
                                     t.billingCategory = r.billingCategory.name;
                             });
                         }
+                        renderBillingCategoriesAdmin();
                         renderTrucksAdmin();
                     },
                     revert: () => {

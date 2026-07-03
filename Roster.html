@@ -367,8 +367,12 @@
     <td>${f("outletName", o.outletName)}</td>
     <td>${f("area", o.area)}</td>
     <td>${f("address", o.address)}</td>
-    <td>${f("customerGroup", o.customerGroup)}</td>
-    <td>${f("notes", o.notes)}</td>
+    <td>${isAdmin ? f("customerGroup", o.customerGroup) : colorChip(o.customerGroup)}</td>
+    <td>${
+        isAdmin
+            ? `<input class="cell-input" title="${esc(o.notes || "")}" value="${esc(o.notes || "")}" onchange="updateOutletField(${o.id},'notes',this.value)">`
+            : esc(o.notes) || "—"
+    }</td>
   </tr>`;
                     })
                     .join("");
@@ -491,7 +495,7 @@
                             ? `<select class="cell-select" onchange="updateDefaultDriver(${d.id}, this.value)"><option value="">— None —</option>${crewSelectOptions(["Driver", "Driver-Helper"], d.defaultDriverId != null ? [d.defaultDriverId] : [])}</select>`
                             : (empMap[d.defaultDriverId] || {}).nick || "None";
                         const helperSel = isAdmin
-                            ? `<select class="cell-select" multiple size="2" onchange="updateDefaultHelpers(${d.id}, this)">${crewSelectOptions(["Helper", "Driver-Helper"], d.defaultHelperIds || [])}</select>`
+                            ? `<div class="chk-list">${helperCheckboxes(d.id, d.defaultHelperIds || [])}</div>`
                             : (d.defaultHelperIds || [])
                                   .map((h) => (empMap[h] || {}).nick)
                                   .filter(Boolean)
@@ -534,7 +538,7 @@
                             : "";
 
                         const notesCell = isAdmin
-                            ? `<input class="cell-input" value="${esc(d.notes || "")}" placeholder="notes…" onchange="saveDefNotes(${d.id}, this.value)">`
+                            ? `<input class="cell-input" title="${esc(d.notes || "")}" value="${esc(d.notes || "")}" placeholder="notes…" onchange="saveDefNotes(${d.id}, this.value)">`
                             : esc(d.notes || "");
 
                         return `<tr>
@@ -568,20 +572,40 @@
                 );
             }
 
-            function updateDefaultHelpers(defId, sel) {
+            // Checkbox list of eligible helpers — far easier to pick than a
+            // ctrl-click <select multiple>.
+            function helperCheckboxes(defId, selectedIds) {
+                const sel = new Set((selectedIds || []).map(Number));
+                return employees
+                    .filter(
+                        (e) =>
+                            ["Helper", "Driver-Helper"].includes(e.role) &&
+                            e.active !== false,
+                    )
+                    .map(
+                        (e) =>
+                            `<label class="chk"><input type="checkbox" value="${e.id}" ${sel.has(Number(e.id)) ? "checked" : ""} onchange="toggleDefaultHelper(${defId}, this)">${esc(e.nick)}</label>`,
+                    )
+                    .join("");
+            }
+
+            function toggleDefaultHelper(defId, cb) {
                 const d = defaultAssignments.find((x) => x.id === defId);
                 if (!d) return;
-                let ids = Array.from(sel.selectedOptions).map((o) =>
-                    Number(o.value),
-                );
-                if (ids.length > 2) {
+                const cur = new Set((d.defaultHelperIds || []).map(Number));
+                const id = Number(cb.value);
+                if (cb.checked) cur.add(id);
+                else cur.delete(id);
+                if (cur.size > 2) {
                     showToast(
                         "A truck can have at most 2 default helpers.",
                         "warning",
                     );
-                    ids = ids.slice(0, 2);
+                    cb.checked = false;
+                    return;
                 }
                 const old = d.defaultHelperIds || [];
+                const ids = [...cur];
                 d.defaultHelperIds = ids;
                 renderDefaults();
                 bgSave(

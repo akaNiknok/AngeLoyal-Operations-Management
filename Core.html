@@ -37,7 +37,7 @@
             let dispatchData = null; // { trips, date }
             let statusFilter = "all";
             let selectedForGroup = new Set(); // trip ids checked for convoy grouping
-            let dispatchView = "table"; // "table" | "board" (crew drag-and-drop)
+            let crewRailOpen = false; // crew drag-and-drop rail beside the table
             let saving = false;
             let todayRosterExpanded = false;
 
@@ -458,6 +458,27 @@
                     )
                     .join("");
                 return html;
+            }
+
+            // Deterministic pastel chip / dot color from a label string, so a
+            // given customer group or billing category always reads the same
+            // color across every panel (no stored palette needed).
+            function labelHue(str) {
+                let h = 0;
+                const s = String(str || "");
+                for (let i = 0; i < s.length; i++)
+                    h = (h * 31 + s.charCodeAt(i)) % 360;
+                return h;
+            }
+            function colorChip(label) {
+                if (!label) return `<span class="color-chip empty">—</span>`;
+                const h = labelHue(label);
+                return `<span class="color-chip" title="${esc(label)}" style="background:hsl(${h} 62% 91%);color:hsl(${h} 55% 30%);border-color:hsl(${h} 45% 78%)">${esc(label)}</span>`;
+            }
+            function catSwatch(name) {
+                if (!name) return "";
+                const h = labelHue(name);
+                return `<span class="cat-swatch" title="${esc(name)}" style="background:hsl(${h} 60% 55%)"></span>`;
             }
 
             function indexById(arr) {

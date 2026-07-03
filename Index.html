@@ -256,22 +256,14 @@
                         </button>
                     </div>
                     <div class="tb-sep"></div>
-                    <div class="pill-group" id="view-pills">
-                        <button
-                            class="pill active"
-                            data-view="table"
-                            onclick="switchDispatchView('table')"
-                        >
-                            Table
-                        </button>
-                        <button
-                            class="pill"
-                            data-view="board"
-                            onclick="switchDispatchView('board')"
-                        >
-                            Crew Board
-                        </button>
-                    </div>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-crew-rail"
+                        onclick="toggleCrewRail()"
+                        title="Show a rail of crews to drag onto trip rows"
+                    >
+                        ☰ Crews
+                    </button>
                     <div class="tb-spacer"></div>
                     <button
                         class="btn btn-ghost btn-sm"
@@ -401,6 +393,18 @@
                 </div>
 
                 <div class="dispatch-layout">
+                    <!-- Crew rail: drag a crew onto a trip row to assign -->
+                    <div
+                        class="cb-rail"
+                        id="crew-rail"
+                        style="display: none; margin: 8px 0 8px 8px"
+                    >
+                        <div class="col-head">
+                            Crews
+                            <span id="cb-rail-count" style="font-weight: 400"></span>
+                        </div>
+                        <div class="cb-rail-list" id="cb-rail-list"></div>
+                    </div>
                     <!-- Main table -->
                     <div class="dispatch-main">
                         <div class="table-wrap" id="dispatch-table-wrap">
@@ -424,6 +428,9 @@
                                             style="width: 28px"
                                         ></th>
                                         <th style="width: 110px">FO #</th>
+                                        <th style="width: 110px">
+                                            Customer Group
+                                        </th>
                                         <th style="width: 200px">Outlet</th>
                                         <th style="width: 90px">Area</th>
                                         <th
@@ -449,11 +456,8 @@
                                         <th class="col-divider" style="width: 160px">
                                             Driver / Helper
                                         </th>
-                                        <th style="width: 50px">Type</th>
+                                        <th style="width: 60px">Type</th>
                                         <th style="width: 90px">Plate</th>
-                                        <th style="width: 90px">
-                                            Customer Group
-                                        </th>
                                         <th class="col-divider" style="width: 120px">Status</th>
                                         <th style="width: 120px">Waybill</th>
                                         <th style="width: 140px">Remarks</th>
@@ -462,21 +466,6 @@
                                 </thead>
                                 <tbody id="dispatch-tbody"></tbody>
                             </table>
-                        </div>
-
-                        <!-- Crew board (drag a crew onto a trip to assign) -->
-                        <div id="crew-board" style="display: none">
-                            <div class="cb-rail">
-                                <div class="col-head">
-                                    Crews
-                                    <span id="cb-rail-count"></span>
-                                </div>
-                                <div
-                                    class="cb-rail-list"
-                                    id="cb-rail-list"
-                                ></div>
-                            </div>
-                            <div class="cb-cards" id="cb-cards"></div>
                         </div>
                     </div>
                 </div>

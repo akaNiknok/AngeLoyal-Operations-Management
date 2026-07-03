@@ -57,7 +57,7 @@
                 document.getElementById("ds-nowb").textContent = noWb;
                 renderUnassignedCrewStat();
                 updateConvoyButtons();
-                if (dispatchView === "board") renderCrewBoard();
+                renderCrewRail();
 
                 // Table
                 const empty = document.getElementById("dispatch-empty");
@@ -148,8 +148,14 @@
                             : `<span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span>`;
 
                         const remarksCell = canE
-                            ? `<input class="cell-input" type="text" value="${esc(t.remarks || "")}" placeholder="—" onchange="changeRemarks(${t.id}, this.value)">`
-                            : `<span class="crew-helper">${esc(t.remarks || "")}</span>`;
+                            ? `<input class="cell-input" type="text" title="${esc(t.remarks || "")}" value="${esc(t.remarks || "")}" placeholder="—" onchange="changeRemarks(${t.id}, this.value)">`
+                            : `<span class="crew-helper" title="${esc(t.remarks || "")}">${esc(t.remarks || "")}</span>`;
+
+                        // Rows are drop targets for crew cards dragged from the
+                        // crew rail (reuses the cb* drag handlers).
+                        const dz = canE
+                            ? `ondragover="cbDragOver(event)" ondragleave="cbDragLeave(event)" ondrop="cbTripDrop(event, ${t.id})"`
+                            : "";
 
                         const billingCat = t.truckBillingCategory || "";
                         const foFull =
@@ -170,19 +176,19 @@
                                 ? ` <button class="row-del" title="Remove trip" onclick="confirmDeleteTrip(${t.id})">✕</button>`
                                 : "";
 
-                        return `<tr class="${sourceCls} ${foGroupCls[i]} ${cgCls}">
+                        return `<tr class="${sourceCls} ${foGroupCls[i]} ${cgCls}" ${dz}>
       ${selectTd}
       <td class="td-fo">${cgBadge}${esc(foFull) || "—"}</td>
+      <td>${colorChip(custGroup)}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
       <td class="td-area">${esc(t.area) || "—"}</td>
       <td class="td-qty">${t.quantity || "—"}</td>
       <td class="td-qty">${t.cbm || "—"}</td>
       <td>${esc(t.tier) || "—"}</td>
-      <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(billingCat) || "—"}</span></td>
+      <td>${colorChip(billingCat)}</td>
       <td class="td-crew col-divider">${crewCell}</td>
-      <td><span class="status-chip sc-scheduled" style="background:var(--border);color:var(--muted);padding:1px 6px">${esc(assignedTruckBillingCat) || "—"}</span></td>
+      <td>${colorChip(assignedTruckBillingCat)}</td>
       <td class="td-plate">${esc(truckPlate) || "—"}</td>
-      <td><span class="status-chip" style="background:var(--bg);color:var(--muted)">${esc(custGroup) || "—"}</span></td>
       <td class="td-status col-divider">${statusCell}</td>
       <td class="td-wb">${waybillCellHtml(t, canE)}</td>
       <td class="td-remarks">${remarksCell}</td>
