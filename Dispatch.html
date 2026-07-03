@@ -132,23 +132,29 @@
                             .filter(Boolean)
                             .join(", ");
 
-                        // Crew is a single unit: pick a truck and its default
-                        // driver + helpers ride along. The sub-line shows the
-                        // actual assigned crew (may differ = substitution).
+                        // Crew is a single unit: one card holds the assigned
+                        // truck (type + plate) and its driver + helpers.
+                        // Assignment is by dragging a crew from the rail onto
+                        // the row; the ✕ unassigns.
                         const crewSub = driverNick
                             ? `<span class="crew-driver">${esc(driverNick)}</span>${helperNicks ? `<span class="crew-helper">+${esc(helperNicks)}</span>` : ""}`
-                            : `<span class="crew-empty">Unassigned</span>`;
-                        const crewCell = canE
-                            ? `<select class="cell-select" onchange="assignCrew(${t.id}, this.value)">${truckCrewOptions(t.truckId)}</select>
-         <div class="crew-cell">${crewSub}</div>`
-                            : `<div class="crew-cell">${crewSub}</div>`;
+                            : `<span class="crew-empty">no driver</span>`;
+                        const unassignBtn = canE
+                            ? `<button class="cb-unassign" onclick="assignCrew(${t.id}, '')" title="Unassign crew">✕</button>`
+                            : "";
+                        const crewCell = truckPlate
+                            ? `<div class="crew-card">
+           <div class="crew-card-top">${colorChip(assignedTruckBillingCat)}<span class="crew-card-plate">${esc(truckPlate)}</span>${unassignBtn}</div>
+           <div class="crew-card-crew">${crewSub}</div>
+         </div>`
+                            : `<div class="crew-card empty"><span class="crew-empty">Unassigned${canE ? " — drag a crew here" : ""}</span></div>`;
 
                         const statusCell = canE
                             ? `<select class="cell-select ${statusChipClass(t.tripStatus)}" onchange="changeStatus(${t.id}, this.value)">${statusSelectOptions(t.tripStatus)}</select>`
                             : `<span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span>`;
 
                         const remarksCell = canE
-                            ? `<input class="cell-input" type="text" title="${esc(t.remarks || "")}" value="${esc(t.remarks || "")}" placeholder="—" onchange="changeRemarks(${t.id}, this.value)">`
+                            ? `<input class="cell-input" type="text" title="${esc(t.remarks || "")}" value="${esc(t.remarks || "")}" placeholder="—" onchange="this.title=this.value; changeRemarks(${t.id}, this.value)">`
                             : `<span class="crew-helper" title="${esc(t.remarks || "")}">${esc(t.remarks || "")}</span>`;
 
                         // Rows are drop targets for crew cards dragged from the
@@ -187,8 +193,6 @@
       <td>${esc(t.tier) || "—"}</td>
       <td>${colorChip(billingCat)}</td>
       <td class="td-crew col-divider">${crewCell}</td>
-      <td>${colorChip(assignedTruckBillingCat)}</td>
-      <td class="td-plate">${esc(truckPlate) || "—"}</td>
       <td class="td-status col-divider">${statusCell}</td>
       <td class="td-wb">${waybillCellHtml(t, canE)}</td>
       <td class="td-remarks">${remarksCell}</td>
@@ -275,29 +279,6 @@
             }
 
             // ── INLINE TRIP EDITING ───────────────────────────────────
-            // Options for the crew <select>: one per active truck, labelled
-            // with its default driver so a dispatcher picks a whole crew, not
-            // a bare truck.
-            function truckCrewOptions(selectedTruckId) {
-                const empMap = indexById(employees);
-                const opts = trucks
-                    .filter((t) => t.active !== false)
-                    .map((t) => {
-                        const def = defaultAssignments.find(
-                            (a) => Number(a.truckId) === Number(t.id),
-                        );
-                        const dnick =
-                            def && def.defaultDriverId
-                                ? (empMap[def.defaultDriverId] || {}).nick
-                                : "";
-                        const label =
-                            esc(t.plate) + (dnick ? " · " + esc(dnick) : "");
-                        return `<option value="${t.id}" ${Number(t.id) === Number(selectedTruckId) ? "selected" : ""}>${label}</option>`;
-                    })
-                    .join("");
-                return `<option value="">— Unassigned —</option>${opts}`;
-            }
-
             function statusSelectOptions(current) {
                 const vals = [
                     "Prepping",

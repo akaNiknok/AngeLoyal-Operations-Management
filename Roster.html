@@ -370,7 +370,7 @@
     <td>${isAdmin ? f("customerGroup", o.customerGroup) : colorChip(o.customerGroup)}</td>
     <td>${
         isAdmin
-            ? `<input class="cell-input" title="${esc(o.notes || "")}" value="${esc(o.notes || "")}" onchange="updateOutletField(${o.id},'notes',this.value)">`
+            ? `<input class="cell-input" title="${esc(o.notes || "")}" value="${esc(o.notes || "")}" onchange="this.title=this.value; updateOutletField(${o.id},'notes',this.value)">`
             : esc(o.notes) || "—"
     }</td>
   </tr>`;
@@ -538,7 +538,7 @@
                             : "";
 
                         const notesCell = isAdmin
-                            ? `<input class="cell-input" title="${esc(d.notes || "")}" value="${esc(d.notes || "")}" placeholder="notes…" onchange="saveDefNotes(${d.id}, this.value)">`
+                            ? `<input class="cell-input" title="${esc(d.notes || "")}" value="${esc(d.notes || "")}" placeholder="notes…" onchange="this.title=this.value; saveDefNotes(${d.id}, this.value)">`
                             : esc(d.notes || "");
 
                         return `<tr>

@@ -128,14 +128,16 @@ function withExistingTrip(extra = {}) {
   return asDispatcher(sheets);
 }
 
-test('saveTripChanges re-snapshots the billing category when the truck changes', () => {
+test('saveTripChanges keeps the trip billing category fixed when the truck changes', () => {
   const { api, ss } = withExistingTrip();
   const res = api.saveTripChanges(50, { truckId: 4 }); // truck 4 = 6W
   assert.equal(res.success, true);
 
   const trip = rowObject(...firstRow(ss, 'Trips'));
   assert.equal(Number(trip['Truck ID']), 4);
-  assert.equal(trip['Truck Billing Category'], '6W'); // re-snapshotted
+  // Required truck type is snapshotted at dispatch and must not re-price
+  // when a physical truck is reassigned.
+  assert.equal(trip['Truck Billing Category'], '10W');
 });
 
 test('saveTripChanges stamps Status Changed By/At on a status change', () => {

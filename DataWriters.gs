@@ -126,8 +126,10 @@ function saveTripChanges(tripId, changes) {
     const updates = {};
 
     if (changes.truckId !== undefined) {
-      updates['Truck ID']               = changes.truckId;
-      updates['Truck Billing Category'] = _resolveBillingCategory(changes.truckId) || '';
+      updates['Truck ID'] = changes.truckId;
+      // Truck Billing Category is the required truck type for the trip
+      // (snapshotted at dispatch/import). Reassigning a physical truck must
+      // NOT re-price the trip, so it is intentionally left untouched here.
     }
     if (changes.driverId !== undefined) {
       updates['Driver ID'] = changes.driverId;

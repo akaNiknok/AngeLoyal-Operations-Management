@@ -393,18 +393,6 @@
                 </div>
 
                 <div class="dispatch-layout">
-                    <!-- Crew rail: drag a crew onto a trip row to assign -->
-                    <div
-                        class="cb-rail"
-                        id="crew-rail"
-                        style="display: none; margin: 8px 0 8px 8px"
-                    >
-                        <div class="col-head">
-                            Crews
-                            <span id="cb-rail-count" style="font-weight: 400"></span>
-                        </div>
-                        <div class="cb-rail-list" id="cb-rail-list"></div>
-                    </div>
                     <!-- Main table -->
                     <div class="dispatch-main">
                         <div class="table-wrap" id="dispatch-table-wrap">
@@ -453,11 +441,9 @@
                                         <th style="width: 90px">
                                             Billing Cat.
                                         </th>
-                                        <th class="col-divider" style="width: 160px">
-                                            Driver / Helper
+                                        <th class="col-divider" style="width: 170px">
+                                            Crew
                                         </th>
-                                        <th style="width: 60px">Type</th>
-                                        <th style="width: 90px">Plate</th>
                                         <th class="col-divider" style="width: 120px">Status</th>
                                         <th style="width: 120px">Waybill</th>
                                         <th style="width: 140px">Remarks</th>
@@ -467,6 +453,17 @@
                                 <tbody id="dispatch-tbody"></tbody>
                             </table>
                         </div>
+                    </div>
+                    <!-- Crew rail: drag a crew onto a trip row to assign -->
+                    <div class="cb-rail" id="crew-rail" style="display: none">
+                        <div class="col-head">
+                            Crews
+                            <span
+                                id="cb-rail-count"
+                                style="font-weight: 400"
+                            ></span>
+                        </div>
+                        <div class="cb-rail-list" id="cb-rail-list"></div>
                     </div>
                 </div>
 

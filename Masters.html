@@ -428,8 +428,8 @@
                             ? `<input class="cell-input" value="${esc(m.fileTypeCode)}" onchange="updateRouteTypeMapField(${m.id},'fileTypeCode',this.value)">`
                             : `<span style="font-family:'DM Mono',monospace">${esc(m.fileTypeCode)}</span>`;
                         const catCell = isAdmin
-                            ? `<select class="cell-select" onchange="updateRouteTypeMapField(${m.id},'billingCategory',this.value)">${billingCategoryOptions(m.billingCategory)}</select>`
-                            : `<span style="font-family:'DM Mono',monospace">${esc(m.billingCategory)}</span>`;
+                            ? `<div class="cat-cell">${catSwatch(m.billingCategory)}<select class="cell-select" onchange="updateRouteTypeMapField(${m.id},'billingCategory',this.value)">${billingCategoryOptions(m.billingCategory)}</select></div>`
+                            : colorChip(m.billingCategory);
                         return `<tr>
     <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${m.id}</td>
     <td>${codeCell}</td>
@@ -459,6 +459,8 @@
                 bgSave("updateRouteTypeMapping", [id, { [field]: value }], {
                     onOk: (r) => {
                         Object.assign(m, r.mapping);
+                        if (field === "billingCategory")
+                            renderRouteTypeMapAdmin();
                     },
                     revert: () => {
                         m[field] = old;

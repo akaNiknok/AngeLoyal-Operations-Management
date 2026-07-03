@@ -758,8 +758,7 @@
                 display: flex;
                 flex-direction: column;
                 background: var(--surface);
-                border: 1px solid var(--border);
-                border-radius: var(--radius);
+                border-left: 1px solid var(--border);
                 overflow: hidden;
             }
             .cb-rail-list {
@@ -794,14 +793,22 @@
             .cb-crew-card:active {
                 cursor: grabbing;
             }
+            .cb-crew-card.assigned {
+                opacity: 0.4;
+            }
             .cb-crew-line {
                 font-size: 12px;
             }
             .cb-crew-plate {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                margin-top: 3px;
+            }
+            .cb-crew-platenum {
                 font-family: "DM Mono", monospace;
-                font-size: 10px;
+                font-size: 11px;
                 color: var(--muted);
-                margin-top: 2px;
             }
             /* A trip row highlighted as an active drop target. */
             table.dispatch-table tbody tr.cb-drop-hover {
@@ -925,6 +932,41 @@
             }
             .td-crew .crew-driver {
                 margin-right: 4px;
+            }
+            /* Assigned-crew card inside the dispatch table's Crew column. */
+            .crew-card {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .crew-card.empty {
+                min-height: 22px;
+                justify-content: center;
+            }
+            .crew-card-top {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+            }
+            .crew-card-plate {
+                font-family: "DM Mono", monospace;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            .crew-card-crew {
+                font-size: 11px;
+            }
+            .cb-unassign {
+                margin-left: auto;
+                border: none;
+                background: transparent;
+                color: var(--hint);
+                cursor: pointer;
+                font-size: 11px;
+                padding: 0 4px;
+            }
+            .cb-unassign:hover {
+                color: var(--red);
             }
             .cell-select.sc-scheduled {
                 color: var(--blue);
