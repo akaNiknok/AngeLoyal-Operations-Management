@@ -291,6 +291,15 @@
                     </button>
                     <button
                         class="btn btn-ghost btn-sm"
+                        id="btn-clear-prepping-crew"
+                        onclick="clearAllPreppingCrew()"
+                        style="display: none"
+                        title="Unassign crew from every Prepping trip on this day"
+                    >
+                        ✕ Clear all crew (Prepping)
+                    </button>
+                    <button
+                        class="btn btn-ghost btn-sm"
                         onclick="openAddTripModal()"
                     >
                         + Add trip
@@ -417,9 +426,10 @@
                                         ></th>
                                         <th style="width: 110px">FO #</th>
                                         <th style="width: 110px">
-                                            Customer Group
+                                            Cust. Grp.
                                         </th>
                                         <th style="width: 200px">Outlet</th>
+                                        <th style="width: 160px">Address</th>
                                         <th style="width: 90px">Area</th>
                                         <th
                                             style="
@@ -447,7 +457,6 @@
                                         <th class="col-divider" style="width: 120px">Status</th>
                                         <th style="width: 120px">Waybill</th>
                                         <th style="width: 140px">Remarks</th>
-                                        <th style="width: 60px">Source</th>
                                     </tr>
                                 </thead>
                                 <tbody id="dispatch-tbody"></tbody>
