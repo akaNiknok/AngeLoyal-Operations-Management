@@ -239,8 +239,6 @@ const RPC_ALLOWED = {
   updateRouteTypeMapping: true,
   createEmployee: true,
   updateEmployee: true,
-  saveAssignment: true,
-  removeAssignment: true,
 };
 
 /**

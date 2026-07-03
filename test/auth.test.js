@@ -42,7 +42,6 @@ function authEnv(codes, extra = {}) {
       Users: usersSheet(),
       Employees: emptySheet('Employees'),
       Trucks: emptySheet('Trucks'),
-      'Employee-Truck Assignment': emptySheet('Employee-Truck Assignment'),
       'Waybill Prefixes': emptySheet('Waybill Prefixes'),
       Outlets: emptySheet('Outlets'),
       'Default Assignments': emptySheet('Default Assignments'),

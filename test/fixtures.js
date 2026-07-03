@@ -18,8 +18,6 @@ const HEADERS = {
 
   'Default Assignments': ['ID', 'Truck ID', 'Default Driver ID', 'Default Helper IDs', 'Notes'],
 
-  'Employee-Truck Assignment': ['ID', 'Date', 'Employee ID', 'Truck ID', 'Type'],
-
   Trips: [
     'ID', 'Trip Date', 'Billing Date', 'FO Number', 'FO Split Suffix',
     'Outlet ID', 'Area', 'Quantity', 'CBM', 'Restrictions',

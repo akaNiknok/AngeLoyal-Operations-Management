@@ -744,7 +744,7 @@ function setTripConvoyGroup(tripIds, action) {
 
 
 // ============================================================
-//  DATA WRITERS — Default Assignments (Admin only)
+//  DATA WRITERS — Default Assignments (the truck roster; Admin + Dispatcher)
 // ============================================================
 
 /**
@@ -756,7 +756,7 @@ function setTripConvoyGroup(tripIds, action) {
  * @returns {{ success: boolean } | { success: false, error: string }}
  */
 function updateDefaultAssignment(defaultAssignId, changes) {
-  _requirePermission('EDIT_MASTER_RECORDS');
+  _requirePermission('ASSIGN_CREW');
   try {
     const sheet   = _getSheet(SHEET_DEFAULT_ASSIGN);
     const rows    = sheet.getDataRange().getValues();
@@ -1276,86 +1276,6 @@ function updateEmployee(employeeId, changes) {
 
     _auditLog('EMPLOYEE_EDIT', SHEET_EMPLOYEES, employeeId, JSON.stringify(oldVal), JSON.stringify(changes));
     return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
-
-
-// ============================================================
-//  DATA WRITERS — Truck Roster
-// ============================================================
-
-/**
- * Appends a new assignment row to the Employee-Truck Assignment sheet.
- * Returns the new row so the client can patch its local roster state
- * without a follow-up getCurrentAssignments() call.
- *
- * @param {number} employeeId
- * @param {number} truckId
- * @param {string} type  'Driver' | 'Helper'
- * @returns {{ success: boolean, row: { id, dateMs, employeeId, truckId, type } } | { success: false, error: string }}
- */
-function saveAssignment(employeeId, truckId, type) {
-  _requirePermission('ASSIGN_CREW');
-  try {
-    const sheet   = _getSheet(SHEET_ASSIGNMENTS);
-    const nextId  = _nextRowId(sheet);
-    const now     = new Date();
-
-    // Column order: ID | Date | Employee ID | Truck ID | Type
-    sheet.appendRow([
-      nextId,
-      Utilities.formatDate(now, Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss'),
-      employeeId,
-      truckId,
-      type,
-    ]);
-
-    _auditLog('ASSIGN', SHEET_ASSIGNMENTS, nextId, '',
-      `Employee ${employeeId} → Truck ${truckId} as ${type}`);
-
-    return {
-      success: true,
-      row: { id: nextId, dateMs: now.getTime(), employeeId: Number(employeeId), truckId: Number(truckId), type: type },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * Removes an employee from their current truck (append-only: writes a null truck row).
- * Returns the new row so the client can remove the employee from its local
- * roster state without a follow-up getCurrentAssignments() call.
- *
- * @param {number} employeeId
- * @param {string} type  'Driver' | 'Helper'
- * @returns {{ success: boolean, row: { id, dateMs, employeeId, truckId: null, type } } | { success: false, error: string }}
- */
-function removeAssignment(employeeId, type) {
-  _requirePermission('ASSIGN_CREW');
-  try {
-    const sheet  = _getSheet(SHEET_ASSIGNMENTS);
-    const nextId = _nextRowId(sheet);
-    const now    = new Date();
-
-    // Empty truckId signals "unassigned"
-    sheet.appendRow([
-      nextId,
-      Utilities.formatDate(now, Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss'),
-      employeeId,
-      '',   // null truckId
-      type,
-    ]);
-
-    _auditLog('REMOVE', SHEET_ASSIGNMENTS, nextId, '',
-      `Employee ${employeeId} unassigned`);
-
-    return {
-      success: true,
-      row: { id: nextId, dateMs: now.getTime(), employeeId: Number(employeeId), truckId: null, type: type },
-    };
   } catch (e) {
     return { success: false, error: e.message };
   }

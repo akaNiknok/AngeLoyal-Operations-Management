@@ -14,9 +14,8 @@
  * Replaces 7 separate google.script.run calls at startup.
  *
  * @returns {{ session: Object, employees: Object[], trucks: Object[],
- *             rosterAssignments: Object[], waybillPrefixes: Object[],
- *             outlets: Object[], defaultAssignments: Object[],
- *             billingCategories: Object[] }}
+ *             waybillPrefixes: Object[], outlets: Object[],
+ *             defaultAssignments: Object[], billingCategories: Object[] }}
  */
 function getBootData() {
   const session = getUserSession();
@@ -31,7 +30,6 @@ function getBootData() {
     session:            session,
     employees:          getEmployees(),
     trucks:             getTrucks(),
-    rosterAssignments:  getCurrentAssignments(),
     waybillPrefixes:    getWaybillPrefixes(),
     outlets:            getOutlets(),
     defaultAssignments: getDefaultAssignments(),
@@ -400,43 +398,4 @@ function getRouteFrequencyForDriver(driverId, windowDays) {
     count:      count,
     outletName: (outlets[oid] || {}).outletName || '',
   }));
-}
-
-/**
- * Returns the latest assignment per employee from the Employee-Truck Assignment sheet.
- * Used by the Truck Roster web app.
- *
- * @returns {Object[]} Array of { id, dateMs, employeeId, truckId, type }
- */
-function getCurrentAssignments() {
-  const sheet   = _getSheet(SHEET_ASSIGNMENTS);
-  const rows    = sheet.getDataRange().getValues();
-  if (rows.length < 2) return [];
-
-  const headers = rows[0].map(h => h.toString().trim());
-
-  const all = rows.slice(1).map(row => {
-    const rawTruckId = _val(row, headers, 'Truck ID');
-    const rawDate    = _val(row, headers, 'Date');
-    const dateMs     = (rawDate instanceof Date) ? rawDate.getTime() : new Date(rawDate).getTime();
-
-    return {
-      id:         _numOrNull(_val(row, headers, 'ID')),
-      dateMs:     isNaN(dateMs) ? 0 : dateMs,
-      employeeId: Number(_val(row, headers, 'Employee ID')),
-      truckId:    (rawTruckId === '' || rawTruckId === null || rawTruckId === undefined)
-                    ? null
-                    : Number(rawTruckId),
-      type:       _val(row, headers, 'Type'),
-    };
-  }).filter(a => a.employeeId);
-
-  // Latest assignment per employee
-  const latest = {};
-  all.forEach(a => {
-    const prev = latest[a.employeeId];
-    if (!prev || a.dateMs >= prev.dateMs) latest[a.employeeId] = a;
-  });
-
-  return Object.values(latest).filter(a => a.truckId !== null);
 }

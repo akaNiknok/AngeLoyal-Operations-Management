@@ -26,7 +26,6 @@
             let currentUser = { email: "", displayName: "", role: null };
             let employees = [];
             let trucks = [];
-            let rosterAssignments = [];
             let waybillPrefixes = [];
             let outlets = [];
             let defaultAssignments = [];
@@ -40,9 +39,8 @@
             let crewRailOpen = false; // crew drag-and-drop rail beside the table
             let crewRailSort = "driver"; // driver | plate | type
             let saving = false;
-            let todayRosterExpanded = false;
 
-            // Roster state (Today's Roster assignment tool)
+            // Roster state (Truck Roster assignment tool)
             let selectedRosterTruckId = null;
             let selectedRosterEmpId = null;
             let empFilter = "all";
@@ -221,7 +219,6 @@
                         currentUser = boot.session || { role: null };
                         employees = boot.employees || [];
                         trucks = boot.trucks || [];
-                        rosterAssignments = boot.rosterAssignments || [];
                         waybillPrefixes = boot.waybillPrefixes || [];
                         outlets = boot.outlets || [];
                         defaultAssignments = boot.defaultAssignments || [];
@@ -254,8 +251,8 @@
             function onMasterDataReady() {
                 renderTruckList();
                 renderEmpList();
+                renderRosterDetail();
                 renderUnassignedCrewStat();
-                renderDefaults();
                 renderOutlets();
                 populateAddTripSelects();
                 loadDispatch();
@@ -389,11 +386,12 @@
 
                 if (name === "dispatch") {
                     loadDispatch();
-                    renderTruckList();
-                    renderEmpList();
                 }
                 if (name === "roster") {
-                    renderDefaults();
+                    renderTruckList();
+                    renderEmpList();
+                    renderRosterDetail();
+                    renderUnassignedCrewStat();
                 }
                 if (name === "outlets") renderOutlets();
                 if (name === "trucks") renderTrucksAdmin();

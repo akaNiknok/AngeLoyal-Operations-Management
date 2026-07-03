@@ -133,7 +133,6 @@ test('getBootData returns the session plus all master collections in one call', 
     Users: usersSheet(),
     Employees: [HEADERS.Employees.slice(), [1, 'Boy', 'Juan', '', 'Cruz', 'Driver', true]],
     Trucks: [HEADERS.Trucks.slice(), [1, 'AAA-111', 'Isuzu', '6W', true, '6W']],
-    'Employee-Truck Assignment': emptySheet('Employee-Truck Assignment'),
     'Waybill Prefixes': [HEADERS['Waybill Prefixes'].slice(), [1, 'AL', 'AngeLoyal', 40]],
     Outlets: [HEADERS.Outlets.slice(), [1, 'Outlet A', 'Cavite', '', '', '', '6/1/2026']],
     'Default Assignments': [HEADERS['Default Assignments'].slice(), [1, 1, 1, '', '']],
@@ -149,5 +148,4 @@ test('getBootData returns the session plus all master collections in one call', 
   assert.equal(boot.outlets.length, 1);
   assert.equal(boot.defaultAssignments.length, 1);
   assert.equal(boot.billingCategories.length, 1);
-  assert.ok(Array.isArray(boot.rosterAssignments));
 });

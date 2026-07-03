@@ -122,32 +122,36 @@ test('master writers reject non-admins', () => {
   assert.throws(() => api.createTruck({ plate: 'ZZZ-000' }), /Access denied/);
 });
 
-// ---------------- Truck roster (append-only) ----------------
+// ---------------- Truck roster (Default Assignments) ----------------
+// The roster is now the Default Assignments sheet, edited via
+// updateDefaultAssignment. It is gated by ASSIGN_CREW (Admin + Dispatcher),
+// not the Admin-only EDIT_MASTER_RECORDS the other master writers use.
 
-test('saveAssignment / removeAssignment drive getCurrentAssignments to the latest state', () => {
+test('updateDefaultAssignment (the roster) is editable by a Dispatcher', () => {
   const sheets = base({
-    'Employee-Truck Assignment': emptySheet('Employee-Truck Assignment'),
-    Outlets: emptySheet('Outlets'),
+    'Default Assignments': [HEADERS['Default Assignments'].slice(), [1, 5, '', '', '']],
   });
-  const { api } = makeEnv({ sheets, userEmail: EMAIL.Dispatcher });
+  const { api, ss } = makeEnv({ sheets, userEmail: EMAIL.Dispatcher });
 
-  api.saveAssignment(100, 5, 'Driver');
-  api.saveAssignment(100, 6, 'Driver'); // reassigned to a different truck
+  const res = api.updateDefaultAssignment(1, {
+    defaultDriverId: 100,
+    defaultHelperIds: [21, 22],
+    notes: 'A team',
+  });
+  assert.equal(res.success, true);
 
-  let current = api.getCurrentAssignments();
-  const emp100 = current.find((a) => a.employeeId === 100);
-  assert.ok(emp100, 'employee 100 should be assigned');
-  assert.equal(emp100.truckId, 6); // latest row wins
-
-  api.removeAssignment(100, 'Driver'); // append a null-truck row
-  current = api.getCurrentAssignments();
-  assert.equal(current.find((a) => a.employeeId === 100), undefined); // filtered out
+  const row = rowObject(HEADERS['Default Assignments'], dump(ss, 'Default Assignments').rows[0]);
+  assert.equal(row['Default Driver ID'], 100);
+  assert.equal(row['Default Helper IDs'], '21,22');
+  assert.equal(row['Notes'], 'A team');
 });
 
 test('roster writes are gated by ASSIGN_CREW permission', () => {
-  const sheets = base({ 'Employee-Truck Assignment': emptySheet('Employee-Truck Assignment') });
+  const sheets = base({
+    'Default Assignments': [HEADERS['Default Assignments'].slice(), [1, 5, '', '', '']],
+  });
   const { api } = makeEnv({ sheets, userEmail: EMAIL.Viewer });
-  assert.throws(() => api.saveAssignment(1, 2, 'Driver'), /Access denied/);
+  assert.throws(() => api.updateDefaultAssignment(1, { notes: 'x' }), /Access denied/);
 });
 
 // ---------------- Route Type Map ----------------

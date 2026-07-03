@@ -10,7 +10,6 @@
 
 const SHEET_EMPLOYEES       = 'Employees';
 const SHEET_TRUCKS          = 'Trucks';
-const SHEET_ASSIGNMENTS     = 'Employee-Truck Assignment';
 const SHEET_AUDIT           = 'Audit Log';
 const SHEET_USERS           = 'Users';
 const SHEET_BILLING_CATEGORIES = 'Billing Categories';

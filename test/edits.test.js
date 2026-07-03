@@ -89,15 +89,16 @@ test('updateDefaultAssignment updates driver, helper CSV, and notes', () => {
   assert.equal(row.Notes, 'new note');
 });
 
-test('updateDefaultAssignment errors on unknown id and requires admin', () => {
+test('updateDefaultAssignment errors on unknown id and denies a Viewer', () => {
   const sheets = base({
     'Default Assignments': [HEADERS['Default Assignments'].slice(), [1, 3, 9, '', '']],
   });
   const { api } = asAdmin(sheets);
   assert.match(api.updateDefaultAssignment(99, { notes: 'x' }).error, /not found/);
 
-  const { api: dispApi } = makeEnv({ sheets, userEmail: EMAIL.Dispatcher });
-  assert.throws(() => dispApi.updateDefaultAssignment(1, { notes: 'x' }), /Access denied/);
+  // The roster is now ASSIGN_CREW-gated (Admin + Dispatcher), so a Viewer is denied.
+  const { api: viewApi } = makeEnv({ sheets, userEmail: EMAIL.Viewer });
+  assert.throws(() => viewApi.updateDefaultAssignment(1, { notes: 'x' }), /Access denied/);
 });
 
 // ---------------- updateTruck active toggle ----------------

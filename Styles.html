@@ -1357,46 +1357,6 @@
                 font-size: 12px;
             }
 
-            /* Today's Roster (collapsible section in Dispatch panel) */
-            .today-roster {
-                display: flex;
-                flex-direction: row;
-                flex-shrink: 0;
-                height: 300px;
-                border-top: 1px solid var(--border);
-                overflow: hidden;
-            }
-            .today-roster.collapsed {
-                display: none;
-            }
-            .roster-toggle-badge {
-                font-size: 10px;
-                font-family: "DM Mono", monospace;
-                padding: 1px 6px;
-                border-radius: 99px;
-                background: var(--amber-bg);
-                color: var(--amber);
-                margin-left: 4px;
-            }
-            .roster-toggle-badge:empty {
-                display: none;
-            }
-            #btn-toggle-roster.active {
-                background: var(--surface);
-                border-color: var(--border-md);
-                color: var(--text);
-            }
-            .sub-badge {
-                font-size: 10px;
-                font-family: "DM Mono", monospace;
-                font-weight: 500;
-                padding: 1px 6px;
-                border-radius: 99px;
-                background: var(--amber-bg);
-                color: var(--amber);
-                margin-left: 6px;
-            }
-
             /* ── IMPORT PANEL ── */
             #panel-import {
                 flex-direction: row;
@@ -1812,10 +1772,6 @@
                 border-collapse: collapse;
                 font-size: 12px;
             }
-            #defaults-table {
-                width: 100%;
-                table-layout: fixed;
-            }
             table.data-table thead th {
                 position: sticky;
                 top: 0;
@@ -1864,21 +1820,19 @@
             }
 
             /* ── TRUCK ROSTER PANEL (default crew template) ── */
-            .roster-split {
+            .roster-workspace {
                 display: flex;
                 flex-direction: row;
                 flex: 1;
                 overflow: hidden;
             }
-            .roster-split .defaults-table-wrap {
-                flex: 1.4;
+            .list-item.draggable-row {
+                cursor: grab;
             }
-            .roster-split .col-right {
-                border-left: 1px solid var(--border);
-            }
-            .defaults-table-wrap {
-                flex: 1;
-                overflow: auto;
+            .list-item.cb-drop-hover {
+                background: var(--blue-bg);
+                outline: 2px dashed var(--accent);
+                outline-offset: -2px;
             }
             table.data-table tbody tr.row-selected {
                 background: var(--blue-bg);
@@ -2103,7 +2057,7 @@
                 .trip-sidebar {
                     display: none;
                 }
-                #panel-roster {
+                .roster-workspace {
                     flex-direction: column;
                 }
                 .col-left {

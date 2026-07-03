@@ -70,7 +70,6 @@
                         Object.assign(t, r.truck);
                         if (field === "billingCategory") renderTrucksAdmin();
                         renderTruckList();
-                        renderDefaults();
                     },
                     revert: () => {
                         t[field] = old;
@@ -95,7 +94,6 @@
                         );
                         renderTrucksAdmin();
                         renderTruckList();
-                        renderDefaults();
                     },
                 });
             }
@@ -135,7 +133,6 @@
                         showToast(`${r.truck.plate} added.`, "success");
                         renderTrucksAdmin();
                         renderTruckList();
-                        renderDefaults();
                     })
                     .withFailureHandler((e) => {
                         setSyncing(false);

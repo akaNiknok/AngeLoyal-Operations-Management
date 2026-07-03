@@ -30,7 +30,7 @@ The project is contractually delivered in 3 phases. See [`BACKLOG.md`](BACKLOG.m
 | `Auth.gs` | Google sign-in + session layer. `getLoginUrl()` builds the OAuth consent URL; `_handleOAuthCallback()` (driven by `doGet`) exchanges the code and reads the identity from the ID token (`_identityFromIdToken`); session tokens are minted/looked up in `CacheService` (`_createSession`/`logout`); and the **`rpc(sessionToken, fnName, args)` gateway** (allow-list `RPC_ALLOWED`) that every authenticated client call funnels through. `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` live in Script Properties. |
 | `Utils.gs` | Generic sheet/row helpers: `_getSheet`, `_val`, `_numOrNull`, date parsing/formatting, `_nextRowId`, `_findRowById`, `_writeRowFields`, `_indexById`. **Reuse these — don't hand-roll sheet access.** |
 | `DataReaders.gs` | Read-only accessors. `getBootData()` returns all master data in one round trip. `getDispatchBoardData()`, `getTrips()`, `getWaybillsForTrip()`, etc. |
-| `DataWriters.gs` | All sheet-mutating endpoints (`createTrip`, `saveTripChanges`, `confirmWaybill`, `importRouteFile`, `createOutlet/Truck/Employee/BillingCategory`, roster `saveAssignment`/`removeAssignment`, …). Largest file. |
+| `DataWriters.gs` | All sheet-mutating endpoints (`createTrip`, `saveTripChanges`, `confirmWaybill`, `importRouteFile`, `createOutlet/Truck/Employee/BillingCategory`, roster `updateDefaultAssignment`, …). Largest file. |
 | `Internals.gs` | Private helpers for writers: `_auditLog`, waybill suggestion logic, carry-over trip creation, outlet resolve-or-create, route-frequency append, billing-category rename cascade. |
 | `DevTools.gs` | Token-gated `_devDump` JSON export for local data snapshots. Not in the UI. |
 
@@ -42,7 +42,7 @@ The project is contractually delivered in 3 phases. See [`BACKLOG.md`](BACKLOG.m
 - `Core.html` — global JS state (`employees`, `trucks`, `dispatchData`, …), `bootApp()` boot sequence, RBAC UI gating, panel switching, shared utilities, SheetJS (XLSX) CDN loader.
 - `Dispatch.html` — dispatch board (the primary screen).
 - `Import.html` — Rebisco `.xlsx` route-file parsing + import.
-- `Roster.html` — truck roster (driver/helper ↔ truck assignment).
+- `Roster.html` — truck roster (driver/helper ↔ truck assignment; edits Default Assignments) + Outlets admin.
 - `Masters.html` — admin master-detail panels (outlets, trucks, employees, billing categories, default assignments).
 
 The client calls the backend with `google.script.run.withSuccessHandler(...).fnName(args)`. There is **no router/framework** — `switchPanel()` toggles `.panel` visibility, state lives in module-level `let` globals in `Core.html`.
@@ -64,7 +64,7 @@ The client calls the backend with `google.script.run.withSuccessHandler(...).fnN
 - **Billing Date vs Trip Date**: Trip Date is the calendar dispatch day; Billing Date is the original operational day and is *preserved across carry-overs* so fuel-price/rate indexing stays correct. Don't conflate them.
 - **Snapshotting**: `Truck Billing Category` is stamped onto each trip at dispatch so later category renames don't re-price historical trips.
 - **Helpers** are stored as a comma-separated string of employee IDs in one cell (0–3 helpers), parsed in code — not a relational sub-table.
-- **Append-only logs**: Audit Log, Route Frequency Log, Employee-Truck Assignment. Don't mutate prior rows; derive current state by reducing to the latest row (e.g. `getCurrentAssignments()`).
+- **Append-only logs**: Audit Log, Route Frequency Log. Don't mutate prior rows; derive current state by reducing to the latest row.
 - **Waybills**: suggested (`Locked=FALSE`) → confirmed (`Locked=TRUE`, immutable). Confirmation bumps `Last Sequence Number` on the prefix. Suffixes: `-R` (redeliver), `-FT` (foul trip).
 - **RBAC**: roles are Admin / Dispatcher / Payroll / Viewer. Every sensitive writer must call `_requirePermission(...)`. The UI also hides controls, but **the server is the real gate** — never trust client-side gating alone.
 - **Identity**: the visitor's email comes from a **verified Google sign-in (server-side OAuth code flow)**, not `Session.getActiveUser()` (which is blank for anyone outside the deployer's Workspace domain under `executeAs: me` + anonymous access). `rpc()` sets `_REQUEST_EMAIL` from the session; `_getCurrentUserEmail()` prefers it and falls back to `Session` only for the editor/owner. New client-callable backend functions must be added to `RPC_ALLOWED` in `Auth.gs` or they're unreachable from the browser.

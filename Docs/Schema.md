@@ -11,14 +11,13 @@ The AngeLoyal Order Management System (OMS) relies on a structured collection of
 | 3 | Waybill Prefixes | Config | Administrative Setup |
 | 4 | Employees | People & Trucks | Master Records |
 | 5 | Trucks | People & Trucks | Master Records |
-| 6 | Default Assignments | People & Trucks | Operations Config |
-| 7 | Employee-Truck Assignment | People & Trucks | Append-Only Log |
-| 8 | Outlets | People & Trucks | Master Records (Auto-Populating) |
-| 9 | Trips | Dispatch | Core Operational Ledger |
-| 10 | Route Frequency Log | Dispatch | Append-Only Performance Log |
-| 11 | Waybills | Waybills | Append-Only Transaction Ledger |
-| 12 | Audit Log | Audit | System-Wide Activity Journal |
-| 13 | Route Type Map | Config | Administrative Setup (Self-Seeding) |
+| 6 | Default Assignments | People & Trucks | Operations Config (the truck roster) |
+| 7 | Outlets | People & Trucks | Master Records (Auto-Populating) |
+| 8 | Trips | Dispatch | Core Operational Ledger |
+| 9 | Route Frequency Log | Dispatch | Append-Only Performance Log |
+| 10 | Waybills | Waybills | Append-Only Transaction Ledger |
+| 11 | Audit Log | Audit | System-Wide Activity Journal |
+| 12 | Route Type Map | Config | Administrative Setup (Self-Seeding) |
 
 ## **Group 1: Config Sheets**
 
@@ -43,7 +42,8 @@ Maps Google account emails to specific system roles to manage access control.
 | Add manual trips | ✓ | ✓ | — | — |
 | Flag trip status | ✓ | ✓ | — | — |
 | Confirm waybill numbers | ✓ | ✓ | — | — |
-| Edit Outlets, Default Assignments | ✓ | — | — | — |
+| Edit the truck roster (Default Assignments) | ✓ | ✓ | — | — |
+| Edit Outlets | ✓ | — | — | — |
 | Edit Billing Categories, Waybill Prefixes | ✓ | — | — | — |
 | Edit Users sheet | ✓ | — | — | — |
 | View Audit Log | ✓ | — | — | — |
@@ -69,7 +69,7 @@ Maintains the list of valid billing classifications that Admins can assign to tr
 
 **System Behavior:** Admins select a truck's Billing Category directly when creating or editing a truck record (Sheet 5). Renaming a category here cascades to every Trucks row currently set to the old name, so existing trucks stay matched to the renamed category.
 
-### **Sheet 13: Route Type Map**
+### **Sheet 12: Route Type Map**
 
 Maps the truck-type column codes that appear in a Rebisco route file (e.g. 6WF, 6WC, 4WC) to a truck **Billing Category** (Sheet 2). A route file lists how many trucks of each type an FO needs in dedicated per-type columns (10W, 6WF, 6WC, 4WC, L300…), separate from the client's "Restrictions" constraint. During import the system reads which type column carries the count, looks up its billing category here, and assigns a truck of that category. This sheet **self-seeds** with sensible defaults the first time it is read, so no manual setup is required; Admins can add/edit mappings via the Route Type Map admin panel as the route-file format evolves.
 
@@ -140,33 +140,19 @@ Maintains the authoritative fleet registry, combining physical specifications wi
 
 ### **Sheet 6: Default Assignments**
 
-Establishes the permanent, baseline crew configuration for each vehicle. These records are used to auto-populate the daily dispatch board.
+The **truck roster**: the permanent, baseline crew configuration for each vehicle. It is the single source of crew truth — the dispatch board's Crew Rail stamps a truck's default crew onto trips (`assignCrew`), and the Truck Roster panel edits it directly. One row per truck (seeded blank at truck creation).
 
 | Column | Type | Notes |
 | :---- | :---- | :---- |
 | ID | Number | Auto-incrementing primary key |
 | Truck ID | Number | Foreign Key → Trucks.ID |
 | Default Driver ID | Number | Foreign Key → Employees.ID (Nullable if unassigned) |
-| Default Helper IDs | String | Comma-separated list of Employee IDs (e.g., 30,52, Nullable) |
+| Default Helper IDs | String | Comma-separated list of Employee IDs (0–3, e.g., 30,52, Nullable) |
 | Notes | String | Special scheduling constraints (e.g., "Driver available Mon–Wed only") |
 
-**System Behavior:** Updates made to default assignments apply strictly to newly generated trips. Historical trip logs remain unchanged.
+**System Behavior:** Edited via `updateDefaultAssignment` (gated by `ASSIGN_CREW` — Admin + Dispatcher). Updates apply strictly to newly generated trips; historical trip logs remain unchanged. One-off per-day crew substitutions are made directly on the trip's Crew column, not here.
 
-### **Sheet 7: Employee-Truck Assignment**
-
-An append-only transaction ledger utilized by the internal fleet management applications to track real-time personnel movements.
-
-| Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Date | String | Timestamp of the assignment change (M/d/yyyy HH:mm:ss) |
-| Employee ID | Number | Foreign Key → Employee.ID |
-| Truck ID | Number | Foreign Key → Truck.ID (empty signals "unassigned") |
-| Type | String | Driver or Helper |
-
-**System Behavior:** `getCurrentAssignments()` reduces this log to the most recent row per employee (by Date) to derive the live current roster.
-
-### **Sheet 8: Outlets**
+### **Sheet 7: Outlets**
 
 Created empty. On first import of a Rebisco route file, the backend scans all outlet names in the file and inserts any that don't already exist as new rows. Admin can then enrich the records (add address, notes, etc.).
 
@@ -182,7 +168,7 @@ Created empty. On first import of a Rebisco route file, the backend scans all ou
 
 ## **Group 3: Dispatch**
 
-### **Sheet 9: Trips**
+### **Sheet 8: Trips**
 
 The core transactional table of the system. Each row tracks an individual delivery assignment. Multiple rows may share an FO Number for multi-drop routes, or contain distinct alphabetical suffixes for split-load allocations.
 
@@ -236,7 +222,7 @@ When a trip status transitions to `Foul Trip - For Redeliver` or `Redeliver`, th
 * Parent Trip ID \= Links back to the original trip's ID
 * Source \= Carry-over
 
-### **Sheet 10: Route Frequency Log**
+### **Sheet 9: Route Frequency Log**
 
 An append-only table compiled automatically upon saving any trip. It acts as the data source for real-time compliance alerts regarding driver delivery frequencies.
 
@@ -252,7 +238,7 @@ An append-only table compiled automatically upon saving any trip. It acts as the
 
 ## **Group 4: Waybills**
 
-### **Sheet 11: Waybills**
+### **Sheet 10: Waybills**
 
 Tracks system-generated billing numbers. Once a record is finalized by operational staff (Locked \= TRUE), it becomes immutable within the workspace UI; any subsequent amendments can only be executed via structural audit overrides.
 
@@ -281,7 +267,7 @@ Tracks system-generated billing numbers. Once a record is finalized by operation
 
 ## **Group 5: Audit**
 
-### **Sheet 12: Audit Log**
+### **Sheet 11: Audit Log**
 
 The global ledger recording all administrative, operational, and data state modifications across the entire environment.
 
@@ -299,7 +285,6 @@ The global ledger recording all administrative, operational, and data state modi
 
 #### **System Action Vocabulary**
 
-* ASSIGN / REMOVE — Personnel adjustments on the vehicle roster  
 * TRIP\_CREATE — Registration of a new delivery record  
 * TRIP\_STATUS\_CHANGE — Modifications to an active trip's state  
 * TRIP\_REASSIGN — Changes made to a trip's driver or vehicle allocation  
