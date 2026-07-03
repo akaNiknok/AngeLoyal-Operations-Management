@@ -594,13 +594,13 @@
                     <span
                         class="tb-label"
                         style="color: var(--hint); font-size: 10px"
-                        >The default crew per truck. Drag an employee onto a
-                        truck, or select both. Changes affect new dispatch days
-                        only — not existing trips.</span
+                        >The default crew per truck. Drag crew onto a truck to
+                        assign; drag them back to the right to unassign. Changes
+                        affect new dispatch days only — not existing trips.</span
                     >
                 </div>
                 <div class="roster-workspace">
-                    <div class="col-left">
+                    <div class="roster-pane roster-trucks">
                         <div class="col-head">
                             <span>Trucks</span>
                             <span
@@ -611,91 +611,34 @@
                         <div class="col-search">
                             <input
                                 id="truck-search"
-                                placeholder="Search plate or type…"
+                                placeholder="Search plate, brand or type…"
                                 oninput="renderTruckList()"
                             />
                         </div>
                         <div class="list-scroll" id="truck-list"></div>
                     </div>
 
-                    <div class="col-right">
-                        <div class="detail-col">
-                            <div class="col-head">Truck detail</div>
-                            <div class="detail-body" id="roster-detail-body">
-                                <div class="empty-board" style="padding: 24px 0">
-                                    <div class="icon">🚚</div>
-                                    <div class="sub">
-                                        Select a truck to view its crew
-                                    </div>
-                                </div>
-                            </div>
-                            <div
-                                class="assign-bar"
-                                id="roster-assign-bar"
-                                style="display: none"
-                            >
-                                <button
-                                    class="assign-btn disabled"
-                                    id="roster-assign-btn"
-                                    onclick="doAssign()"
-                                >
-                                    Assign employee
-                                </button>
-                                <button
-                                    class="assign-btn primary"
-                                    id="roster-assign-btn2"
-                                    style="display: none"
-                                ></button>
-                                <div
-                                    class="assign-hint"
-                                    id="roster-assign-hint"
-                                ></div>
-                            </div>
+                    <div
+                        class="roster-pane roster-emps"
+                        ondragover="rosterUnassignDragOver(event)"
+                        ondragleave="rosterUnassignDragLeave(event)"
+                        ondrop="rosterUnassignDrop(event)"
+                    >
+                        <div class="col-head">
+                            <span>Unassigned Crew</span>
+                            <span
+                                id="emp-count-label"
+                                style="font-weight: 400"
+                            ></span>
                         </div>
-
-                        <div class="emp-col">
-                            <div class="col-head">
-                                <span>Employees</span>
-                                <span
-                                    id="emp-count-label"
-                                    style="font-weight: 400"
-                                ></span>
-                            </div>
-                            <div class="emp-filter-bar">
-                                <button
-                                    class="pill active"
-                                    onclick="setEmpFilter('all', this)"
-                                >
-                                    All
-                                </button>
-                                <button
-                                    class="pill"
-                                    onclick="setEmpFilter('Driver', this)"
-                                >
-                                    Drivers
-                                </button>
-                                <button
-                                    class="pill"
-                                    onclick="setEmpFilter('Helper', this)"
-                                >
-                                    Helpers
-                                </button>
-                                <button
-                                    class="pill"
-                                    onclick="setEmpFilter('unassigned', this)"
-                                >
-                                    Unassigned
-                                </button>
-                            </div>
-                            <div class="col-search">
-                                <input
-                                    id="emp-search"
-                                    placeholder="Search employee…"
-                                    oninput="renderEmpList()"
-                                />
-                            </div>
-                            <div class="list-scroll" id="emp-list"></div>
+                        <div class="col-search">
+                            <input
+                                id="emp-search"
+                                placeholder="Search employee…"
+                                oninput="renderEmpList()"
+                            />
                         </div>
+                        <div class="list-scroll" id="emp-list"></div>
                     </div>
                 </div>
             </div>

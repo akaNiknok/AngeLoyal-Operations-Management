@@ -43,7 +43,6 @@
             // Roster state (Truck Roster assignment tool)
             let selectedRosterTruckId = null;
             let selectedRosterEmpId = null;
-            let empFilter = "all";
 
             // Import state
             let importRows = []; // parsed from xlsx
@@ -251,7 +250,6 @@
             function onMasterDataReady() {
                 renderTruckList();
                 renderEmpList();
-                renderRosterDetail();
                 renderUnassignedCrewStat();
                 renderOutlets();
                 populateAddTripSelects();
@@ -390,7 +388,6 @@
                 if (name === "roster") {
                     renderTruckList();
                     renderEmpList();
-                    renderRosterDetail();
                     renderUnassignedCrewStat();
                 }
                 if (name === "outlets") renderOutlets();
