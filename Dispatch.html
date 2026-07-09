@@ -205,7 +205,7 @@
                             ? `onclick="handleRowClick(event, ${t.id})"`
                             : "";
 
-                        return `<tr class="${sourceCls} ${foGroupCls[i]} ${cgCls}${selCls}" ${dz} ${rowClick}>
+                        return `<tr data-tid="${t.id}" class="${sourceCls} ${foGroupCls[i]} ${cgCls}${selCls}" ${dz} ${rowClick}>
       <td class="td-fo">${dragHandle}${esc(foFull) || "—"}</td>
       <td>${colorChip(custGroup)}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
@@ -354,11 +354,15 @@
                 e.dataTransfer.setData(ROW_DRAG_TYPE, String(tripId));
                 e.dataTransfer.effectAllowed = "move";
                 draggingTripId = tripId;
+                e.target.closest("tr")?.classList.add("row-dragging");
             }
 
             function rowDragEnd() {
                 draggingTripId = null;
                 clearRowDropIndicator();
+                document
+                    .querySelectorAll(".row-dragging")
+                    .forEach((el) => el.classList.remove("row-dragging"));
             }
 
             function rowDragOver(e, tripId) {
@@ -429,10 +433,10 @@
                 if (idx === -1) idx = remaining.length; // target was itself moved — append
                 remaining.splice(before ? idx : idx + 1, 0, ...movedIds);
 
-                applyReorder(remaining);
+                applyReorder(remaining, movedIds);
             }
 
-            function applyReorder(newOrderIds) {
+            function applyReorder(newOrderIds, flashIds) {
                 const byId = indexById(dispatchData.trips);
                 const prevTrips = dispatchData.trips;
                 // Stamp local sortOrder so a re-render (before the server
@@ -440,12 +444,67 @@
                 dispatchData.trips = newOrderIds.map((id, i) =>
                     Object.assign({}, byId[id], { sortOrder: i * 10 }),
                 );
-                renderDispatch();
+                flipRender(renderDispatch);
+                // Flash the rows that just moved so the eye can follow them.
+                (flashIds || []).forEach((id) =>
+                    document
+                        .querySelector(`tr[data-tid="${id}"]`)
+                        ?.classList.add("just-moved"),
+                );
                 bgSave("reorderTrips", [dispatchData.date, newOrderIds], {
                     revert: () => {
                         dispatchData.trips = prevTrips;
                         renderDispatch();
                     },
+                });
+            }
+
+            // FLIP: record each row's screen position, run the re-render (which
+            // rebuilds the tbody), then translate each row back to where it was
+            // and release the transform so it glides to its new home. Rows are
+            // matched across the render by data-tid.
+            // ponytail: transform on a <tr> briefly breaks the sticky FO cell's
+            // horizontal pin — only visible mid-glide when scrolled sideways.
+            function flipRender(renderFn) {
+                const tbody = document.getElementById("dispatch-tbody");
+                const reduce = window.matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                ).matches;
+                if (!tbody || reduce) return renderFn();
+
+                const before = {};
+                tbody
+                    .querySelectorAll("tr[data-tid]")
+                    .forEach((tr) => {
+                        before[tr.dataset.tid] =
+                            tr.getBoundingClientRect().top;
+                    });
+
+                renderFn();
+
+                const moved = [];
+                tbody.querySelectorAll("tr[data-tid]").forEach((tr) => {
+                    const prev = before[tr.dataset.tid];
+                    if (prev == null) return;
+                    const delta = prev - tr.getBoundingClientRect().top;
+                    if (!delta) return;
+                    tr.style.transform = `translateY(${delta}px)`;
+                    moved.push(tr);
+                });
+                if (!moved.length) return;
+
+                requestAnimationFrame(() => {
+                    moved.forEach((tr) => {
+                        tr.style.transition = "transform 0.22s ease";
+                        tr.style.transform = "";
+                        tr.addEventListener(
+                            "transitionend",
+                            () => {
+                                tr.style.transition = "";
+                            },
+                            { once: true },
+                        );
+                    });
                 });
             }
 

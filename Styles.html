@@ -592,6 +592,11 @@
                 min-width: 1620px; /* >= sum of column widths, so columns (e.g. Status) scroll instead of squishing */
                 border-collapse: collapse;
                 font-size: 12px;
+                user-select: none; /* rows are click-to-select; shift-click shouldn't smear a text selection */
+            }
+            table.dispatch-table input,
+            table.dispatch-table textarea {
+                user-select: text; /* but editable cells still need text selection */
             }
             table.dispatch-table thead th {
                 position: sticky;
@@ -912,12 +917,34 @@
                 cursor: grabbing;
             }
             /* Insertion indicator for row-reorder drag-over (drawn inset so it
-               doesn't shift row height/layout). */
-            table.dispatch-table tbody tr.drop-before {
+               doesn't shift row height/layout). Drawn per-cell rather than on
+               the tr: the sticky FO cell paints over a tr box-shadow (clipping
+               the left) and renders it a hair off from the tr's, giving a
+               seam — one shadow per td is uniform across the whole width. */
+            table.dispatch-table tbody tr.drop-before td {
                 box-shadow: inset 0 2px 0 0 var(--accent);
             }
-            table.dispatch-table tbody tr.drop-after {
+            table.dispatch-table tbody tr.drop-after td {
                 box-shadow: inset 0 -2px 0 0 var(--accent);
+            }
+
+            /* Reorder feedback: fade the dragged row while it's in flight, and
+               flash rows into their new home when the drop lands. */
+            table.dispatch-table tbody tr.row-dragging {
+                opacity: 0.45;
+            }
+            @keyframes row-settle {
+                from { background: var(--blue-bg); }
+            }
+            table.dispatch-table tbody tr.just-moved,
+            table.dispatch-table tbody tr.just-moved td:first-child {
+                animation: row-settle 0.5s ease-out;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                table.dispatch-table tbody tr.just-moved,
+                table.dispatch-table tbody tr.just-moved td:first-child {
+                    animation: none;
+                }
             }
 
             .selection-count {
