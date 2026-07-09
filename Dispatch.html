@@ -8,6 +8,7 @@
                     .withSuccessHandler((data) => {
                         dispatchData = data;
                         selectedForGroup.clear();
+                        lastSelectedId = null;
                         renderDispatch();
                         setSyncing(false);
                     })
@@ -166,10 +167,18 @@
                             ? `<input class="cell-input remarks-in" type="text" title="${esc(t.remarks || "")}" value="${esc(t.remarks || "")}" placeholder="—" onchange="this.title=this.value; changeRemarks(${t.id}, this.value)">`
                             : `<span class="crew-helper" title="${esc(t.remarks || "")}">${esc(t.remarks || "")}</span>`;
 
-                        // Rows are drop targets for crew cards dragged from the
-                        // crew rail (reuses the cb* drag handlers).
+                        // Rows are drop targets both for crew cards dragged
+                        // from the crew rail (cb* handlers) and for other
+                        // rows being reordered — rowDragOver/rowDrop tell
+                        // the two apart by dataTransfer type and delegate.
                         const dz = canE
-                            ? `ondragover="cbDragOver(event)" ondragleave="cbDragLeave(event)" ondrop="cbTripDrop(event, ${t.id})"`
+                            ? `ondragover="rowDragOver(event, ${t.id})" ondragleave="rowDragLeave(event)" ondrop="rowDrop(event, ${t.id})"`
+                            : "";
+
+                        // Grip lives inside the frozen FO cell so the row
+                        // doesn't need a whole extra sticky column.
+                        const dragHandle = canE
+                            ? `<span class="row-drag-handle" draggable="true" ondragstart="rowDragStart(event, ${t.id})" ondragend="rowDragEnd(event)" title="Drag to reorder">⠿</span>`
                             : "";
 
                         const billingCat = t.truckBillingCategory || "";
@@ -197,7 +206,7 @@
                             : "";
 
                         return `<tr class="${sourceCls} ${foGroupCls[i]} ${cgCls}${selCls}" ${dz} ${rowClick}>
-      <td class="td-fo">${esc(foFull) || "—"}</td>
+      <td class="td-fo">${dragHandle}${esc(foFull) || "—"}</td>
       <td>${colorChip(custGroup)}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
       <td class="td-address" title="${esc(address)}">${esc(address) || "—"}</td>
@@ -215,23 +224,229 @@
                     .join("");
             }
 
-            // Row click toggles convoy-group selection (highlight instead of a
-            // checkbox column). Clicks on inline controls inside the row
-            // (inputs, selects, buttons, links) act on that control instead.
+            // Row click toggles convoy-group / bulk-action selection (highlight
+            // instead of a checkbox column). Clicks on inline controls inside
+            // the row (inputs, selects, buttons, links) act on that control
+            // instead. Shift extends a range over the currently displayed
+            // order; Ctrl/Cmd toggles one row; a plain click replaces the
+            // selection.
             function handleRowClick(e, tripId) {
                 if (e.target.closest("input, select, button, a")) return;
-                if (selectedForGroup.has(tripId)) selectedForGroup.delete(tripId);
-                else selectedForGroup.add(tripId);
+
+                if (e.shiftKey && lastSelectedId != null) {
+                    const ids = getFilteredTrips().map((t) => t.id);
+                    const a = ids.indexOf(lastSelectedId);
+                    const b = ids.indexOf(tripId);
+                    if (a !== -1 && b !== -1) {
+                        const lo = Math.min(a, b);
+                        const hi = Math.max(a, b);
+                        selectedForGroup = new Set(ids.slice(lo, hi + 1));
+                    } else {
+                        selectedForGroup = new Set([tripId]);
+                    }
+                } else if (e.ctrlKey || e.metaKey) {
+                    if (selectedForGroup.has(tripId))
+                        selectedForGroup.delete(tripId);
+                    else selectedForGroup.add(tripId);
+                    lastSelectedId = tripId;
+                } else {
+                    selectedForGroup = new Set([tripId]);
+                    lastSelectedId = tripId;
+                }
                 updateConvoyButtons();
                 renderDispatch();
             }
 
             function updateConvoyButtons() {
                 const n = selectedForGroup.size;
+                const editing = canEdit();
                 document.getElementById("btn-group-convoy").style.display =
-                    canEdit() && n >= 2 ? "" : "none";
+                    editing && n >= 2 ? "" : "none";
                 document.getElementById("btn-ungroup-convoy").style.display =
-                    canEdit() && n >= 1 ? "" : "none";
+                    editing && n >= 1 ? "" : "none";
+
+                const show = editing && n >= 1;
+                const countEl = document.getElementById("selection-count");
+                if (countEl) {
+                    countEl.style.display = show ? "" : "none";
+                    countEl.textContent = `${n} selected`;
+                }
+                const bulkStatusEl = document.getElementById("bulk-status");
+                if (bulkStatusEl) {
+                    bulkStatusEl.style.display = show ? "" : "none";
+                    // Populate once from the same option list used per-row, so
+                    // the two never drift apart.
+                    if (!bulkStatusEl.dataset.populated) {
+                        bulkStatusEl.innerHTML =
+                            `<option value="">Set status…</option>` +
+                            statusSelectOptions(null);
+                        bulkStatusEl.dataset.populated = "1";
+                    }
+                }
+            }
+
+            // Applies one status to every selected trip in one round trip.
+            // Reuses bulkSetTripStatus (server) which itself reuses
+            // saveTripChanges per id — carry-over spawn keeps working.
+            function bulkChangeStatus(status) {
+                if (!canEdit() || !status || !dispatchData) return;
+                const ids = [...selectedForGroup];
+                if (!ids.length) return;
+
+                const olds = new Map();
+                ids.forEach((id) => {
+                    const trip = (dispatchData.trips || []).find(
+                        (t) => t.id === id,
+                    );
+                    if (trip) {
+                        olds.set(id, trip.tripStatus);
+                        trip.tripStatus = status;
+                    }
+                });
+                selectedForGroup.clear();
+                updateConvoyButtons();
+                renderDispatch();
+
+                bgSave("bulkSetTripStatus", [ids, status], {
+                    onOk: (r) => {
+                        if (r.newTripIds && r.newTripIds.length) {
+                            showToast(
+                                `${r.newTripIds.length} carry-over trip${r.newTripIds.length === 1 ? "" : "s"} created for next day.`,
+                                "success",
+                            );
+                            loadDispatch();
+                        }
+                    },
+                    revert: () => {
+                        ids.forEach((id) => {
+                            const trip = (dispatchData.trips || []).find(
+                                (t) => t.id === id,
+                            );
+                            if (trip && olds.has(id))
+                                trip.tripStatus = olds.get(id);
+                        });
+                        renderDispatch();
+                    },
+                });
+            }
+
+            // ── ROW DRAG-TO-REORDER ────────────────────────────────────
+            // A grip inside the FO cell (rendered by renderDispatch) starts
+            // the drag. Row dragover/drop is shared with the crew-card drop
+            // zone (cbDragOver/cbTripDrop in CrewBoard.html) — the dataTransfer
+            // type tells the two apart so crew-card drops keep working.
+            const ROW_DRAG_TYPE = "application/x-oms-rows";
+            let draggingTripId = null;
+
+            function isRowDrag(e) {
+                return e.dataTransfer.types.includes(ROW_DRAG_TYPE);
+            }
+
+            function clearRowDropIndicator() {
+                document
+                    .querySelectorAll(".drop-before, .drop-after")
+                    .forEach((el) =>
+                        el.classList.remove("drop-before", "drop-after"),
+                    );
+            }
+
+            function rowDragStart(e, tripId) {
+                e.dataTransfer.setData(ROW_DRAG_TYPE, String(tripId));
+                e.dataTransfer.effectAllowed = "move";
+                draggingTripId = tripId;
+            }
+
+            function rowDragEnd() {
+                draggingTripId = null;
+                clearRowDropIndicator();
+            }
+
+            function rowDragOver(e, tripId) {
+                if (!isRowDrag(e)) {
+                    cbDragOver(e);
+                    return;
+                }
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const tr = e.currentTarget;
+                const rect = tr.getBoundingClientRect();
+                const before = e.clientY < rect.top + rect.height / 2;
+                clearRowDropIndicator();
+                tr.classList.add(before ? "drop-before" : "drop-after");
+            }
+
+            function rowDragLeave(e) {
+                if (!isRowDrag(e)) cbDragLeave(e);
+            }
+
+            function rowDrop(e, tripId) {
+                if (!isRowDrag(e)) {
+                    cbTripDrop(e, tripId);
+                    return;
+                }
+                e.preventDefault();
+                const tr = e.currentTarget;
+                const rect = tr.getBoundingClientRect();
+                const before = e.clientY < rect.top + rect.height / 2;
+                clearRowDropIndicator();
+                finishRowReorder(tripId, before);
+            }
+
+            // Moves the dragged set (multi-select, else the dragged row's
+            // convoy block, else just the row) to just before/after the drop
+            // target, within the FULL day order (not just the filtered view)
+            // — so the persisted order stays correct regardless of the
+            // status filter currently applied on screen.
+            function finishRowReorder(targetTripId, before) {
+                if (!dispatchData || draggingTripId == null) return;
+                const draggedId = draggingTripId;
+                if (draggedId === targetTripId) return;
+
+                const trips = dispatchData.trips || [];
+                const fullOrder = orderedDayTrips(trips).map((t) => t.id);
+                const byId = indexById(trips);
+
+                let movedIds;
+                if (
+                    selectedForGroup.has(draggedId) &&
+                    selectedForGroup.size > 1
+                ) {
+                    movedIds = fullOrder.filter((id) =>
+                        selectedForGroup.has(id),
+                    );
+                } else {
+                    const cg = (byId[draggedId] || {}).convoyGroup;
+                    movedIds = cg
+                        ? fullOrder.filter(
+                              (id) => (byId[id] || {}).convoyGroup === cg,
+                          )
+                        : [draggedId];
+                }
+                const movedSet = new Set(movedIds);
+
+                const remaining = fullOrder.filter((id) => !movedSet.has(id));
+                let idx = remaining.indexOf(targetTripId);
+                if (idx === -1) idx = remaining.length; // target was itself moved — append
+                remaining.splice(before ? idx : idx + 1, 0, ...movedIds);
+
+                applyReorder(remaining);
+            }
+
+            function applyReorder(newOrderIds) {
+                const byId = indexById(dispatchData.trips);
+                const prevTrips = dispatchData.trips;
+                // Stamp local sortOrder so a re-render (before the server
+                // round trip completes) keeps showing the new order.
+                dispatchData.trips = newOrderIds.map((id, i) =>
+                    Object.assign({}, byId[id], { sortOrder: i * 10 }),
+                );
+                renderDispatch();
+                bgSave("reorderTrips", [dispatchData.date, newOrderIds], {
+                    revert: () => {
+                        dispatchData.trips = prevTrips;
+                        renderDispatch();
+                    },
+                });
             }
 
             function groupSelectedTrips(action) {
@@ -265,10 +480,14 @@
             function getFilteredTrips() {
                 if (!dispatchData) return [];
                 const trips = dispatchData.trips || [];
-                if (statusFilter === "all") return trips;
+                let filtered = trips;
                 if (statusFilter === "carry")
-                    return trips.filter((t) => t.source === "Carry-over");
-                return trips.filter((t) => t.tripStatus === statusFilter);
+                    filtered = trips.filter((t) => t.source === "Carry-over");
+                else if (statusFilter !== "all")
+                    filtered = trips.filter(
+                        (t) => t.tripStatus === statusFilter,
+                    );
+                return orderedDayTrips(filtered);
             }
 
             function setStatusFilter(f, btn) {

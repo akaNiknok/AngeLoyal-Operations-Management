@@ -257,6 +257,17 @@
                         </button>
                     </div>
                     <div class="tb-spacer"></div>
+                    <span
+                        id="selection-count"
+                        class="selection-count"
+                        style="display: none"
+                    ></span>
+                    <select
+                        class="cell-select"
+                        id="bulk-status"
+                        style="display: none; width: 140px"
+                        onchange="bulkChangeStatus(this.value); this.selectedIndex = 0;"
+                    ></select>
                     <button
                         class="btn btn-ghost btn-sm"
                         id="btn-group-convoy"
