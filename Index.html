@@ -197,7 +197,7 @@
                         type="date"
                         id="dispatch-date"
                         style="width: 140px"
-                        onchange="loadDispatch()"
+                        onchange="loadDispatch(true)"
                     />
                     <button
                         class="btn btn-ghost btn-sm"
@@ -404,6 +404,10 @@
                 <div class="dispatch-layout">
                     <!-- Main table -->
                     <div class="dispatch-main">
+                        <div class="board-loading" id="dispatch-loading">
+                            <div class="spinner"></div>
+                            <div class="loading-text">Loading trips…</div>
+                        </div>
                         <div class="table-wrap" id="dispatch-table-wrap">
                             <div class="empty-board" id="dispatch-empty">
                                 <div class="icon">📋</div>

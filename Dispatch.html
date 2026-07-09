@@ -1,15 +1,38 @@
 <script>
             // ── DISPATCH BOARD ────────────────────────────────────────
-            function loadDispatch() {
+            // Per-date cache. Navigation (useCache=true) paints instantly from
+            // cache then revalidates in the background. Writes call
+            // loadDispatch() with no cache, so an edit never shows stale trips.
+            const dispatchCache = {};
+
+            function loadDispatch(useCache) {
                 const dateVal = document.getElementById("dispatch-date").value;
                 if (!dateVal) return;
+                const key = isoToMDY(dateVal);
+                const cached = useCache && dispatchCache[key];
+                if (cached) {
+                    dispatchData = cached;
+                    selectedForGroup.clear();
+                    lastSelectedId = null;
+                    renderDispatch();
+                } else {
+                    document
+                        .getElementById("dispatch-loading")
+                        .classList.add("on");
+                }
                 setSyncing(true);
                 srv()
                     .withSuccessHandler((data) => {
+                        dispatchCache[key] = data;
                         dispatchData = data;
-                        selectedForGroup.clear();
-                        lastSelectedId = null;
+                        if (!cached) {
+                            selectedForGroup.clear();
+                            lastSelectedId = null;
+                        }
                         renderDispatch();
+                        document
+                            .getElementById("dispatch-loading")
+                            .classList.remove("on");
                         setSyncing(false);
                     })
                     .withFailureHandler((e) => {
@@ -17,9 +40,12 @@
                             "Dispatch load failed: " + e.message,
                             "error",
                         );
+                        document
+                            .getElementById("dispatch-loading")
+                            .classList.remove("on");
                         setSyncing(false);
                     })
-                    .getDispatchBoardData(isoToMDY(dateVal));
+                    .getDispatchBoardData(key);
             }
 
             function renderDispatch() {
@@ -566,12 +592,12 @@
                 const mm = String(d.getMonth() + 1).padStart(2, "0");
                 const dd = String(d.getDate()).padStart(2, "0");
                 inp.value = `${yyyy}-${mm}-${dd}`;
-                loadDispatch();
+                loadDispatch(true);
             }
 
             function goToday() {
                 document.getElementById("dispatch-date").value = todayStr();
-                loadDispatch();
+                loadDispatch(true);
             }
 
             // ── INLINE TRIP EDITING ───────────────────────────────────
