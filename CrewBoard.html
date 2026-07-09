@@ -116,6 +116,13 @@
                 e.preventDefault();
                 e.currentTarget.classList.remove("cb-drop-hover");
                 const truckId = Number(e.dataTransfer.getData("text/plain"));
-                if (truckId) assignCrew(tripId, truckId);
+                if (!truckId) return;
+                // Dropping onto a row that's part of a multi-selection
+                // assigns the same crew to every selected trip.
+                if (selectedForGroup.has(tripId) && selectedForGroup.size > 1) {
+                    selectedForGroup.forEach((id) => assignCrew(id, truckId));
+                } else {
+                    assignCrew(tripId, truckId);
+                }
             }
         </script>

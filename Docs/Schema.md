@@ -198,6 +198,7 @@ The core transactional table of the system. Each row tracks an individual delive
 | Added By | String | Email address of the user who generated the record |
 | Added At | DateTime | Creation timestamp |
 | Convoy Group | String | Token grouping trips whose trucks must travel together (convoys / split loads); unique within a Trip Date; Nullable (blank = not in a convoy) |
+| Sort Order | Number | Manual display/route order within a Trip Date, set by dragging rows on the dispatch board; Nullable (blank sorts last) |
 
 #### **Status & Carry-Over Workflow**
 

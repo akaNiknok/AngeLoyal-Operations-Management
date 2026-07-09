@@ -179,11 +179,19 @@ test('saveTripChanges does not spawn a carry-over trip on Preload', () => {
   assert.equal(rowObject(after.headers, after.rows[0])['Trip Status'], 'Preload');
 });
 
+// The route-frequency window is measured against the real clock (new Date()),
+// so fixtures must be dated relative to now — a hardcoded date ages out of it.
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+
 test('saveTripChanges warns when a driver exceeds the route-frequency threshold', () => {
   // 5 recent trips for driver 9 to outlet 12; reassigning makes it the 6th.
-  const today = '6/16/2026';
+  const recent = daysAgo(3);
   const freqRows = [HEADERS['Route Frequency Log'].slice()];
-  for (let i = 1; i <= 5; i++) freqRows.push([i, 100 + i, today, 9, 12]);
+  for (let i = 1; i <= 5; i++) freqRows.push([i, 100 + i, recent, 9, 12]);
 
   const { api } = withExistingTrip({ 'Route Frequency Log': freqRows });
   const res = api.saveTripChanges(50, { driverId: 9 }); // old driver was 8
@@ -194,8 +202,8 @@ test('saveTripChanges warns when a driver exceeds the route-frequency threshold'
 });
 
 test('saveTripChanges does not warn below the threshold', () => {
-  const today = '6/16/2026';
-  const freqRows = [HEADERS['Route Frequency Log'].slice(), [1, 101, today, 9, 12]];
+  const recent = daysAgo(3);
+  const freqRows = [HEADERS['Route Frequency Log'].slice(), [1, 101, recent, 9, 12]];
   const { api } = withExistingTrip({ 'Route Frequency Log': freqRows });
   const res = api.saveTripChanges(50, { driverId: 9 }); // becomes 2nd assignment
   assert.equal(res.routeFrequencyWarning, null);

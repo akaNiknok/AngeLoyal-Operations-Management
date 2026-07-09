@@ -36,6 +36,7 @@
             let dispatchData = null; // { trips, date }
             let statusFilter = "all";
             let selectedForGroup = new Set(); // trip ids checked for convoy grouping
+            let lastSelectedId = null; // anchor for shift-click range selection
             let crewRailOpen = false; // crew drag-and-drop rail beside the table
             let crewRailSort = "driver"; // driver | plate | type
             let saving = false;
@@ -473,6 +474,40 @@
                 if (!name) return "";
                 const h = labelHue(name);
                 return `<span class="cat-swatch" title="${esc(name)}" style="background:hsl(${h} 60% 55%)"></span>`;
+            }
+
+            // Single source of truth for a day's row order — used by both the
+            // dispatch board (getFilteredTrips) and the export builder
+            // (buildFinalRouteModel in Export.html), so the printed/exported
+            // route always matches what the dispatcher arranged on screen.
+            //
+            // Order: explicit Sort Order (blank sorts last) with id as a
+            // stable tiebreak, then convoy members are pulled contiguous by
+            // anchoring each convoy block at its earliest position in that
+            // sorted order (mirrors the group/FO anchor trick already used
+            // in Export.html).
+            function orderedDayTrips(trips) {
+                const list = [...(trips || [])];
+                list.sort((a, b) => {
+                    const sa = a.sortOrder == null ? Infinity : a.sortOrder;
+                    const sb = b.sortOrder == null ? Infinity : b.sortOrder;
+                    return sa - sb || a.id - b.id;
+                });
+
+                const idx = new Map(list.map((t, i) => [t.id, i]));
+                const groupAnchor = {};
+                list.forEach((t, i) => {
+                    if (t.convoyGroup && !(t.convoyGroup in groupAnchor))
+                        groupAnchor[t.convoyGroup] = i;
+                });
+                const anchorOf = (t) =>
+                    t.convoyGroup ? groupAnchor[t.convoyGroup] : idx.get(t.id);
+                list.sort(
+                    (a, b) =>
+                        anchorOf(a) - anchorOf(b) ||
+                        idx.get(a.id) - idx.get(b.id),
+                );
+                return list;
             }
 
             function indexById(arr) {

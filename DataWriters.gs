@@ -216,6 +216,38 @@ function saveTripChanges(tripId, changes) {
   }
 }
 
+/**
+ * Sets Trip Status on multiple trips in one call (bulk row-selection action
+ * on the dispatch board). Reuses saveTripChanges per trip so the carry-over
+ * spawn (_createCarryoverTrip), audit trail, and route-frequency check all
+ * fire exactly as they do for a single-trip status change.
+ *
+ * @param {number[]} tripIds
+ * @param {string}   status
+ * @returns {{ success: true, updated: number, newTripIds: number[] } | { success: false, error: string }}
+ */
+function bulkSetTripStatus(tripIds, status) {
+  _requirePermission('ASSIGN_CREW');
+  try {
+    const ids = (tripIds || []).map(Number).filter(Boolean);
+    if (ids.length === 0) throw new Error('No trips selected.');
+
+    const newTripIds = [];
+    let updated = 0;
+    ids.forEach(id => {
+      const r = saveTripChanges(id, { tripStatus: status });
+      if (r && r.success) {
+        updated++;
+        if (r.newTripId) newTripIds.push(r.newTripId);
+      }
+    });
+
+    return { success: true, updated: updated, newTripIds: newTripIds };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 
 // ============================================================
 //  DATA WRITERS — Waybills
@@ -737,6 +769,39 @@ function setTripConvoyGroup(tripIds, action) {
     });
 
     return { success: true, group };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Persists the dispatcher's manual row order for a Trip Date. Writes
+ * `Sort Order = index * 10` (leaving gaps for future manual nudges) for each
+ * id in `orderedTripIds`, in order. Purely presentational — not audited.
+ *
+ * @param {string}   dateStr         'M/d/yyyy' — unused beyond intent; every
+ *                                   id is trusted as belonging to that date
+ *                                   (the client only ever sends the day it has loaded).
+ * @param {number[]} orderedTripIds  Full ordered list of trip ids for the day.
+ * @returns {{ success: true } | { success: false, error: string }}
+ */
+function reorderTrips(dateStr, orderedTripIds) {
+  _requirePermission('ASSIGN_CREW');
+  try {
+    const ids = (orderedTripIds || []).map(Number).filter(Boolean);
+    if (ids.length === 0) throw new Error('No trips to reorder.');
+
+    const sheet   = _getSheet(SHEET_TRIPS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    ids.forEach((id, i) => {
+      const rowIdx = _findRowById(rows, headers, id);
+      if (rowIdx === -1) throw new Error(`Trip ID ${id} not found.`);
+      _writeRowFields(sheet, rows[rowIdx], rowIdx, headers, { 'Sort Order': i * 10 });
+    });
+
+    return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
   }
