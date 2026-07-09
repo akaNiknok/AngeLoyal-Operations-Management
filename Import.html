@@ -488,7 +488,10 @@
                         // names show blank on the Dispatch board until reload.
                         (r.newOutlets || []).forEach((o) => outlets.push(o));
                         clearImport();
-                        // Switch to dispatch for the imported date
+                        // Switch to dispatch for the imported date. Drop that
+                        // date's dispatch cache first — the panel switch paints
+                        // from cache, which doesn't have the new trips yet.
+                        delete dispatchCache[isoToMDY(dateVal)];
                         document.getElementById("dispatch-date").value =
                             dateVal;
                         switchPanel("dispatch");

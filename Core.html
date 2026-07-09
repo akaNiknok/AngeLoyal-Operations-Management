@@ -206,35 +206,48 @@
             function handleSessionExpired() {
                 sessionToken = null;
                 storeDel("oms_session");
+                storeDel("oms_boot");
                 currentUser = { email: "", displayName: "", role: null };
                 hideLoading();
                 showSignIn("Your session expired. Please sign in again.");
             }
 
             // ── DATA LOAD (after sign-in) ─────────────────────────────
+            // SWR boot: paint instantly from the last visit's boot data in
+            // localStorage, then getBootData() revalidates in the background.
+            // Skipped right after a fresh OAuth sign-in (token just injected),
+            // so one account's cached UI never flashes for another account.
             function loadAppData() {
-                setLoading("Loading data…");
+                const cachedRaw = (window.__OMS_BOOT_TOKEN || "").trim()
+                    ? null
+                    : storeGet("oms_boot");
+                let painted = false;
+                if (cachedRaw) {
+                    try {
+                        const boot = JSON.parse(cachedRaw);
+                        if (boot && boot.session && boot.session.role) {
+                            applyBootData(boot);
+                            painted = true;
+                        }
+                    } catch (_) {}
+                }
+                if (!painted) setLoading("Loading data…");
+                setSyncing(true);
                 srv()
                     .withSuccessHandler((boot) => {
-                        currentUser = boot.session || { role: null };
-                        employees = boot.employees || [];
-                        trucks = boot.trucks || [];
-                        waybillPrefixes = boot.waybillPrefixes || [];
-                        outlets = boot.outlets || [];
-                        defaultAssignments = boot.defaultAssignments || [];
-                        billingCategories = boot.billingCategories || [];
-                        routeTypeMap = boot.routeTypeMap || [];
-
-                        applyRoleToUI(currentUser.role);
-                        hideLoading();
-
-                        // Signed in but not authorized → the gate is shown.
-                        if (!currentUser.role) return;
-
-                        populatePrefixSelects();
-                        onMasterDataReady();
+                        setSyncing(false);
+                        const raw = JSON.stringify(boot);
+                        if (boot.session && boot.session.role) {
+                            storeSet("oms_boot", raw);
+                        } else {
+                            storeDel("oms_boot");
+                        }
+                        // Cached paint already matches the server → done.
+                        if (painted && raw === cachedRaw) return;
+                        applyBootData(boot);
                     })
                     .withFailureHandler((err) => {
+                        setSyncing(false);
                         hideLoading();
                         // AUTH_REQUIRED is handled inside srv(); others toast.
                         if (!/AUTH_REQUIRED/.test(err.message || "")) {
@@ -248,12 +261,32 @@
                     .getBootData();
             }
 
+            function applyBootData(boot) {
+                currentUser = boot.session || { role: null };
+                employees = boot.employees || [];
+                trucks = boot.trucks || [];
+                waybillPrefixes = boot.waybillPrefixes || [];
+                outlets = boot.outlets || [];
+                defaultAssignments = boot.defaultAssignments || [];
+                billingCategories = boot.billingCategories || [];
+                routeTypeMap = boot.routeTypeMap || [];
+
+                applyRoleToUI(currentUser.role);
+                hideLoading();
+
+                // Signed in but not authorized → the gate is shown.
+                if (!currentUser.role) return;
+
+                populatePrefixSelects();
+                onMasterDataReady();
+            }
+
             function onMasterDataReady() {
                 renderTruckList();
                 renderEmpList();
                 renderOutlets();
                 populateAddTripSelects();
-                loadDispatch();
+                loadDispatch(true);
             }
 
             // ── RBAC ──────────────────────────────────────────────────
@@ -328,6 +361,7 @@
                 const t = sessionToken;
                 sessionToken = null;
                 storeDel("oms_session");
+                storeDel("oms_boot");
                 currentUser = { email: "", displayName: "", role: null };
                 if (t) google.script.run.logout(t); // best-effort server cleanup
                 closeAccountMenu();
@@ -383,7 +417,7 @@
                 document.getElementById("nav-" + name).classList.add("active");
 
                 if (name === "dispatch") {
-                    loadDispatch();
+                    loadDispatch(true);
                 }
                 if (name === "roster") {
                     renderTruckList();
