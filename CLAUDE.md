@@ -95,6 +95,7 @@ npm run fetch-data         # snapshot live sheets → data/ (gitignored, real da
 - Keep the schema doc and code in lockstep. A new feature usually means: a new sheet/columns in `Docs/Schema.md` → constants in `Code.gs` → reader in `DataReaders.gs` → writer (+ `_requirePermission` + `_auditLog`) in `DataWriters.gs` → UI partial + `Core.html` state/boot wiring.
 - Match the surrounding style: the `_`-prefixed helpers are private; reader functions return plain objects with camelCase keys; writers return `{ success, ... } | { success:false, error }`.
 - Only commit/push when asked.
+- PR descriptions must not include a "🤖 Generated with Claude Code" line or Claude Code attribution.
 - **Gitflow**: one feature branch per task (`feat/<task>`, `fix/<task>`) off updated `develop`, **merge commit** PRs back into `develop` (Conventional Commits on branch commits). `main` is production-only: release merges from `develop` and `hotfix/*` branches, each tagged `vX.Y.Z` + GitHub Release, then `npm run release`. Versioning: major = phase, minor = feature release, patch = hotfix. Full steps in [`DEPLOY.md`](DEPLOY.md#git-workflow-gitflow).
 - Money, payroll, and billing logic are contractually sensitive and Phase 2's hardest part — favor correctness, date-locking, and an audit trail over cleverness.
 
