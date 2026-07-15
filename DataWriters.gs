@@ -13,7 +13,8 @@
  * Creates a new trip row from a Rebisco import payload.
  * Also auto-seeds the Outlets sheet with any new outlet names.
  * Also writes a suggested waybill row.
- * Also appends to Route Frequency Log.
+ * Also appends to Route Frequency Log — unless the trip is created 'Prepping',
+ * in which case markDayScheduled logs it at promotion.
  *
  * @param {Object} tripData  Fields matching the Trips sheet columns.
  * @returns {{ success: boolean, tripId: number, waybillSuggested: string } | { success: false, error: string }}
@@ -40,6 +41,7 @@ function createTrip(tripData) {
 
     const tripDate    = tripData.tripDate    || _formatDate(now);
     const billingDate = tripData.billingDate || tripDate;
+    const tripStatus  = tripData.tripStatus  || 'Scheduled';
 
     sheet.appendRow([
       nextId,
@@ -56,7 +58,7 @@ function createTrip(tripData) {
       tripData.driverId        || '',
       Array.isArray(tripData.helperIds) ? tripData.helperIds.join(',') : (tripData.helperIds || ''),
       truckBillingCategory,
-      tripData.tripStatus      || 'Scheduled',
+      tripStatus,
       tripData.parentTripId    || '',
       tripData.source          || 'Manual',
       tripData.tier            || '',
@@ -75,8 +77,9 @@ function createTrip(tripData) {
       waybillSuggested = wb.waybillNumber;
     }
 
-    // 5. Append to Route Frequency Log if driver and outlet are set
-    if (tripData.driverId && outletId) {
+    // 5. Append to Route Frequency Log — only once the trip is out of Prepping;
+    //    a Prepping trip's crew is still being shuffled (markDayScheduled logs it).
+    if (tripStatus !== 'Prepping' && tripData.driverId && outletId) {
       _appendRouteFrequency(nextId, tripDate, tripData.driverId, outletId);
     }
 
@@ -164,13 +167,21 @@ function saveTripChanges(tripId, changes) {
       _auditLog('TRIP_STATUS_CHANGE', SHEET_TRIPS, tripId, oldStatus, changes.tripStatus);
     }
 
-    // Route frequency check + log if driver changed
+    // Route frequency check + log. A trip only counts once it's out of Prepping:
+    // imported trips land Prepping and get reassigned freely, so logging earlier
+    // credits drivers for trips they never took. Logged on the transition out of
+    // Prepping (this endpoint or markDayScheduled), and on later driver changes.
+    const newStatus     = changes.tripStatus !== undefined ? changes.tripStatus : oldStatus;
+    const newDriverId   = changes.driverId   !== undefined ? changes.driverId   : oldDriverId;
+    const justScheduled = oldStatus === 'Prepping' && newStatus !== 'Prepping';
+    const driverChanged = changes.driverId !== undefined && changes.driverId !== oldDriverId;
+
     let routeFrequencyWarning = null;
-    if (changes.driverId !== undefined && changes.driverId !== oldDriverId && changes.driverId) {
+    if (newStatus !== 'Prepping' && newDriverId && (justScheduled || driverChanged)) {
       const outletId = _numOrNull(_val(row, headers, 'Outlet ID'));
       const tripDate = _formatDate(_readDateCell(_val(row, headers, 'Trip Date')));
       if (outletId) {
-        const freq     = getRouteFrequencyForDriver(changes.driverId);
+        const freq     = getRouteFrequencyForDriver(newDriverId);
         const existing = freq.find(f => f.outletId === Number(outletId));
         const newCount = (existing ? existing.count : 0) + 1;
         if (newCount > 5) {
@@ -179,7 +190,7 @@ function saveTripChanges(tripId, changes) {
             count:      newCount,
           };
         }
-        _appendRouteFrequency(tripId, tripDate, changes.driverId, outletId);
+        _appendRouteFrequency(tripId, tripDate, newDriverId, outletId);
       }
     }
 
@@ -451,16 +462,13 @@ function importRouteFile(tripDate, rowData) {
     };
 
     // --- Next IDs for the sheets we'll append to ---
-    const tripsSheet     = _getSheet(SHEET_TRIPS);
-    const routeFreqSheet = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
-    const auditSheet     = _getSheet(SHEET_AUDIT);
-    let nextTripId      = _nextRowId(tripsSheet);
-    let nextRouteFreqId = _nextRowId(routeFreqSheet);
-    let nextAuditId     = _nextRowId(auditSheet);
+    const tripsSheet = _getSheet(SHEET_TRIPS);
+    const auditSheet = _getSheet(SHEET_AUDIT);
+    let nextTripId  = _nextRowId(tripsSheet);
+    let nextAuditId = _nextRowId(auditSheet);
 
-    const newTripRows      = [];
-    const newRouteFreqRows = [];
-    const newAuditRows     = [];
+    const newTripRows  = [];
+    const newAuditRows = [];
 
     let imported = 0;
     let skipped  = 0;
@@ -502,10 +510,6 @@ function importRouteFile(tripDate, rowData) {
         nowStr,
         rd.convoyGroup ? String(convoyTokenBase + Number(rd.convoyGroup)) : '',
       ]);
-
-      if (driverId && outletId) {
-        newRouteFreqRows.push([nextRouteFreqId++, tripId, tripDate, driverId, outletId]);
-      }
 
       newAuditRows.push([
         nextAuditId++,
@@ -574,7 +578,6 @@ function importRouteFile(tripDate, rowData) {
 
     _appendRows(outletsSheet, newOutletRows);
     _appendRows(tripsSheet, newTripRows);
-    _appendRows(routeFreqSheet, newRouteFreqRows);
     _appendRows(auditSheet, newAuditRows);
 
     return { success: true, imported, skipped, errors, newOutlets };
@@ -646,7 +649,7 @@ function markDayScheduled(tripDate, prefixId) {
     const rows    = sheet.getDataRange().getValues();
     const headers = rows[0].map(h => h.toString().trim());
 
-    const promoted = [];   // { rowIdx, tripId, foNumber, truckId }
+    const promoted = [];   // { rowIdx, tripId, foNumber, truckId, driverId, outletId }
     rows.forEach((row, i) => {
       if (i === 0) return;
       if (_val(row, headers, 'Trip Status') !== 'Prepping') return;
@@ -656,6 +659,8 @@ function markDayScheduled(tripDate, prefixId) {
         tripId:   _numOrNull(_val(row, headers, 'ID')),
         foNumber: String(_val(row, headers, 'FO Number') || ''),
         truckId:  _numOrNull(_val(row, headers, 'Truck ID')),
+        driverId: _numOrNull(_val(row, headers, 'Driver ID')),
+        outletId: _numOrNull(_val(row, headers, 'Outlet ID')),
       });
     });
 
@@ -685,6 +690,16 @@ function markDayScheduled(tripDate, prefixId) {
     _appendRows(auditSheet, promoted.map(p =>
       [nextAuditId++, nowStr, email || 'unknown', 'TRIP_STATUS_CHANGE', '', SHEET_TRIPS, p.tripId, 'Prepping', 'Scheduled']
     ));
+
+    // Route frequency is logged here rather than at import: a Prepping trip's
+    // crew is still being shuffled, so only the promoted assignment ran.
+    // ponytail: no over-threshold warning on bulk promotion — the dispatcher
+    // gets one per driver reassignment already. Add if they ask to see it here.
+    const freqSheet = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
+    let nextFreqId  = _nextRowId(freqSheet);
+    _appendRows(freqSheet, promoted
+      .filter(p => p.driverId && p.outletId)
+      .map(p => [nextFreqId++, p.tripId, tripDate, p.driverId, p.outletId]));
 
     // Suggest waybills: skip trips that already have a waybill row.
     const wbSheet   = _getSheet(SHEET_WAYBILLS);

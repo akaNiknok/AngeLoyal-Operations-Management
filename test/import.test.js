@@ -154,12 +154,11 @@ test('importRouteFile creates one trip per truck for a multi-truck FO', () => {
   assert.deepEqual(trips.map((t) => Number(t['Truck ID'])).sort(), [3, 4]);
 });
 
-test('importRouteFile logs route frequency only for rows with a resolved driver', () => {
+test('importRouteFile logs no route frequency — trips land Prepping, not scheduled', () => {
   const { api, ss } = asDispatcher(importSheets());
   api.importRouteFile('6/16/2026', ROWS);
-  // FO-1 (truck 3 / driver 9) and FO-2 (truck 4 / driver 10) get a driver;
-  // FO-3 is unassigned -> 2 route-freq rows.
-  assert.equal(dump(ss, 'Route Frequency Log').rows.length, 2);
+  // Crew is still shuffleable while Prepping; markDayScheduled does the logging.
+  assert.equal(dump(ss, 'Route Frequency Log').rows.length, 0);
 });
 
 test('importRouteFile skips blank rows', () => {

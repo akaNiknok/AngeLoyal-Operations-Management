@@ -209,6 +209,53 @@ test('saveTripChanges does not warn below the threshold', () => {
   assert.equal(res.routeFrequencyWarning, null);
 });
 
+// Route frequency counts trips that were actually scheduled — a Prepping trip's
+// crew is still being shuffled, so nothing is logged until it leaves Prepping.
+function withPreppingTrip(extra = {}) {
+  const { api, ss } = withExistingTrip(extra);
+  const sheet = ss.getSheetByName('Trips');
+  const headers = HEADERS.Trips;
+  sheet.getRange(2, headers.indexOf('Trip Status') + 1).setValue('Prepping');
+  return { api, ss };
+}
+
+test('saveTripChanges does not log route frequency while the trip is Prepping', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { driverId: 9 }); // reassign, still Prepping
+  assert.equal(res.success, true);
+  assert.equal(dump(ss, 'Route Frequency Log').rows.length, 0);
+  assert.equal(res.routeFrequencyWarning, null);
+});
+
+test('saveTripChanges logs route frequency when a Prepping trip is scheduled', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { tripStatus: 'Scheduled' }); // no driver change
+  assert.equal(res.success, true);
+
+  const { headers, rows } = dump(ss, 'Route Frequency Log');
+  assert.equal(rows.length, 1);
+  const freq = rowObject(headers, rows[0]);
+  assert.equal(Number(freq['Trip ID']), 50);
+  assert.equal(Number(freq['Driver ID']), 8);   // the driver it carried into Scheduled
+  assert.equal(Number(freq['Outlet ID']), 12);
+});
+
+test('saveTripChanges logs route frequency once when scheduling with a new driver', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { driverId: 9, tripStatus: 'Scheduled' });
+  assert.equal(res.success, true);
+
+  const { headers, rows } = dump(ss, 'Route Frequency Log');
+  assert.equal(rows.length, 1);
+  assert.equal(Number(rowObject(headers, rows[0])['Driver ID']), 9);
+});
+
+test('saveTripChanges does not re-log route frequency on a later status change', () => {
+  const { api, ss } = withExistingTrip();   // already Scheduled
+  api.saveTripChanges(50, { tripStatus: 'Delivered' });
+  assert.equal(dump(ss, 'Route Frequency Log').rows.length, 0);
+});
+
 test('saveTripChanges is gated by ASSIGN_CREW permission', () => {
   const { api } = makeEnv({ sheets: dispatchSheets(), userEmail: EMAIL.Viewer });
   assert.throws(() => api.saveTripChanges(1, { truckId: 4 }), /Access denied/);

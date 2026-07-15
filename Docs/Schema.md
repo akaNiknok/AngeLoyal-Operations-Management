@@ -225,7 +225,9 @@ When a trip status transitions to `Foul Trip - For Redeliver` or `Redeliver`, th
 
 ### **Sheet 9: Route Frequency Log**
 
-An append-only table compiled automatically upon saving any trip. It acts as the data source for real-time compliance alerts regarding driver delivery frequencies.
+An append-only table recording the driver-outlet assignments that were actually scheduled. It acts as the data source for real-time compliance alerts regarding driver delivery frequencies.
+
+A trip is logged when it **leaves Prepping** — via `markDayScheduled`, a manual status change, or creation at a status other than Prepping (manual trips and carry-overs, which are born Scheduled). Imported trips log nothing at import: their crew comes from the truck's default assignment and the dispatcher reshuffles it freely during Prepping, so logging then would credit drivers for trips they never took. Reassigning the driver of an already-scheduled trip appends another row.
 
 | Column | Type | Notes |
 | :---- | :---- | :---- |
