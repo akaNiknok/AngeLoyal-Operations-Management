@@ -1,9 +1,38 @@
 <script>
             // ── DISPATCH BOARD ────────────────────────────────────────
             // Per-date cache. Navigation (useCache=true) paints instantly from
-            // cache then revalidates in the background. Writes call
-            // loadDispatch() with no cache, so an edit never shows stale trips.
+            // cache then revalidates in the background. After a load, the
+            // adjacent dates are prefetched so day-to-day navigation is
+            // instant on first visit too. Writes keep the cache honest one of
+            // two ways: predictable edits are already applied optimistically
+            // to the cached object (dispatchData IS dispatchCache[date]), and
+            // writes that create rows the client can't predict either refetch
+            // (loadDispatch() with no cache) or delete the affected date's
+            // cache entry so its next visit does a full load.
             const dispatchCache = {};
+            const dispatchPrefetching = new Set();
+
+            // 'M/d/yyyy' + delta days → 'M/d/yyyy'
+            function mdyAddDays(mdy, delta) {
+                const [m, d, y] = mdy.split("/").map(Number);
+                const dt = new Date(y, m - 1, d + delta);
+                return `${dt.getMonth() + 1}/${dt.getDate()}/${dt.getFullYear()}`;
+            }
+
+            // Silent background fill of an empty cache slot. Never overwrites
+            // an existing entry — if the user navigated there mid-flight, the
+            // real loadDispatch() owns that slot and its data is fresher.
+            function prefetchDispatch(key) {
+                if (dispatchCache[key] || dispatchPrefetching.has(key)) return;
+                dispatchPrefetching.add(key);
+                srv()
+                    .withSuccessHandler((data) => {
+                        dispatchPrefetching.delete(key);
+                        if (!dispatchCache[key]) dispatchCache[key] = data;
+                    })
+                    .withFailureHandler(() => dispatchPrefetching.delete(key))
+                    .getDispatchBoardData(key);
+            }
 
             function loadDispatch(useCache) {
                 const dateVal = document.getElementById("dispatch-date").value;
@@ -34,6 +63,8 @@
                             .getElementById("dispatch-loading")
                             .classList.remove("on");
                         setSyncing(false);
+                        prefetchDispatch(mdyAddDays(key, -1));
+                        prefetchDispatch(mdyAddDays(key, 1));
                     })
                     .withFailureHandler((e) => {
                         showToast(
@@ -340,7 +371,12 @@
                                 `${r.newTripIds.length} carry-over trip${r.newTripIds.length === 1 ? "" : "s"} created for next day.`,
                                 "success",
                             );
-                            loadDispatch();
+                            // Carry-overs land on the NEXT day — the current
+                            // board is already correct; just make sure the
+                            // next day's visit does a full load.
+                            delete dispatchCache[
+                                mdyAddDays(dispatchData.date, 1)
+                            ];
                         }
                     },
                     revert: () => {
@@ -703,7 +739,10 @@
                                 `Carry-over trip created for next day (ID ${r.newTripId}).`,
                                 "success",
                             );
-                            loadDispatch();
+                            // Carry-over lands on the NEXT day, not this board.
+                            delete dispatchCache[
+                                mdyAddDays(dispatchData.date, 1)
+                            ];
                         }
                     },
                     revert: () => {
@@ -809,7 +848,14 @@
                             return;
                         }
                         showToast("Trip removed.", "success");
-                        loadDispatch();
+                        // Remove locally — dispatchData is the cached object,
+                        // so the per-date cache stays correct too.
+                        dispatchData.trips = (dispatchData.trips || []).filter(
+                            (t) => t.id !== tripId,
+                        );
+                        selectedForGroup.delete(tripId);
+                        updateConvoyButtons();
+                        renderDispatch();
                     })
                     .withFailureHandler((e) => {
                         setSyncing(false);
@@ -982,6 +1028,9 @@
                             `Trip added (ID ${r.tripId})${r.waybillSuggested ? " — waybill " + r.waybillSuggested + " suggested" : ""}`,
                             "success",
                         );
+                        // The trip may be on a different date than the board;
+                        // drop that date's cache so its next visit refetches.
+                        delete dispatchCache[isoToMDY(dateVal)];
                         loadDispatch();
                     })
                     .withFailureHandler((e) => {
