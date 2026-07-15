@@ -5,6 +5,10 @@ BACKLOG.md
 # Session-local resume file written by Claude when blocked on human input (see CLAUDE.md)
 HANDOFF.md
 
+# Generated env pointer — written by `npm run use:dev` / `use:prod`.
+# The committed sources are .clasp.prod.json and .clasp.dev.json.
+.clasp.json
+
 *.xlsx
 *.pdf
 node_modules/

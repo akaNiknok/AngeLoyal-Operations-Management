@@ -76,17 +76,22 @@ The client calls the backend with `google.script.run.withSuccessHandler(...).fnN
 
 Full details in [`DEPLOY.md`](DEPLOY.md). The repo is wired to Apps Script via [`clasp`](https://github.com/google/clasp); `.gs`/`.html`/`appsscript.json` are the source of truth.
 
+There are **two environments** — two Sheets, each with its own bound Apps Script project (see [Environments in DEPLOY.md](DEPLOY.md#environments-prod-vs-dev)). Day-to-day commands target **DEV**; only `npm run release` touches **PROD**.
+
 ```sh
-npm run push      # push to the Apps Script editor (dev/HEAD only)
-npm run release   # push --force + redeploy the LIVE web app  ← ONLY from main
-npm run open      # open the script editor
-npm test          # run local test suite (no clasp, no live Sheet, no npm install)
-npm run fetch-data         # snapshot live sheets → data/ (gitignored, real data)
+npm run push        # push to the DEV script's editor/HEAD (never touches prod)
+npm run deploy:dev  # push + update the DEV /exec deployment (for clear-data/fetch-data --dev)
+npm run release     # push --force + redeploy the LIVE (PROD) web app  ← ONLY from main
+npm run open        # open the DEV script editor (open:prod for PROD)
+npm test            # run local test suite (no clasp, no live Sheet, no npm install)
+npm run fetch-data          # snapshot live PROD sheets → data/ (gitignored, real data); -- --dev for DEV
+npm run clear-data          # DEV: wipe transactional sheets (Trips, Outlets, waybills, logs)
+npm run clear-data:prod     # PROD: same, but requires typing "PRODUCTION" to confirm (post-release only)
 ```
 
-> The live app is served from a **versioned deployment**, not HEAD. `npm run push` alone does NOT update what users see. Going live = a tagged release from `main` followed by `npm run release` — never run it from `develop` or a feature branch (see the gitflow section in [`DEPLOY.md`](DEPLOY.md#git-workflow-gitflow)).
+> The live app is served from a **versioned deployment** on the PROD script. `npm run push` only updates DEV. Going live = a tagged release from `main` followed by `npm run release` — never run it from `develop` or a feature branch (see the gitflow section in [`DEPLOY.md`](DEPLOY.md#git-workflow-gitflow)).
 
-- `.clasp.json` holds the (non-secret) Script ID. `.claspignore` keeps `Docs/` and sample files out of Apps Script.
+- `.clasp.prod.json` / `.clasp.dev.json` hold the (non-secret) Script IDs; `.clasp.json` is a gitignored generated pointer (each npm command selects its env first via `use:dev`/`use:prod`). `.claspignore` keeps `Docs/` and sample files out of Apps Script.
 - `data/`, `.env`, `*.xlsx`, `*.pdf` are gitignored — they contain real operational data. `DEV_DUMP_TOKEN` (in `.env`) is a password-equivalent.
 - **Automated tests** live in `test/` and run with `npm test` (Node's built-in `node:test` + a `vm` shim — no clasp, no live Sheet, no `npm install`). The harness loads the `.gs` bundle with in-memory fakes for `SpreadsheetApp`/`Session`/`Utilities`; see [`test/README.md`](test/README.md). Phase 1 (records, dispatch, waybills) is broadly covered — Utils helpers, RBAC matrix, waybill numbering/confirmation, carry-over trips, `createTrip`/`saveTripChanges`, `importRouteFile`, master-record CRUD + roster, and the dispatch/read path. **Phase 2 (billing/payroll) is not built yet — write its tests alongside the code.** For anything not covered, still verify by snapshotting live data (`npm run fetch-data`) and/or testing in a deployed copy. When you add backend logic, add a test next to it.
 

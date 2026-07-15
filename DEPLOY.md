@@ -2,6 +2,30 @@
 
 This repo is wired up with [`clasp`](https://github.com/google/clasp) (Google's Command Line Apps Script Projects tool) so that `Code.gs` and `Index.html` here are the source of truth, and changes get pushed to the Apps Script project bound to the AngeLoyal Google Sheet.
 
+## Environments (PROD vs DEV)
+
+There are **two Google Sheets, each with its own container-bound Apps Script project** — hard isolation, so dev code and destructive tooling physically cannot touch production data:
+
+| | PROD | DEV |
+| :--- | :--- | :--- |
+| Sheet | AngeLoyal OMS (live data) | "AngeLoyal OMS (DEV)" — a File → Make a copy of prod |
+| Script ID | in [`.clasp.prod.json`](.clasp.prod.json) | in [`.clasp.dev.json`](.clasp.dev.json) |
+| Deployment | `AKfycby8...NYV0` (the live web app) | its own deployment (`deploy:dev`) |
+| Updated by | `npm run release` (from `main` only) | `npm run push` / `watch` / `deploy:dev` |
+| Data scripts | `npm run fetch-data` | `npm run fetch-data -- --dev`, `npm run clear-data` (dev-only) |
+
+`.clasp.json` is **gitignored and generated**: every env-touching npm script first copies the right source file over it (`use:dev` / `use:prod`), so nothing depends on which env was used last. The committed sources are `.clasp.prod.json` and `.clasp.dev.json`.
+
+### One-time DEV environment setup
+
+1. **Copy the Sheet**: open the prod Sheet → File → Make a copy → name it "AngeLoyal OMS (DEV)". This copies the data *and* the bound script code — but **not** Script Properties or deployments.
+2. **Wire up clasp**: open the copy → Extensions → Apps Script → Project Settings → copy the Script ID into `.clasp.dev.json`.
+3. **Script Properties on the DEV script** (Project Settings → Script Properties): set `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` (same OAuth client as prod). Then run `setupDevDumpToken()` once from the DEV editor and put the logged token in `.env` as `DEV_DUMP_TOKEN_DEV`.
+4. **Create the DEV deployment**: `npm run push`, then `npx clasp deploy` (first time). Put the deployment ID into the `deploy:dev` script in [`package.json`](package.json) and its `/exec` URL into `scripts/clear-sheet-data.js` + the `DEV_URL` in `scripts/fetch-sheet-data.js`.
+5. **OAuth redirect URIs**: in Google Cloud Console, add the DEV `/exec` URL (and optionally the DEV script's `/dev` URL) to the OAuth client's Authorized redirect URIs — sign-in on DEV fails without this.
+
+> The DEV `/exec` serves a **versioned** deployment: after changing `DevTools.gs` (or anything the local data scripts hit), rerun `npm run deploy:dev`. Browser testing of HEAD uses the DEV script's `/dev` URL as before. The copied Users sheet means the same accounts can sign in to DEV immediately; sessions/cache are per-script, so prod sessions won't carry over.
+
 ## One-time setup
 1. **Enable the Apps Script API** for your Google account:
    https://script.google.com/home/usersettings (toggle it ON).
@@ -22,7 +46,7 @@ This repo is wired up with [`clasp`](https://github.com/google/clasp) (Google's 
 
 4. **Connect to the existing Apps Script project**
 
-   Open the Sheet -> Extensions -> Apps Script -> Project Settings (gear icon) -> copy the **Script ID**, then paste it into [`.clasp.json`](.clasp.json):
+   Open the Sheet -> Extensions -> Apps Script -> Project Settings (gear icon) -> copy the **Script ID**, then paste it into [`.clasp.prod.json`](.clasp.prod.json) (or `.clasp.dev.json` for the DEV copy):
 
    ```json
    {
@@ -111,7 +135,7 @@ When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google acc
 - **Script Properties travel with the script** (they're stored on it), so the existing values persist through an ownership transfer — but they point at the old GCP project's client. Decide per the bullet above whether to keep or replace them.
 - **Redirect URIs** — if the script keeps the same Script/Deployment ID, the `/exec` URL is unchanged and the registered redirect URI still works. If you create a fresh deployment (new ID), register its new `/exec` URL on the OAuth client and update the `deploy -i <id>` in [`package.json`](package.json) and the URL in this doc.
 - **Consent screen** — if AngeLoyal has a Workspace domain, set the consent screen to **Internal** so any `@angeloyal` account is allowed automatically (no test-user list, no Google verification). Otherwise publish to Production or keep the operators' accounts as test users.
-- **Re-point the tooling** — update `.clasp.json` (Script ID) and re-run `npm run login` as the AngeLoyal owner; confirm the deployment ID in `package.json`.
+- **Re-point the tooling** — update `.clasp.prod.json` (Script ID) and re-run `npm run login` as the AngeLoyal owner; confirm the deployment ID in `package.json`.
 - **Users sheet** — populate it with AngeLoyal staff emails + roles so they get access instead of the unauthorized gate.
 
 > Optional simplification once AngeLoyal owns it: if **all** users are in a single Google Workspace domain and the script is owned within that domain, `Session.getActiveUser().getEmail()` would work for everyone and OAuth could be retired. It's not necessary — the OAuth flow keeps working regardless — but it's an option if you'd rather not maintain an OAuth client.
@@ -128,13 +152,13 @@ npm run push                       # test in the Apps Script editor / dev URL
 
 Going live is a separate step — see [Git workflow (gitflow)](#git-workflow-gitflow) below. Only `main` gets `npm run release`.
 
-- `npm run push` — pushes local files to the **Apps Script editor** (updates the "head" / dev version, what you see when you open the script editor). This alone does **not** update the live web app.
-- `npm run deploy` — creates a new version and updates the **live web app deployment** to point at it. The deployment ID is the one used by the AngeLoyal OMS web app: `AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0` (`https://script.google.com/macros/s/AKfycby8.../exec`).
-- `npm run release` — runs both: `clasp push --force` then `npm run deploy`. **Use this when you want your changes to go live.**
-- `npm run open` — opens the project in the Apps Script editor in your browser.
-- `npm run watch` — watches for local file changes and auto-pushes (editor only, does not redeploy the live web app).
+- `npm run push` — pushes local files to the **DEV** Apps Script project (its editor/HEAD, served at the DEV `/dev` URL). Never touches prod.
+- `npm run deploy:dev` — pushes to DEV and updates the **DEV deployment** (`/exec` URL used by `clear-data` / `fetch-data -- --dev`). Only needed when those endpoints must pick up new code — don't run it on every push (Apps Script has a ~200-version cap).
+- `npm run release` — pushes to **PROD** (`clasp push --force`) and updates the **live web app deployment** (`AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0`, `https://script.google.com/macros/s/AKfycby8.../exec`). **This is the only command that touches production. Only run it from `main`.**
+- `npm run open` / `npm run open:prod` — opens the DEV / PROD project in the Apps Script editor.
+- `npm run watch` — watches for local file changes and auto-pushes to DEV.
 
-> The live AngeLoyal OMS web app is served from a **versioned deployment**, not `HEAD`. `npm run push` updates the editor/dev copy only — always run `npm run release` (or `npm run deploy` after pushing) to make changes visible to actual users.
+> The live AngeLoyal OMS web app is served from a **versioned deployment** on the PROD script. Day-to-day work never touches it — going live is always a release from `main` via `npm run release`.
 
 ## Git workflow (gitflow)
 This is a solo project developed mostly through Claude Code, on a simplified gitflow:
@@ -161,7 +185,7 @@ Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Pa
 
 ## Notes
 - `.claspignore` restricts what gets pushed to `Code.gs`, `Index.html`, and `appsscript.json` — the `Docs/` and `Sample Files/` folders stay local/Git only and are never sent to Apps Script.
-- `.clasp.json` contains the Script ID (not secret, just an identifier) and is committed so the whole team points at the same project.
+- `.clasp.prod.json` / `.clasp.dev.json` contain the Script IDs (not secret, just identifiers) and are committed; `.clasp.json` is the gitignored, generated pointer (see [Environments](#environments-prod-vs-dev)).
 - Auth tokens (`~/.clasprc.json`) are per-user and never committed.
 
 ## Reading live sheet data locally (for testing/verification)
@@ -176,9 +200,14 @@ Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Pa
 **Usage:**
 
 ```sh
-npm run fetch-data            # dumps every sheet to data/sheets-snapshot.json
+npm run fetch-data            # dumps every PROD sheet to data/sheets-snapshot.json
 npm run fetch-data -- Trips   # dumps just the "Trips" sheet to data/Trips.json
+npm run fetch-data -- --dev   # dumps from the DEV spreadsheet instead (needs DEV_DUMP_TOKEN_DEV)
+npm run clear-data            # DEV: clears Trips/Outlets/Route Frequency Log/Waybills/Audit Log rows
+npm run clear-data:prod       # PRODUCTION: same, but prompts to type "PRODUCTION" first (needs DEV_DUMP_TOKEN)
 ```
+
+> `clear-data:prod` hits the **live versioned deployment**, so it only works once the `devClear` endpoint has shipped to prod via `npm run release`. It reads the prod script's `DEV_DUMP_TOKEN` from `.env` and refuses to run unless you type `PRODUCTION` at the prompt.
 
 `data/` is gitignored — these snapshots contain real operational data (driver names, routes, etc.) and stay local only.
 
