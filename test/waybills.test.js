@@ -35,14 +35,14 @@ test('suggested waybill number = prefix + (lastSeq+1) with type suffix', () => {
   assert.equal(reg.waybillNumber, 'AL-6');
 
   const redeliver = api._createSuggestedWaybill(102, 1, 'FO-2', 'Redeliver', null);
-  assert.equal(redeliver.waybillNumber, 'AL-6-R'); // does NOT advance the prefix
+  assert.equal(redeliver.waybillNumber, 'AL-7-R'); // 6 was reserved by the first suggestion
 
   const foul = api._createSuggestedWaybill(103, 1, 'FO-3', 'Foul Trip', null);
-  assert.equal(foul.waybillNumber, 'AL-6-FT');
+  assert.equal(foul.waybillNumber, 'AL-8-FT');
 
-  // Suggesting must NOT bump the prefix's Last Sequence Number — only confirming does.
+  // Suggesting reserves the number: the prefix's Last Sequence Number advances.
   const { rows } = dump(ss, 'Waybill Prefixes');
-  assert.equal(rowObject(HEADERS['Waybill Prefixes'], rows[0])['Last Sequence Number'], 5);
+  assert.equal(rowObject(HEADERS['Waybill Prefixes'], rows[0])['Last Sequence Number'], 8);
 });
 
 test('sequence pads to the width implied by the stored value, and never truncates', () => {
@@ -52,8 +52,8 @@ test('sequence pads to the width implied by the stored value, and never truncate
   const { api } = asAdmin(sheets);
 
   assert.equal(api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null).waybillNumber, 'AL-0358');
-  // suffix rides after the padded number
-  assert.equal(api._createSuggestedWaybill(102, 1, 'FO-2', 'Redeliver', null).waybillNumber, 'AL-0358-R');
+  // suffix rides after the padded number; 0358 was reserved, so the next is 0359
+  assert.equal(api._createSuggestedWaybill(102, 1, 'FO-2', 'Redeliver', null).waybillNumber, 'AL-0359-R');
 
   // A value already wider than any leading zeros prints in full — no truncation.
   const wide = baseSheets();
@@ -82,7 +82,7 @@ test('blank prefix produces a bare sequence number, no leading dash', () => {
   assert.equal(reg.waybillNumber, '6');
 
   const redeliver = api._createSuggestedWaybill(102, 1, 'FO-2', 'Redeliver', null);
-  assert.equal(redeliver.waybillNumber, '6-R');
+  assert.equal(redeliver.waybillNumber, '7-R'); // 6 was reserved by the first suggestion
 });
 
 test('suggested waybills are written unlocked / Suggested', () => {
@@ -120,9 +120,9 @@ test('_suggestWaybillsForGroups shares one number within a group, increments acr
   assert.deepEqual(wbs.map((w) => w['Sequence Number']), [41, 41, 42, 43]);
   assert.ok(wbs.every((w) => w.Status === 'Suggested' && w.Locked === false && w['Waybill Type'] === 'Regular'));
 
-  // Suggesting must NOT bump the prefix — only confirming does.
+  // Suggesting reserves the numbers: the prefix advances to the last one issued.
   const seq = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0])['Last Sequence Number'];
-  assert.equal(seq, 40);
+  assert.equal(seq, 43);
 
   // Audit: one WAYBILL_SUGGEST row per waybill row.
   const audit = dump(ss, 'Audit Log');

@@ -250,6 +250,74 @@ test('saveTripChanges logs route frequency once when scheduling with a new drive
   assert.equal(Number(rowObject(headers, rows[0])['Driver ID']), 9);
 });
 
+test('saveTripChanges suggests a waybill when a Prepping trip is scheduled with a prefix', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { tripStatus: 'Scheduled', prefixId: 1 });
+  assert.equal(res.success, true);
+  assert.equal(res.trip.waybillSuggested, 'AL-6'); // last seq 5 + 1
+  assert.ok(res.trip.suggestedWaybillId);
+
+  const { headers, rows } = dump(ss, 'Waybills');
+  assert.equal(rows.length, 1);
+  const wb = rowObject(headers, rows[0]);
+  assert.equal(Number(wb['Trip ID']), 50);
+  assert.equal(wb['FO Number'], 'FO-500');
+  assert.equal(wb.Status, 'Suggested');
+
+  // Suggesting reserves the number.
+  const pref = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0]);
+  assert.equal(pref['Last Sequence Number'], 6);
+});
+
+test('saveTripChanges joins the load\'s suggested waybill instead of reserving a new number', () => {
+  // Trip 51: same FO + truck + date as trip 50, already Scheduled with a
+  // Suggested waybill. Scheduling 50 must ride AL-3, even with no prefix.
+  const { api, ss } = withPreppingTrip({
+    Trips: [
+      HEADERS.Trips.slice(),
+      tripRow({ ID: 50, 'Trip Date': '6/16/2026', 'Billing Date': '6/16/2026', 'FO Number': 'FO-500', 'Outlet ID': 12, 'Truck ID': 3, 'Driver ID': 8, 'Trip Status': 'Scheduled', Source: 'Import' }),
+      tripRow({ ID: 51, 'Trip Date': '6/16/2026', 'Billing Date': '6/16/2026', 'FO Number': 'FO-500', 'Outlet ID': 12, 'Truck ID': 3, 'Driver ID': 8, 'Trip Status': 'Scheduled', Source: 'Import' }),
+    ],
+    Waybills: [
+      HEADERS.Waybills.slice(),
+      [1, 'AL-3', 1, 3, 51, 'FO-500', 'Regular', '', 'Suggested', false, '', ''],
+    ],
+  });
+
+  const res = api.saveTripChanges(50, { tripStatus: 'Scheduled' });
+  assert.equal(res.success, true);
+  assert.equal(res.trip.waybillSuggested, 'AL-3');
+
+  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.equal(wbs.length, 2);
+  assert.deepEqual(wbs.map((w) => w['Waybill Number']), ['AL-3', 'AL-3']);
+
+  // No new number reserved for the join.
+  const pref = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0]);
+  assert.equal(pref['Last Sequence Number'], 5);
+});
+
+test('saveTripChanges without a prefix schedules the trip but suggests no waybill', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { tripStatus: 'Scheduled' });
+  assert.equal(res.success, true);
+  assert.equal(res.trip.tripStatus, 'Scheduled');
+  assert.equal(dump(ss, 'Waybills').rows.length, 0);
+});
+
+test('saveTripChanges does not duplicate an existing waybill on scheduling', () => {
+  const { api, ss } = withPreppingTrip({
+    Waybills: [
+      HEADERS.Waybills.slice(),
+      [1, 'AL-3', 1, 3, 50, 'FO-500', 'Regular', '', 'Suggested', false, '', ''],
+    ],
+  });
+  const res = api.saveTripChanges(50, { tripStatus: 'Scheduled', prefixId: 1 });
+  assert.equal(res.success, true);
+  assert.equal(dump(ss, 'Waybills').rows.length, 1);
+  assert.equal(res.trip.waybillSuggested, undefined);
+});
+
 test('saveTripChanges does not re-log route frequency on a later status change', () => {
   const { api, ss } = withExistingTrip();   // already Scheduled
   api.saveTripChanges(50, { tripStatus: 'Delivered' });

@@ -97,6 +97,46 @@ test('bulkSetTripStatus sets status on every trip and fires carry-over per trip'
   });
 });
 
+test('bulkSetTripStatus with a prefix reserves a distinct waybill number per load', () => {
+  // Blank FO Numbers -> two separate loads -> two distinct reserved numbers.
+  const sheets = baseSheets([tripRow({ ID: 1 }), tripRow({ ID: 2 })]);
+  sheets['Waybill Prefixes'] = [HEADERS['Waybill Prefixes'].slice(), [1, 'AL', 'AngeLoyal', 5]];
+  const { api, ss } = asDispatcher(sheets);
+
+  const res = api.bulkSetTripStatus([1, 2], 'Scheduled', 1);
+  assert.equal(res.success, true);
+  assert.equal(res.updated, 2);
+
+  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.equal(wbs.length, 2);
+  assert.deepEqual(wbs.map((w) => Number(w['Trip ID'])).sort(), [1, 2]);
+  assert.deepEqual(wbs.map((w) => w['Waybill Number']).sort(), ['AL-6', 'AL-7']);
+  wbs.forEach((w) => assert.equal(w.Status, 'Suggested'));
+
+  const pref = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0]);
+  assert.equal(pref['Last Sequence Number'], 7); // both numbers reserved
+});
+
+test('bulkSetTripStatus shares one waybill number across the stops of one load', () => {
+  // Same FO Number + Truck ID + Trip Date = one truck load = one waybill.
+  const sheets = baseSheets([
+    tripRow({ ID: 1, 'FO Number': 'FO-9', 'Truck ID': 3 }),
+    tripRow({ ID: 2, 'FO Number': 'FO-9', 'Truck ID': 3 }),
+  ]);
+  sheets['Waybill Prefixes'] = [HEADERS['Waybill Prefixes'].slice(), [1, 'AL', 'AngeLoyal', 5]];
+  const { api, ss } = asDispatcher(sheets);
+
+  const res = api.bulkSetTripStatus([1, 2], 'Scheduled', 1);
+  assert.equal(res.success, true);
+
+  const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.equal(wbs.length, 2); // one row per stop...
+  assert.deepEqual(wbs.map((w) => w['Waybill Number']), ['AL-6', 'AL-6']); // ...sharing one number
+
+  const pref = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0]);
+  assert.equal(pref['Last Sequence Number'], 6); // only one number reserved
+});
+
 test('bulkSetTripStatus is gated by ASSIGN_CREW permission', () => {
   const { api } = makeEnv({
     sheets: baseSheets([tripRow({ ID: 1 })]),
