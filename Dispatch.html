@@ -148,21 +148,61 @@
 
                 const tbody = document.getElementById("dispatch-tbody");
 
-                // Alternating shade per FO so all trips of one Freight Order
-                // (even when split across several trucks/waybills, or not
-                // adjacent in board order) read as one visual group. Parity
-                // is keyed by FO so every row of the same FO always gets the
-                // same class, not just adjacent ones.
+                // Alternating shade per load so all trips of one Freight Order
+                // read as one visual group. Keyed the same way as the merged
+                // cells below, so the shading and the merges can never disagree
+                // about where a load starts and ends.
                 const foParityByKey = {};
                 let nextFoParity = 0;
                 const foGroupCls = trips.map((t) => {
-                    const key = t.foNumber ? "fo-" + t.foNumber : "none-" + t.id;
+                    const key = foKey(t) || "none-" + t.id;
                     if (!(key in foParityByKey)) {
                         foParityByKey[key] = nextFoParity;
                         nextFoParity ^= 1;
                     }
                     return "fo-grp-" + foParityByKey[key];
                 });
+
+                // Merged (rowspan) cells: n = how many rows this cell covers,
+                // 0 = covered by the run's first row, so render no cell at all.
+                // A null key never merges (a group of one).
+                const spanRuns = (keyOf) =>
+                    trips.map((t, i) => {
+                        const key = keyOf(t);
+                        if (!key) return 1;
+                        if (keyOf(trips[i - 1]) === key) return 0;
+                        let n = 1;
+                        while (keyOf(trips[i + n]) === key) n++;
+                        return n;
+                    });
+
+                // Crew is a property of the load, not the row — one FO rides one
+                // truck, so its rows always share a crew cell.
+                const crewSpan = spanRuns(foKey);
+
+                // "Same FO = same waybill" (Schema.md): a load's stops share one
+                // waybill number, stored as one Waybill row per trip. Keyed on
+                // the number too, so a load left half-confirmed by older data
+                // shows its rows separately instead of hiding the split.
+                const waybillSpan = spanRuns((t) =>
+                    foKey(t)
+                        ? foKey(t) +
+                          "|" +
+                          (t.waybillConfirmed || "") +
+                          "|" +
+                          (t.waybillSuggested || "")
+                        : null,
+                );
+
+                // Status is per outlet drop: a load can deliver one stop and
+                // fail the next, and Redeliver/Foul-For-Redeliver spawns a
+                // carry-over per row. So Status merges only while the load's
+                // stops actually agree, and splits back into per-row selects
+                // the moment they diverge — never forcing one stop's outcome
+                // onto another.
+                const statusSpan = spanRuns((t) =>
+                    foKey(t) ? foKey(t) + "|" + t.tripStatus : null,
+                );
 
                 // Convoy groups: cycle a small palette per distinct token on
                 // the loaded day (stripe + badge, distinct from FO shading).
@@ -216,8 +256,11 @@
          </div>`
                             : `<div class="crew-card empty"><span class="crew-empty">Unassigned${canE ? " — drag a crew here" : ""}</span></div>`;
 
+                        // A merged select drives every stop it covers; an
+                        // un-merged one (the load's stops disagree) drives only
+                        // its own row.
                         const statusCell = canE
-                            ? `<select class="cell-select ${statusChipClass(t.tripStatus)}" onchange="changeStatus(${t.id}, this.value)">${statusSelectOptions(t.tripStatus)}</select>`
+                            ? `<select class="cell-select ${statusChipClass(t.tripStatus)}" onchange="changeStatus(${t.id}, this.value, ${statusSpan[i] > 1})">${statusSelectOptions(t.tripStatus)}</select>`
                             : `<span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span>`;
 
                         const remarksCell = canE
@@ -263,7 +306,7 @@
                             ? `onclick="handleRowClick(event, ${t.id})"`
                             : "";
 
-                        return `<tr data-tid="${t.id}" class="${sourceCls} ${foGroupCls[i]} ${cgCls}${selCls}" ${dz} ${rowClick}>
+                        return `<tr data-tid="${t.id}" class="${sourceCls} ${foGroupCls[i]} ${cgCls}${selCls}" ${dz} ${rowClick} onmouseenter="hoverLoad(${t.id}, true)" onmouseleave="hoverLoad(${t.id}, false)">
       <td class="td-fo">${dragHandle}${esc(foFull) || "—"}</td>
       <td>${colorChip(custGroup)}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
@@ -273,13 +316,32 @@
       <td class="td-qty">${t.cbm || "—"}</td>
       <td>${esc(t.tier) || "—"}</td>
       <td class="td-billingcat"><div class="billingcat-cell">${colorChip(billingCat)}${cgBadge}</div></td>
-      <td class="td-crew col-divider">${crewCell}</td>
-      <td class="td-status col-divider">${statusCell}</td>
-      <td class="td-wb">${waybillCellHtml(t, canE)}</td>
+      ${crewSpan[i] ? `<td class="td-crew col-divider"${crewSpan[i] > 1 ? ` rowspan="${crewSpan[i]}"` : ""}>${crewCell}</td>` : ""}
+      ${statusSpan[i] ? `<td class="td-status col-divider"${statusSpan[i] > 1 ? ` rowspan="${statusSpan[i]}"` : ""}>${statusCell}</td>` : ""}
+      ${waybillSpan[i] ? `<td class="td-wb"${waybillSpan[i] > 1 ? ` rowspan="${waybillSpan[i]}"` : ""}>${waybillCellHtml(t, canE)}</td>` : ""}
       <td class="td-remarks"><div class="remarks-cell">${remarksCell}${delBtn}</div></td>
     </tr>`;
                     })
                     .join("");
+            }
+
+            // Every row of the load a row belongs to (itself, if it has no FO #).
+            function loadBlockIds(tripId) {
+                const trips = dispatchData.trips || [];
+                const key = foKey(trips.find((t) => t.id === tripId));
+                return key
+                    ? trips.filter((t) => foKey(t) === key).map((t) => t.id)
+                    : [tripId];
+            }
+
+            // Hover highlights the whole load. A merged cell is transparent, so
+            // per-row hover would tint only the slice of it sitting over the
+            // hovered row — the load is the unit, so it lights up as one.
+            function hoverLoad(tripId, on) {
+                loadBlockIds(tripId).forEach((id) => {
+                    const tr = document.querySelector(`tr[data-tid="${id}"]`);
+                    if (tr) tr.classList.toggle("load-hover", on);
+                });
             }
 
             // Row click toggles convoy-group / bulk-action selection (highlight
@@ -287,10 +349,13 @@
             // the row (inputs, selects, buttons, links) act on that control
             // instead. Shift extends a range over the currently displayed
             // order; Ctrl/Cmd toggles one row; a plain click replaces the
-            // selection.
+            // selection. Selection works in whole loads, for the same reason
+            // hover does — and because the convoy grouping it feeds is a
+            // per-truck decision, so half a load is never a useful selection.
             function handleRowClick(e, tripId) {
                 if (e.target.closest("input, select, button, a")) return;
 
+                const block = loadBlockIds(tripId);
                 if (e.shiftKey && lastSelectedId != null) {
                     const ids = getFilteredTrips().map((t) => t.id);
                     const a = ids.indexOf(lastSelectedId);
@@ -298,17 +363,25 @@
                     if (a !== -1 && b !== -1) {
                         const lo = Math.min(a, b);
                         const hi = Math.max(a, b);
-                        selectedForGroup = new Set(ids.slice(lo, hi + 1));
+                        // Expand the range to whole loads at both ends.
+                        selectedForGroup = new Set(
+                            ids
+                                .slice(lo, hi + 1)
+                                .flatMap((id) => loadBlockIds(id)),
+                        );
                     } else {
-                        selectedForGroup = new Set([tripId]);
+                        selectedForGroup = new Set(block);
                     }
                 } else if (e.ctrlKey || e.metaKey) {
-                    if (selectedForGroup.has(tripId))
-                        selectedForGroup.delete(tripId);
-                    else selectedForGroup.add(tripId);
+                    const drop = selectedForGroup.has(tripId);
+                    block.forEach((id) =>
+                        drop
+                            ? selectedForGroup.delete(id)
+                            : selectedForGroup.add(id),
+                    );
                     lastSelectedId = tripId;
                 } else {
-                    selectedForGroup = new Set([tripId]);
+                    selectedForGroup = new Set(block);
                     lastSelectedId = tripId;
                 }
                 updateConvoyButtons();
@@ -473,7 +546,13 @@
                 const fullOrder = orderedDayTrips(trips).map((t) => t.id);
                 const byId = indexById(trips);
 
+                // Drag the largest unit the row belongs to: an explicit
+                // multi-selection, else its convoy, else its load. A load's
+                // rows move together so dragging one can never strand the rest
+                // (and orderedDayTrips re-clusters anyway — moving the block
+                // keeps the drag doing what it looks like it does).
                 let movedIds;
+                const fk = foKey(byId[draggedId]);
                 if (
                     selectedForGroup.has(draggedId) &&
                     selectedForGroup.size > 1
@@ -487,12 +566,25 @@
                         ? fullOrder.filter(
                               (id) => (byId[id] || {}).convoyGroup === cg,
                           )
-                        : [draggedId];
+                        : fk
+                          ? fullOrder.filter((id) => foKey(byId[id]) === fk)
+                          : [draggedId];
                 }
                 const movedSet = new Set(movedIds);
 
                 const remaining = fullOrder.filter((id) => !movedSet.has(id));
-                let idx = remaining.indexOf(targetTripId);
+                // Land outside the target's whole load, never between two of
+                // its rows — a drop mid-load would split a merged cell.
+                const tk = foKey(byId[targetTripId]);
+                const block = tk
+                    ? remaining.filter((id) => foKey(byId[id]) === tk)
+                    : [];
+                const anchorId = block.length
+                    ? before
+                        ? block[0]
+                        : block[block.length - 1]
+                    : targetTripId;
+                let idx = remaining.indexOf(anchorId);
                 if (idx === -1) idx = remaining.length; // target was itself moved — append
                 remaining.splice(before ? idx : idx + 1, 0, ...movedIds);
 
@@ -672,11 +764,12 @@
             }
 
             // Assign a whole crew (truck + its default driver & helpers) to a
-            // trip in one move. Optimistic: apply + re-render immediately.
+            // trip in one move — and to every other row of the same FO, which
+            // is what the board's merged crew cell promises. Optimistic: apply
+            // + re-render immediately.
             function assignCrew(tripId, truckIdRaw) {
-                const trip = (dispatchData.trips || []).find(
-                    (t) => t.id === tripId,
-                );
+                const trips = dispatchData.trips || [];
+                const trip = trips.find((t) => t.id === tripId);
                 if (!trip) return;
                 const truckId = Number(truckIdRaw) || null;
                 let driverId = null;
@@ -693,6 +786,26 @@
                         helperIds = (def.defaultHelperIds || []).map(Number);
                     }
                 }
+                const key = foKey(trip);
+                const targets = key
+                    ? trips.filter((t) => foKey(t) === key)
+                    : [trip];
+                targets.forEach((t) =>
+                    applyCrew(t, truckId, driverId, helperIds),
+                );
+            }
+
+            function applyCrew(trip, truckId, driverId, helperIds) {
+                const tripId = trip.id;
+                // Already carries this exact crew — an FO sibling reached twice
+                // (multi-select overlapping an FO, clear-all over an FO's rows)
+                // would otherwise re-save and re-audit a no-op.
+                if (
+                    trip.truckId === truckId &&
+                    trip.driverId === driverId &&
+                    String(trip.helperIds) === String(helperIds)
+                )
+                    return;
                 const old = {
                     truckId: trip.truckId,
                     driverId: trip.driverId,
@@ -721,11 +834,26 @@
                 });
             }
 
-            function changeStatus(tripId, status) {
-                const trip = (dispatchData.trips || []).find(
-                    (t) => t.id === tripId,
-                );
+            // `wholeLoad` comes from the merged Status cell: the select the
+            // dispatcher touched visibly covered every stop of the load, so it
+            // sets every stop. An un-merged select sets only its own row.
+            function changeStatus(tripId, status, wholeLoad) {
+                const trips = dispatchData.trips || [];
+                const trip = trips.find((t) => t.id === tripId);
                 if (!trip) return;
+                const key = wholeLoad && foKey(trip);
+                if (key) {
+                    trips
+                        .filter((t) => foKey(t) === key)
+                        .forEach((t) => applyStatus(t, status));
+                    return;
+                }
+                applyStatus(trip, status);
+            }
+
+            function applyStatus(trip, status) {
+                const tripId = trip.id;
+                if (trip.tripStatus === status) return;
                 const old = trip.tripStatus;
                 trip.tripStatus = status;
                 renderDispatch();
@@ -781,32 +909,48 @@
                     showToast("Enter a waybill number first.", "warning");
                     return;
                 }
-                const trip = (dispatchData.trips || []).find(
-                    (t) => t.id === tripId,
-                );
+                const trips = dispatchData.trips || [];
+                const trip = trips.find((t) => t.id === tripId);
                 if (!trip || !trip.suggestedWaybillId) {
                     showToast("No waybill to confirm for this trip yet.", "warning");
                     return;
                 }
-                // Optimistic: lock the row in immediately so confirming feels
+                // One waybill covers the whole load, and confirmWaybill locks
+                // every row of it server-side — so every stop of the load has
+                // to move together here too, or the board would show the rest
+                // still awaiting a number they no longer need.
+                const key = foKey(trip);
+                const targets = key
+                    ? trips.filter((t) => foKey(t) === key)
+                    : [trip];
+                // Optimistic: lock the rows in immediately so confirming feels
                 // instant, then reconcile/revert once the server responds.
-                const old = {
-                    waybillConfirmed: trip.waybillConfirmed,
-                    waybillSuggested: trip.waybillSuggested,
-                    suggestedWaybillId: trip.suggestedWaybillId,
-                };
-                trip.waybillConfirmed = customNumber;
-                trip.waybillSuggested = "";
-                trip.suggestedWaybillId = null;
+                const olds = targets.map((t) => ({
+                    trip: t,
+                    waybillConfirmed: t.waybillConfirmed,
+                    waybillSuggested: t.waybillSuggested,
+                    suggestedWaybillId: t.suggestedWaybillId,
+                }));
+                targets.forEach((t) => {
+                    t.waybillConfirmed = customNumber;
+                    t.waybillSuggested = "";
+                    t.suggestedWaybillId = null;
+                });
                 renderDispatch();
-                bgSave("confirmWaybill", [old.suggestedWaybillId, customNumber], {
+                bgSave("confirmWaybill", [trip.suggestedWaybillId, customNumber], {
                     onOk: (r) => {
-                        trip.waybillConfirmed = r.waybillNumber;
-                        showToast(`Waybill ${r.waybillNumber} confirmed.`, "success");
+                        targets.forEach((t) => (t.waybillConfirmed = r.waybillNumber));
+                        showToast(
+                            `Waybill ${r.waybillNumber} confirmed` +
+                                (r.confirmed > 1 ? ` for ${r.confirmed} stops.` : "."),
+                            "success",
+                        );
                         renderDispatch();
                     },
                     revert: () => {
-                        Object.assign(trip, old);
+                        olds.forEach(({ trip: t, ...prev }) =>
+                            Object.assign(t, prev),
+                        );
                         renderDispatch();
                     },
                 });

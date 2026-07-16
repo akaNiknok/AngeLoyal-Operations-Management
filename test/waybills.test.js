@@ -183,6 +183,89 @@ test('confirmWaybill refuses to re-confirm a locked waybill', () => {
   assert.match(res.error, /already confirmed and locked/);
 });
 
+// ---- confirmWaybill: one waybill, one row per stop of the load ----
+// _suggestWaybillsForGroups gives a multi-stop load ONE number spread over one
+// Waybill row per trip. Those rows are a single waybill, so confirming any of
+// them must lock all of them — the dispatch board merges them into one cell and
+// confirms from whichever row leads the run.
+function loadOf(api, tripIds) {
+  api._suggestWaybillsForGroups(1, [{ foNumber: 'FO-1', tripIds }]);
+}
+
+test('confirmWaybill locks every row of a multi-stop load, not just the one passed', () => {
+  const { api, ss } = asAdmin(baseSheets({ lastSeq: 5 }));
+  loadOf(api, [101, 102, 103]); // one load, three stops, all AL-6
+
+  const rows = () => dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.deepEqual(rows().map((w) => w['Waybill Number']), ['AL-6', 'AL-6', 'AL-6']);
+
+  // Confirm via the MIDDLE row's id — any row of the waybill is a valid handle.
+  const res = api.confirmWaybill(rows()[1].ID, null);
+  assert.equal(res.success, true);
+  assert.equal(res.confirmed, 3);
+
+  const after = rows();
+  assert.deepEqual(after.map((w) => w.Locked), [true, true, true]);
+  assert.deepEqual(after.map((w) => w.Status), ['Confirmed', 'Confirmed', 'Confirmed']);
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['AL-6', 'AL-6', 'AL-6']);
+});
+
+test('confirmWaybill applies a custom number to every stop of the load', () => {
+  const { api, ss } = asAdmin(baseSheets({ lastSeq: 5 }));
+  loadOf(api, [101, 102, 103]);
+  const rows = () => dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+
+  // The old per-row confirm would have thrown "already confirmed and in use"
+  // on the 2nd stop: the 1st was by then locked carrying the same number.
+  const res = api.confirmWaybill(rows()[0].ID, 'AL-250');
+  assert.equal(res.success, true);
+  assert.equal(res.confirmed, 3);
+
+  const after = rows();
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['AL-250', 'AL-250', 'AL-250']);
+  assert.deepEqual(after.map((w) => Number(w['Sequence Number'])), [250, 250, 250]);
+  assert.deepEqual(after.map((w) => w.Locked), [true, true, true]);
+});
+
+test('confirmWaybill leaves a different load alone', () => {
+  const { api, ss } = asAdmin(baseSheets({ lastSeq: 5 }));
+  api._suggestWaybillsForGroups(1, [
+    { foNumber: 'FO-1', tripIds: [101, 102] }, // AL-6
+    { foNumber: 'FO-2', tripIds: [201, 202] }, // AL-7
+  ]);
+  const rows = () => dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+
+  const res = api.confirmWaybill(rows()[0].ID, null);
+  assert.equal(res.confirmed, 2); // only FO-1's two stops
+
+  const after = rows();
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['AL-6', 'AL-6', 'AL-7', 'AL-7']);
+  assert.deepEqual(after.map((w) => w.Locked), [true, true, false, false]);
+});
+
+test('confirmWaybill does not re-confirm an already-locked sibling', () => {
+  const { api, ss } = asAdmin(baseSheets({ lastSeq: 5 }));
+  loadOf(api, [101, 102]);
+  const rows = () => dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+
+  // Simulate legacy half-confirmed data: lock one stop by hand, with a
+  // different confirmer, and check the group confirm does not overwrite it.
+  const ws = ss.getSheetByName('Waybills');
+  const hdr = HEADERS.Waybills;
+  ws.getRange(2, hdr.indexOf('Locked') + 1).setValue(true);
+  ws.getRange(2, hdr.indexOf('Status') + 1).setValue('Confirmed');
+  ws.getRange(2, hdr.indexOf('Confirmed By') + 1).setValue('someone.else@angeloyal.com');
+
+  const res = api.confirmWaybill(rows()[1].ID, null);
+  assert.equal(res.success, true);
+  assert.equal(res.confirmed, 1); // only the still-unlocked stop
+
+  const after = rows();
+  assert.equal(after[0]['Confirmed By'], 'someone.else@angeloyal.com'); // untouched
+  assert.equal(after[1]['Confirmed By'], 'admin@angeloyal.com');
+  assert.deepEqual(after.map((w) => w.Locked), [true, true]);
+});
+
 test('confirmWaybill is gated by CONFIRM_WAYBILL permission', () => {
   const sheets = baseSheets();
   const env = makeEnv({ sheets, userEmail: 'viewer@angeloyal.com' });
