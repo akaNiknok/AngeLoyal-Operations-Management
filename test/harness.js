@@ -104,6 +104,9 @@ class FakeRange {
     return this;
   }
 
+  // Cells in the in-memory fake keep their JS type, so formatting is a no-op.
+  setNumberFormat() { return this; }
+
   clearContent() {
     for (let r = 0; r < this.numRows; r++) {
       const srcRow = this.sheet.data[this.row - 1 + r];

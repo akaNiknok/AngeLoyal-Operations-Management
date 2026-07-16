@@ -238,13 +238,18 @@ function _writeRowFields(sheet, row, rowIdx, headers, updates) {
  * Builds a waybill number string from a prefix, sequence number, and optional
  * suffix. A blank prefix (Waybill Prefixes.Prefix = "") omits the leading
  * "prefix-" segment entirely, so the number is just the bare sequence.
+ * The sequence is zero-padded to `width` so it matches the physical booklet's
+ * fixed-width numbering (e.g. width 4 → 0358). width 0/blank means no padding.
+ * padStart never truncates, so a sequence longer than width prints in full.
  * @param {string} prefix
  * @param {number} seq
+ * @param {number} [width]
  * @param {string} [suffix]
  * @returns {string}
  */
-function _waybillNumberString(prefix, seq, suffix) {
-  return (prefix ? `${prefix}-${seq}` : `${seq}`) + (suffix || '');
+function _waybillNumberString(prefix, seq, width, suffix) {
+  const s = String(seq).padStart(width || 0, '0');
+  return (prefix ? `${prefix}-${s}` : `${s}`) + (suffix || '');
 }
 
 /**

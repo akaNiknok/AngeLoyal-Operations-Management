@@ -69,7 +69,7 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
   if (waybillType === 'Redeliver')  suffix = '-R';
   if (waybillType === 'Foul Trip')  suffix = '-FT';
 
-  const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, suffix);
+  const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth, suffix);
   const nextId        = _nextRowId(sheet);
 
   sheet.appendRow([
@@ -116,7 +116,7 @@ function _suggestWaybillsForGroups(prefixId, groups) {
   groups.forEach(g => {
     if (!g.tripIds || g.tripIds.length === 0) return;
     nextSeq += 1;
-    const waybillNumber = _waybillNumberString(pref.prefix, nextSeq);
+    const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth);
     g.tripIds.forEach(tripId => {
       const id = nextId++;
       newRows.push([
@@ -167,10 +167,22 @@ function _updateWaybillPrefixSequence(prefixId, newSeqNumber) {
   const rowIdx  = _findRowById(rows, headers, prefixId);
   if (rowIdx === -1) return;
 
-  const row     = rows[rowIdx];
-  const current = Number(_val(row, headers, 'Last Sequence Number')) || 0;
-  if (newSeqNumber > current) {
-    _writeRowFields(sheet, row, rowIdx, headers, { 'Last Sequence Number': newSeqNumber });
+  const rawCur  = _val(rows[rowIdx], headers, 'Last Sequence Number');
+  const current = Number(rawCur) || 0;
+  if (newSeqNumber <= current) return;   // only advances, never regresses
+
+  // Preserve the booklet's fixed digit width — implied by the stored value's
+  // length (a new prefix is seeded as text like "0000"). Pad the new value to
+  // that width; when it carries a leading zero, write it as text (number
+  // format "@") so Sheets doesn't coerce "0358" back to the number 358.
+  const width  = String(rawCur == null ? '' : rawCur).trim().length;
+  const plain  = String(newSeqNumber);
+  const padded = plain.padStart(width, '0');
+  const cell   = sheet.getRange(rowIdx + 1, headers.indexOf('Last Sequence Number') + 1);
+  if (padded !== plain) {
+    cell.setNumberFormat('@').setValue(padded);
+  } else {
+    cell.setValue(newSeqNumber);
   }
 }
 
