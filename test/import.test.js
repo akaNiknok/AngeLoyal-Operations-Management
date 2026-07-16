@@ -8,6 +8,9 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 const { makeEnv, dump, rowObject } = require('./harness');
 const { HEADERS, usersSheet, emptySheet, EMAIL } = require('./fixtures');
 
@@ -244,4 +247,77 @@ test('_resolveOrCreateOutlet returns existing id (case-insensitive) or creates o
   assert.equal(dump(ss, 'Outlets').rows.length, 2);
 
   assert.equal(api._resolveOrCreateOutlet('', 'X', 'Y'), ''); // empty name -> ''
+});
+
+// ---------------- parseRebiscoFile (Import.html, client-side) ----------------
+// The convoy redistribution runs in the browser, before importRouteFile ever
+// sees a row. Load Import.html's single <script> block into a vm the same way
+// the harness loads the .gs bundle. Only stub what top-level code touches.
+
+function loadParseRebiscoFile() {
+  const html = fs.readFileSync(path.resolve(__dirname, '..', 'Import.html'), 'utf8');
+  const src = html.replace(/^[\s\S]*?<script>/, '').replace(/<\/script>[\s\S]*$/, '');
+  const sandbox = { showToast() {}, console };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(`${src}\n;globalThis.__parse = parseRebiscoFile;`, sandbox, {
+    filename: 'Import.html',
+  });
+  // Round-trip out of the vm's realm: its objects carry a different
+  // Object.prototype, which deepStrictEqual counts as a mismatch.
+  return (raw) => JSON.parse(JSON.stringify(sandbox.__parse(raw)));
+}
+
+// Mirrors the real file's shape: type columns sit between FREIGHT ORDER and TOTAL.
+const RAW_HEADER = ['FREIGHT ORDER', 'L300', 'TOTAL', 'OUTLET', 'AREA'];
+const MALL = 'SW FESTIVAL MALL ALABANG';
+const truckCount = (rows) =>
+  rows.reduce((sum, r) => sum + (r.slots || []).reduce((n, s) => n + s.count, 0), 0);
+
+test('parseRebiscoFile hands convoy surplus to the following TOTAL=0 rows', () => {
+  const parse = loadParseRebiscoFile();
+  // Anchor asks for 3 L300s; two blank TOTAL=0 rows ride along -> 1 each.
+  const rows = parse([
+    RAW_HEADER,
+    ['6100043752', 3, 3, MALL, 'Alabang'],
+    ['6100043765', '', 0, MALL, 'Alabang'],
+    ['6100043766', '', 0, MALL, 'Alabang'],
+  ]);
+
+  assert.deepEqual(rows[0].slots, [{ type: 'L300', count: 1 }]); // anchor keeps one
+  assert.deepEqual(rows[1].slots, [{ type: 'L300', count: 1 }]);
+  assert.deepEqual(rows[2].slots, [{ type: 'L300', count: 1 }]);
+  assert.equal(truckCount(rows), 3);
+});
+
+test('parseRebiscoFile keeps surplus trucks on the anchor when recipients run out', () => {
+  const parse = loadParseRebiscoFile();
+  // The real ROUTE MAY 12 case: FO 6100043752 asks for 6 L300s but only 4
+  // blank TOTAL=0 rows follow; row 6 has its own truck and ends the run.
+  const rows = parse([
+    RAW_HEADER,
+    ['6100043752', 6, 6, MALL, 'Alabang'],
+    ['6100043765', '', 0, MALL, 'Alabang'],
+    ['6100043766', '', 0, MALL, 'Alabang'],
+    ['437462', '', 0, MALL, 'Alabang'],
+    ['437463', '', 0, MALL, 'Alabang'],
+    ['437464', 1, 1, 'OTHER OUTLET', 'Cavite'], // own slots -> loop breaks here
+  ]);
+
+  // 1 unplaced surplus stays on the anchor rather than being dropped.
+  assert.deepEqual(rows[0].slots, [{ type: 'L300', count: 2 }]);
+  assert.equal(rows[0].displayType, '2×L300');
+  rows.slice(1, 5).forEach((r) => assert.deepEqual(r.slots, [{ type: 'L300', count: 1 }]));
+  assert.deepEqual(rows[5].slots, [{ type: 'L300', count: 1 }]); // untouched
+
+  // 6 requested by the anchor + 1 for row 6 = 7 trucks, none lost.
+  assert.equal(truckCount(rows), 7);
+});
+
+test('parseRebiscoFile keeps the whole convoy on the anchor when no recipient follows', () => {
+  const parse = loadParseRebiscoFile();
+  const rows = parse([RAW_HEADER, ['6100043752', 4, 4, MALL, 'Alabang']]);
+
+  assert.deepEqual(rows[0].slots, [{ type: 'L300', count: 4 }]);
+  assert.equal(truckCount(rows), 4);
 });
