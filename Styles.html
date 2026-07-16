@@ -1031,7 +1031,8 @@
             }
             .ds-leg {
                 display: flex;
-                gap: 10px;
+                flex-wrap: wrap;
+                gap: 4px 10px;
                 font-size: 12px;
                 font-weight: 500;
             }
@@ -1039,9 +1040,11 @@
                 font-family: "DM Mono", monospace;
             }
             .ds-wb {
-                margin-left: auto;
                 font-family: "DM Mono", monospace;
                 color: var(--muted);
+                font-size: 11px;
+                margin-left: auto;
+                white-space: nowrap;
             }
             .ds-stops {
                 margin-top: 5px;
@@ -1050,16 +1053,33 @@
             }
             .ds-stop {
                 font-size: 12px;
-                margin-bottom: 2px;
+                margin-bottom: 6px;
+            }
+            .ds-stop-top {
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
             }
             .ds-stop-n {
                 font-weight: 600;
-                margin-right: 3px;
+            }
+            .ds-fo {
+                font-family: "DM Mono", monospace;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+            .ds-outlet {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: baseline;
+                gap: 2px 6px;
+                margin-left: 16px;
             }
             .ds-area,
             .ds-qty {
                 color: var(--muted);
                 font-size: 11px;
+                white-space: nowrap;
             }
             .ds-remarks {
                 font-size: 11px;
