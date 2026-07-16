@@ -18,11 +18,28 @@
                 const showInactive = document.getElementById(
                     "trucks-show-inactive",
                 ).checked;
+                const catFilterEl = document.getElementById(
+                    "trucks-category-filter",
+                );
+                if (catFilterEl.options.length <= 1) {
+                    catFilterEl.innerHTML =
+                        `<option value="">All categories</option>` +
+                        billingCategories
+                            .filter((c) => c.active !== false)
+                            .map(
+                                (c) =>
+                                    `<option value="${esc(c.name)}">${esc(c.name)}</option>`,
+                            )
+                            .join("");
+                }
+                const catFilter = catFilterEl.value;
                 const tbody = document.getElementById("trucks-tbody");
                 const isAdmin = currentUser.role === "Admin";
 
                 const filtered = trucks.filter((t) => {
                     if (!showInactive && t.active === false) return false;
+                    if (catFilter && t.billingCategory !== catFilter)
+                        return false;
                     return (
                         !q ||
                         (t.plate || "").toLowerCase().includes(q) ||
@@ -149,11 +166,15 @@
                 const showInactive = document.getElementById(
                     "employees-show-inactive",
                 ).checked;
+                const roleFilter = document.getElementById(
+                    "employees-role-filter",
+                ).value;
                 const tbody = document.getElementById("employees-tbody");
                 const isAdmin = currentUser.role === "Admin";
 
                 const filtered = employees.filter((e) => {
                     if (!showInactive && e.active === false) return false;
+                    if (roleFilter && e.role !== roleFilter) return false;
                     return (
                         !q ||
                         (e.nick || "").toLowerCase().includes(q) ||

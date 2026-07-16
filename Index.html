@@ -726,6 +726,12 @@
                         oninput="renderTrucksAdmin()"
                         style="width: 220px"
                     />
+                    <select
+                        id="trucks-category-filter"
+                        onchange="renderTrucksAdmin()"
+                    >
+                        <option value="">All categories</option>
+                    </select>
                     <span class="tb-label" id="trucks-count"></span>
                     <label
                         class="tb-label"
@@ -778,6 +784,15 @@
                         oninput="renderEmployeesAdmin()"
                         style="width: 220px"
                     />
+                    <select
+                        id="employees-role-filter"
+                        onchange="renderEmployeesAdmin()"
+                    >
+                        <option value="">All roles</option>
+                        <option value="Driver">Driver</option>
+                        <option value="Helper">Helper</option>
+                        <option value="Driver-Helper">Driver-Helper</option>
+                    </select>
                     <span class="tb-label" id="employees-count"></span>
                     <label
                         class="tb-label"
