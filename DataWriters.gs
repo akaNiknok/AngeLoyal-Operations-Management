@@ -587,9 +587,10 @@ function importRouteFile(tripDate, rowData) {
 }
 
 /**
- * Deletes a trip row that was imported but is not applicable.
+ * Deletes a trip row that is not applicable (any source: imported, manual,
+ * or a carry-over spawned from a mis-set status).
  * Only allowed before the trip has a confirmed waybill.
- * This is the only genuine delete in the system — used only during import cleanup.
+ * This is the only genuine delete in the system.
  *
  * @param {number} tripId
  * @returns {{ success: boolean } | { success: false, error: string }}
@@ -614,7 +615,7 @@ function deleteImportedTrip(tripId) {
     // Also delete any suggested (not confirmed) waybill rows for this trip
     _deleteSuggestedWaybillsForTrip(tripId);
 
-    _auditLog('TRIP_DELETE', SHEET_TRIPS, tripId, 'Imported trip deleted (pre-confirmation)', '');
+    _auditLog('TRIP_DELETE', SHEET_TRIPS, tripId, 'Trip deleted (pre-confirmation)', '');
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };

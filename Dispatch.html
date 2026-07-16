@@ -249,10 +249,11 @@
                         const cgBadge = t.convoyGroup
                             ? `<span class="convoy-badge ${cgCls}">C${esc(t.convoyGroup)}</span>`
                             : "";
-                        const delBtn =
-                            canE && t.source === "Import"
-                                ? `<button class="row-del" title="Remove trip" onclick="confirmDeleteTrip(${t.id})">✕</button>`
-                                : "";
+                        // ponytail: shown for every source — the server is the
+                        // real gate and refuses once a waybill is confirmed.
+                        const delBtn = canE
+                            ? `<button class="row-del" title="Remove trip" onclick="confirmDeleteTrip(${t.id})">✕</button>`
+                            : "";
 
                         // Rows are click-to-select (for convoy grouping) instead
                         // of a checkbox column — clicks on inputs/buttons/selects
