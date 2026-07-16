@@ -180,6 +180,20 @@
                 // truck, so its rows always share a crew cell.
                 const crewSpan = spanRuns(foKey);
 
+                // "Same FO = same waybill" (Schema.md): a load's stops share one
+                // waybill number, stored as one Waybill row per trip. Keyed on
+                // the number too, so a load left half-confirmed by older data
+                // shows its rows separately instead of hiding the split.
+                const waybillSpan = spanRuns((t) =>
+                    foKey(t)
+                        ? foKey(t) +
+                          "|" +
+                          (t.waybillConfirmed || "") +
+                          "|" +
+                          (t.waybillSuggested || "")
+                        : null,
+                );
+
                 // Status is per outlet drop: a load can deliver one stop and
                 // fail the next, and Redeliver/Foul-For-Redeliver spawns a
                 // carry-over per row. So Status merges only while the load's
@@ -304,7 +318,7 @@
       <td class="td-billingcat"><div class="billingcat-cell">${colorChip(billingCat)}${cgBadge}</div></td>
       ${crewSpan[i] ? `<td class="td-crew col-divider"${crewSpan[i] > 1 ? ` rowspan="${crewSpan[i]}"` : ""}>${crewCell}</td>` : ""}
       ${statusSpan[i] ? `<td class="td-status col-divider"${statusSpan[i] > 1 ? ` rowspan="${statusSpan[i]}"` : ""}>${statusCell}</td>` : ""}
-      <td class="td-wb">${waybillCellHtml(t, canE)}</td>
+      ${waybillSpan[i] ? `<td class="td-wb"${waybillSpan[i] > 1 ? ` rowspan="${waybillSpan[i]}"` : ""}>${waybillCellHtml(t, canE)}</td>` : ""}
       <td class="td-remarks"><div class="remarks-cell">${remarksCell}${delBtn}</div></td>
     </tr>`;
                     })
@@ -895,32 +909,48 @@
                     showToast("Enter a waybill number first.", "warning");
                     return;
                 }
-                const trip = (dispatchData.trips || []).find(
-                    (t) => t.id === tripId,
-                );
+                const trips = dispatchData.trips || [];
+                const trip = trips.find((t) => t.id === tripId);
                 if (!trip || !trip.suggestedWaybillId) {
                     showToast("No waybill to confirm for this trip yet.", "warning");
                     return;
                 }
-                // Optimistic: lock the row in immediately so confirming feels
+                // One waybill covers the whole load, and confirmWaybill locks
+                // every row of it server-side — so every stop of the load has
+                // to move together here too, or the board would show the rest
+                // still awaiting a number they no longer need.
+                const key = foKey(trip);
+                const targets = key
+                    ? trips.filter((t) => foKey(t) === key)
+                    : [trip];
+                // Optimistic: lock the rows in immediately so confirming feels
                 // instant, then reconcile/revert once the server responds.
-                const old = {
-                    waybillConfirmed: trip.waybillConfirmed,
-                    waybillSuggested: trip.waybillSuggested,
-                    suggestedWaybillId: trip.suggestedWaybillId,
-                };
-                trip.waybillConfirmed = customNumber;
-                trip.waybillSuggested = "";
-                trip.suggestedWaybillId = null;
+                const olds = targets.map((t) => ({
+                    trip: t,
+                    waybillConfirmed: t.waybillConfirmed,
+                    waybillSuggested: t.waybillSuggested,
+                    suggestedWaybillId: t.suggestedWaybillId,
+                }));
+                targets.forEach((t) => {
+                    t.waybillConfirmed = customNumber;
+                    t.waybillSuggested = "";
+                    t.suggestedWaybillId = null;
+                });
                 renderDispatch();
-                bgSave("confirmWaybill", [old.suggestedWaybillId, customNumber], {
+                bgSave("confirmWaybill", [trip.suggestedWaybillId, customNumber], {
                     onOk: (r) => {
-                        trip.waybillConfirmed = r.waybillNumber;
-                        showToast(`Waybill ${r.waybillNumber} confirmed.`, "success");
+                        targets.forEach((t) => (t.waybillConfirmed = r.waybillNumber));
+                        showToast(
+                            `Waybill ${r.waybillNumber} confirmed` +
+                                (r.confirmed > 1 ? ` for ${r.confirmed} stops.` : "."),
+                            "success",
+                        );
                         renderDispatch();
                     },
                     revert: () => {
-                        Object.assign(trip, old);
+                        olds.forEach(({ trip: t, ...prev }) =>
+                            Object.assign(t, prev),
+                        );
                         renderDispatch();
                     },
                 });

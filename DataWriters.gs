@@ -268,9 +268,16 @@ function bulkSetTripStatus(tripIds, status) {
  * Confirms a waybill number (locking it permanently).
  * The dispatcher may pass a custom number; the system checks for duplicates.
  *
- * @param {number} waybillId          The ID of the Suggested waybill row.
+ * A multi-stop load has ONE waybill spread over one Waybill row per trip, all
+ * carrying the same number/prefix/sequence (see `_suggestWaybillsForGroups`).
+ * They are a single waybill, so confirming locks every row of it — confirming
+ * one at a time would leave the rest of the load Suggested, and a second call
+ * carrying the same custom number would trip the duplicate check below.
+ *
+ * @param {number} waybillId          The ID of any Suggested row of the waybill.
  * @param {string} [customNumber]     If provided, use this instead of the suggested number.
- * @returns {{ success: boolean, waybillNumber: string } | { success: false, error: string }}
+ * @returns {{ success: boolean, waybillNumber: string, confirmed: number }
+ *           | { success: false, error: string }}
  */
 function confirmWaybill(waybillId, customNumber) {
   _requirePermission('CONFIRM_WAYBILL');
@@ -287,15 +294,30 @@ function confirmWaybill(waybillId, customNumber) {
       throw new Error(`Waybill ${_val(row, headers, 'Waybill Number')} is already confirmed and locked.`);
     }
 
-    let finalNumber = _val(row, headers, 'Waybill Number');
-    const prefixId  = _numOrNull(_val(row, headers, 'Prefix ID'));
-    let seqNumber   = _numOrNull(_val(row, headers, 'Sequence Number'));
+    const origNumber = _val(row, headers, 'Waybill Number');
+    let finalNumber  = origNumber;
+    const prefixId   = _numOrNull(_val(row, headers, 'Prefix ID'));
+    let seqNumber    = _numOrNull(_val(row, headers, 'Sequence Number'));
+
+    // Every unlocked row of THIS waybill (same number + prefix + sequence).
+    // An already-locked sibling is left alone rather than re-confirmed.
+    const groupIdxs = [];
+    for (let i = 1; i < rows.length; i++) {
+      if (_val(rows[i], headers, 'Waybill Number') === origNumber
+          && _numOrNull(_val(rows[i], headers, 'Prefix ID')) === prefixId
+          && _numOrNull(_val(rows[i], headers, 'Sequence Number')) === seqNumber
+          && !_isTrue(_val(rows[i], headers, 'Locked'))) {
+        groupIdxs.push(i);
+      }
+    }
+    if (groupIdxs.indexOf(rowIdx) === -1) groupIdxs.push(rowIdx);
 
     // If dispatcher provided a custom number, validate and parse it
     if (customNumber && customNumber !== finalNumber) {
-      // Check for duplicate confirmed waybills
+      // Check for duplicate confirmed waybills. This waybill's own rows are not
+      // duplicates of each other — sharing the number is the point.
       const isDuplicate = rows.slice(1).some((r, i) => {
-        if (i === rowIdx - 1) return false; // skip current row
+        if (groupIdxs.indexOf(i + 1) !== -1) return false; // this waybill's own rows
         return _val(r, headers, 'Waybill Number') === customNumber
             && _isTrue(_val(r, headers, 'Locked'));
       });
@@ -309,19 +331,23 @@ function confirmWaybill(waybillId, customNumber) {
 
       // Log the override
       _auditLog('WAYBILL_OVERRIDE', SHEET_WAYBILLS, waybillId,
-        _val(row, headers, 'Waybill Number'), finalNumber);
+        origNumber, finalNumber);
     }
 
-    // Lock the row — single batched write for all 6 fields
+    // Lock every row of the waybill — batched write per row, 6 fields each
     const email = _getCurrentUserEmail();
     const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
-    _writeRowFields(sheet, row, rowIdx, headers, {
-      'Waybill Number':  finalNumber,
-      'Sequence Number': seqNumber,
-      'Status':          'Confirmed',
-      'Locked':          true,
-      'Confirmed By':    email,
-      'Confirmed At':    now,
+    groupIdxs.forEach(i => {
+      _writeRowFields(sheet, rows[i], i, headers, {
+        'Waybill Number':  finalNumber,
+        'Sequence Number': seqNumber,
+        'Status':          'Confirmed',
+        'Locked':          true,
+        'Confirmed By':    email,
+        'Confirmed At':    now,
+      });
+      _auditLog('WAYBILL_CONFIRM', SHEET_WAYBILLS,
+        _numOrNull(_val(rows[i], headers, 'ID')), 'Suggested', finalNumber);
     });
 
     // Update Last Sequence Number in Waybill Prefixes
@@ -329,9 +355,7 @@ function confirmWaybill(waybillId, customNumber) {
       _updateWaybillPrefixSequence(prefixId, seqNumber);
     }
 
-    _auditLog('WAYBILL_CONFIRM', SHEET_WAYBILLS, waybillId, 'Suggested', finalNumber);
-
-    return { success: true, waybillNumber: finalNumber };
+    return { success: true, waybillNumber: finalNumber, confirmed: groupIdxs.length };
   } catch (e) {
     return { success: false, error: e.message };
   }
