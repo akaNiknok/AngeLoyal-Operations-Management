@@ -642,6 +642,18 @@
                 position: sticky;
                 left: 0;
             }
+            /* border-collapse suppresses box-shadow/border on table cells, so the
+               divider is a positioned pseudo-element instead. */
+            table.dispatch-table thead th:first-child::after,
+            table.dispatch-table tbody td:first-child::after {
+                content: "";
+                position: absolute;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                width: 1px;
+                background: var(--border);
+            }
             table.dispatch-table tbody td:first-child {
                 z-index: 1;
                 background: var(--bg);
