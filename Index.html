@@ -337,6 +337,14 @@
                             <button
                                 class="account-action"
                                 type="button"
+                                onclick="printDispatchDay('jpg')"
+                            >
+                                <span class="account-action-icon">📷</span>
+                                Image (.jpg)
+                            </button>
+                            <button
+                                class="account-action"
+                                type="button"
                                 onclick="exportDispatchXlsx()"
                             >
                                 <span class="account-action-icon">⬇</span>
@@ -1039,6 +1047,12 @@
                         onclick="closeModal('modal-driver-share')"
                     >
                         Close
+                    </button>
+                    <button
+                        class="btn btn-ghost"
+                        onclick="printDriverShare('jpg')"
+                    >
+                        📷 Save as .jpg
                     </button>
                     <button
                         class="btn btn-primary"

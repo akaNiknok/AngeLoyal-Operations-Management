@@ -22,6 +22,18 @@
             document.head.appendChild(excelJsScript);
             let excelJsReady = false;
 
+            // html2canvas rasterizes the print HTML to a .jpg for the drivers'
+            // group chat (Print/PDF still uses the browser dialog). Optional:
+            // if it fails to load, the JPG buttons just toast.
+            const html2canvasScript = document.createElement("script");
+            html2canvasScript.src =
+                "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+            html2canvasScript.onload = () => {
+                html2canvasReady = true;
+            };
+            document.head.appendChild(html2canvasScript);
+            let html2canvasReady = false;
+
             // ── GLOBAL STATE ──────────────────────────────────────────
             let currentUser = { email: "", displayName: "", role: null };
             let employees = [];
