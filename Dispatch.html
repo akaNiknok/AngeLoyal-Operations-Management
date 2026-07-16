@@ -794,6 +794,7 @@
             function statusSelectOptions(current) {
                 const vals = [
                     "Prepping",
+                    "Backlog",
                     "Scheduled",
                     "Preload",
                     "Delivered",
@@ -1076,15 +1077,22 @@
                     showToast("Your role cannot schedule trips.", "warning");
                     return;
                 }
-                const count = (dispatchData?.trips || []).filter(
+                const prepping = (dispatchData?.trips || []).filter(
                     (t) => t.tripStatus === "Prepping",
-                ).length;
-                if (count === 0) {
+                );
+                if (prepping.length === 0) {
                     showToast("No Prepping trips on this date.", "warning");
                     return;
                 }
+                const noCrew = prepping.filter(
+                    (t) => !t.truckId && !t.driverId,
+                ).length;
+                const date = document.getElementById("dispatch-date").value;
                 document.getElementById("mds-summary").textContent =
-                    `${count} Prepping trip${count === 1 ? "" : "s"} on ${document.getElementById("dispatch-date").value} will be marked Scheduled.`;
+                    `${prepping.length - noCrew} Prepping trip${prepping.length - noCrew === 1 ? "" : "s"} on ${date} will be marked Scheduled` +
+                    (noCrew
+                        ? `; ${noCrew} without a crew will be marked Backlog and carried over to the next business day.`
+                        : ".");
                 populatePrefixSelects();
                 openModal("modal-mark-scheduled");
             }
@@ -1111,7 +1119,10 @@
                             return;
                         }
                         showToast(
-                            `${r.promoted} trips Scheduled, ${r.waybillsSuggested} waybills suggested.`,
+                            `${r.promoted} trips Scheduled, ${r.waybillsSuggested} waybills suggested.` +
+                                (r.backlogged
+                                    ? ` ${r.backlogged} trip${r.backlogged === 1 ? "" : "s"} without a crew marked Backlog and carried over.`
+                                    : ""),
                             "success",
                         );
                         loadDispatch();

@@ -188,7 +188,7 @@ The core transactional table of the system. Each row tracks an individual delive
 | Driver ID | Number | Foreign Key → Employees.ID pointing to the operating driver |
 | Helper IDs | String | Comma-separated Employee IDs for assigned crew; Nullable |
 | Truck Billing Category | String | Historical snapshot of the vehicle's billing class at the exact moment of dispatch |
-| Trip Status | String | Current execution state: Prepping, Scheduled, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
+| Trip Status | String | Current execution state: Prepping, Backlog, Scheduled, Preload, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
 | Parent Trip ID | Number | Foreign Key → Trips.ID. Points to the initiating record for all redeliveries or foul trip tracking |
 | Source | String | Generation origin: Import, Manual, or Carry-over |
 | Tier | Number | Client priority ranking (1, 2, 3); Nullable for manual entries |
@@ -205,6 +205,8 @@ The core transactional table of the system. Each row tracks an individual delive
 ```
 Prepping (imported, pre-waybill — dispatcher merges/splits/reassigns freely)
   → Scheduled (day promoted via markDayScheduled; waybills suggested)
+  → Backlog (day promoted but still no crew — no waybill; carries over to the
+             next business day as a fresh Prepping trip)
 Scheduled
   → Preload (goods loaded onto the truck, not yet delivered)
       → Delivered
@@ -216,12 +218,13 @@ Scheduled
       → Two-Day Trip (spans 2 days, single billing, covers both days)
 ```
 
-When a trip status transitions to `Foul Trip - For Redeliver` or `Redeliver`, the system automatically inserts a new row into the Trips log for the following business day using these parameters:
+When a trip status transitions to `Foul Trip - For Redeliver`, `Redeliver`, or `Backlog`, the system automatically inserts a new row into the Trips log for the following business day using these parameters:
 
 * Trip Date \= Next business day
 * Billing Date \= Preserves the original initiating trip's Billing Date
 * Parent Trip ID \= Links back to the original trip's ID
 * Source \= Carry-over
+* Trip Status \= Scheduled, or Prepping for a `Backlog` carry-over (it still needs a crew, and gets no suggested waybill)
 
 ### **Sheet 9: Route Frequency Log**
 
