@@ -341,13 +341,15 @@
                 const stops = card.stops
                     .map(
                         (s, i) => `<div class="ds-stop">
-        <div class="ds-stop-main">
+        <div class="ds-stop-top">
           <span class="ds-stop-n">${i + 1}.</span>
           ${s.foNumber ? `<span class="ds-fo">FO ${esc(s.foNumber)}</span>` : ""}
+          ${s.waybill ? `<span class="ds-wb">WB ${esc(s.waybill)}</span>` : ""}
+        </div>
+        <div class="ds-outlet">
           ${colorChip(s.customer)}
           <span>${esc(s.outletName)} <span class="ds-area">(${esc(s.area)})</span></span>
           <span class="ds-qty">${s.quantity || ""}${s.cbm ? " · " + s.cbm + " cbm" : ""}</span>
-          ${s.waybill ? `<span class="ds-wb">WB ${esc(s.waybill)}</span>` : ""}
         </div>
         ${s.address ? `<div class="ds-address">${esc(s.address)}</div>` : ""}
         ${s.remarks ? `<div class="ds-remarks">✎ ${esc(s.remarks)}</div>` : ""}
@@ -397,12 +399,13 @@
     .ds-plate { font-family: monospace; }
     .ds-wb { margin-left: auto; font-family: monospace; font-weight: normal; font-size: 11px; color: #333; white-space: nowrap; }
     .ds-stops { margin-top: 6px; border-top: 1px dashed #999; padding-top: 6px; }
-    .ds-stop { font-size: 12px; margin-bottom: 4px; }
-    .ds-stop-main { display: flex; align-items: baseline; gap: 5px; }
+    .ds-stop { font-size: 12px; margin-bottom: 6px; }
+    .ds-stop-top { display: flex; align-items: baseline; gap: 6px; }
     .ds-stop-n { font-weight: bold; }
-    .ds-fo { font-family: monospace; font-weight: bold; color: #333; }
-    .ds-area { color: #555; }
-    .ds-qty { color: #555; }
+    .ds-fo { font-family: monospace; font-weight: bold; color: #333; white-space: nowrap; }
+    .ds-outlet { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin-left: 16px; }
+    .ds-area { color: #555; white-space: nowrap; }
+    .ds-qty { color: #555; white-space: nowrap; }
     .ds-remarks { font-size: 10px; color: #333; margin-left: 16px; }
     .ds-address { font-size: 10px; color: #555; margin-left: 16px; }
     .color-chip { display: inline-block; font-size: 9px; font-weight: bold; padding: 1px 6px; border-radius: 99px; border: 1px solid #ccc; }
