@@ -349,7 +349,7 @@
         <div class="ds-outlet">
           ${colorChip(s.customer)}
           <span>${esc(s.outletName)} <span class="ds-area">(${esc(s.area)})</span></span>
-          <span class="ds-qty">${s.quantity || ""}${s.cbm ? " · " + s.cbm + " cbm" : ""}</span>
+          <span class="ds-qty">${s.quantity ? "QTY " + s.quantity : ""}${s.cbm ? " · " + s.cbm + " cbm" : ""}</span>
         </div>
         ${s.address ? `<div class="ds-address">${esc(s.address)}</div>` : ""}
         ${s.remarks ? `<div class="ds-remarks">✎ ${esc(s.remarks)}</div>` : ""}
