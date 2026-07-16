@@ -179,11 +179,19 @@ test('saveTripChanges does not spawn a carry-over trip on Preload', () => {
   assert.equal(rowObject(after.headers, after.rows[0])['Trip Status'], 'Preload');
 });
 
+// The route-frequency window is measured against the real clock (new Date()),
+// so fixtures must be dated relative to now — a hardcoded date ages out of it.
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+
 test('saveTripChanges warns when a driver exceeds the route-frequency threshold', () => {
   // 5 recent trips for driver 9 to outlet 12; reassigning makes it the 6th.
-  const today = '6/16/2026';
+  const recent = daysAgo(3);
   const freqRows = [HEADERS['Route Frequency Log'].slice()];
-  for (let i = 1; i <= 5; i++) freqRows.push([i, 100 + i, today, 9, 12]);
+  for (let i = 1; i <= 5; i++) freqRows.push([i, 100 + i, recent, 9, 12]);
 
   const { api } = withExistingTrip({ 'Route Frequency Log': freqRows });
   const res = api.saveTripChanges(50, { driverId: 9 }); // old driver was 8
@@ -194,11 +202,58 @@ test('saveTripChanges warns when a driver exceeds the route-frequency threshold'
 });
 
 test('saveTripChanges does not warn below the threshold', () => {
-  const today = '6/16/2026';
-  const freqRows = [HEADERS['Route Frequency Log'].slice(), [1, 101, today, 9, 12]];
+  const recent = daysAgo(3);
+  const freqRows = [HEADERS['Route Frequency Log'].slice(), [1, 101, recent, 9, 12]];
   const { api } = withExistingTrip({ 'Route Frequency Log': freqRows });
   const res = api.saveTripChanges(50, { driverId: 9 }); // becomes 2nd assignment
   assert.equal(res.routeFrequencyWarning, null);
+});
+
+// Route frequency counts trips that were actually scheduled — a Prepping trip's
+// crew is still being shuffled, so nothing is logged until it leaves Prepping.
+function withPreppingTrip(extra = {}) {
+  const { api, ss } = withExistingTrip(extra);
+  const sheet = ss.getSheetByName('Trips');
+  const headers = HEADERS.Trips;
+  sheet.getRange(2, headers.indexOf('Trip Status') + 1).setValue('Prepping');
+  return { api, ss };
+}
+
+test('saveTripChanges does not log route frequency while the trip is Prepping', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { driverId: 9 }); // reassign, still Prepping
+  assert.equal(res.success, true);
+  assert.equal(dump(ss, 'Route Frequency Log').rows.length, 0);
+  assert.equal(res.routeFrequencyWarning, null);
+});
+
+test('saveTripChanges logs route frequency when a Prepping trip is scheduled', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { tripStatus: 'Scheduled' }); // no driver change
+  assert.equal(res.success, true);
+
+  const { headers, rows } = dump(ss, 'Route Frequency Log');
+  assert.equal(rows.length, 1);
+  const freq = rowObject(headers, rows[0]);
+  assert.equal(Number(freq['Trip ID']), 50);
+  assert.equal(Number(freq['Driver ID']), 8);   // the driver it carried into Scheduled
+  assert.equal(Number(freq['Outlet ID']), 12);
+});
+
+test('saveTripChanges logs route frequency once when scheduling with a new driver', () => {
+  const { api, ss } = withPreppingTrip();
+  const res = api.saveTripChanges(50, { driverId: 9, tripStatus: 'Scheduled' });
+  assert.equal(res.success, true);
+
+  const { headers, rows } = dump(ss, 'Route Frequency Log');
+  assert.equal(rows.length, 1);
+  assert.equal(Number(rowObject(headers, rows[0])['Driver ID']), 9);
+});
+
+test('saveTripChanges does not re-log route frequency on a later status change', () => {
+  const { api, ss } = withExistingTrip();   // already Scheduled
+  api.saveTripChanges(50, { tripStatus: 'Delivered' });
+  assert.equal(dump(ss, 'Route Frequency Log').rows.length, 0);
 });
 
 test('saveTripChanges is gated by ASSIGN_CREW permission', () => {

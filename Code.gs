@@ -158,6 +158,9 @@ function doGet(e) {
   if (params.action === 'devDump') {
     return _devDump(params);
   }
+  if (params.action === 'devClear') {
+    return _devClear(params);
+  }
 
   // OAuth callback → mint a session and hand its token to the client. On any
   // failure (e.g. a reused code on refresh) bootToken stays '' and the client

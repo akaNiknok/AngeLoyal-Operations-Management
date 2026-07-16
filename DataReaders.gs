@@ -277,6 +277,7 @@ function getTrips(dateFrom, dateTo) {
       addedBy:             _val(row, headers, 'Added By') || '',
       addedAt:             _valDateTime(row, headers, 'Added At'),
       convoyGroup:         String(_val(row, headers, 'Convoy Group') || ''),
+      sortOrder:           _numOrNull(_val(row, headers, 'Sort Order')),
     };
   }).filter(t => t !== null);
 }

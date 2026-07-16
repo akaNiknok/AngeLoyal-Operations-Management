@@ -24,7 +24,7 @@ const HEADERS = {
     'Truck ID', 'Driver ID', 'Helper IDs', 'Truck Billing Category',
     'Trip Status', 'Parent Trip ID', 'Source', 'Tier', 'Remarks',
     'Status Changed By', 'Status Changed At', 'Added By', 'Added At',
-    'Convoy Group',
+    'Convoy Group', 'Sort Order',
   ],
 
   Waybills: [

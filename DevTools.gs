@@ -37,6 +37,42 @@ function _devDump(params) {
 }
 
 /**
+ * Deletes all data rows (keeps header row) from the transactional sheets:
+ * Trips, Outlets, Route Frequency Log, Waybills, Audit Log. Gated by the same
+ * DEV_DUMP_TOKEN as _devDump. Used by local tooling
+ * (scripts/clear-sheet-data.js) to reset a dev/test spreadsheet.
+ *
+ * Usage: ?action=devClear&token=...
+ *
+ * @param {Object} params  e.parameter from doGet
+ * @returns {GoogleAppsScript.Content.TextOutput}
+ */
+function _devClear(params) {
+  const expected = PropertiesService.getScriptProperties().getProperty('DEV_DUMP_TOKEN');
+  const out = (body) => ContentService.createTextOutput(JSON.stringify(body))
+    .setMimeType(ContentService.MimeType.JSON);
+
+  if (!expected || params.token !== expected) {
+    return out({ error: 'forbidden' });
+  }
+
+  const sheetNames = [SHEET_TRIPS, SHEET_OUTLETS, SHEET_ROUTE_FREQ, SHEET_WAYBILLS, SHEET_AUDIT];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cleared = [];
+  sheetNames.forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+    }
+    cleared.push(name);
+  });
+
+  return out({ cleared });
+}
+
+/**
  * One-time setup: generates and stores a random token in Script Properties
  * for the devDump endpoint. Run this once from the Apps Script editor
  * (select this function, click Run), then copy the token from the

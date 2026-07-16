@@ -36,6 +36,7 @@
             let dispatchData = null; // { trips, date }
             let statusFilter = "all";
             let selectedForGroup = new Set(); // trip ids checked for convoy grouping
+            let lastSelectedId = null; // anchor for shift-click range selection
             let crewRailOpen = false; // crew drag-and-drop rail beside the table
             let crewRailSort = "driver"; // driver | plate | type
             let saving = false;
@@ -205,35 +206,48 @@
             function handleSessionExpired() {
                 sessionToken = null;
                 storeDel("oms_session");
+                storeDel("oms_boot");
                 currentUser = { email: "", displayName: "", role: null };
                 hideLoading();
                 showSignIn("Your session expired. Please sign in again.");
             }
 
             // ── DATA LOAD (after sign-in) ─────────────────────────────
+            // SWR boot: paint instantly from the last visit's boot data in
+            // localStorage, then getBootData() revalidates in the background.
+            // Skipped right after a fresh OAuth sign-in (token just injected),
+            // so one account's cached UI never flashes for another account.
             function loadAppData() {
-                setLoading("Loading data…");
+                const cachedRaw = (window.__OMS_BOOT_TOKEN || "").trim()
+                    ? null
+                    : storeGet("oms_boot");
+                let painted = false;
+                if (cachedRaw) {
+                    try {
+                        const boot = JSON.parse(cachedRaw);
+                        if (boot && boot.session && boot.session.role) {
+                            applyBootData(boot);
+                            painted = true;
+                        }
+                    } catch (_) {}
+                }
+                if (!painted) setLoading("Loading data…");
+                setSyncing(true);
                 srv()
                     .withSuccessHandler((boot) => {
-                        currentUser = boot.session || { role: null };
-                        employees = boot.employees || [];
-                        trucks = boot.trucks || [];
-                        waybillPrefixes = boot.waybillPrefixes || [];
-                        outlets = boot.outlets || [];
-                        defaultAssignments = boot.defaultAssignments || [];
-                        billingCategories = boot.billingCategories || [];
-                        routeTypeMap = boot.routeTypeMap || [];
-
-                        applyRoleToUI(currentUser.role);
-                        hideLoading();
-
-                        // Signed in but not authorized → the gate is shown.
-                        if (!currentUser.role) return;
-
-                        populatePrefixSelects();
-                        onMasterDataReady();
+                        setSyncing(false);
+                        const raw = JSON.stringify(boot);
+                        if (boot.session && boot.session.role) {
+                            storeSet("oms_boot", raw);
+                        } else {
+                            storeDel("oms_boot");
+                        }
+                        // Cached paint already matches the server → done.
+                        if (painted && raw === cachedRaw) return;
+                        applyBootData(boot);
                     })
                     .withFailureHandler((err) => {
+                        setSyncing(false);
                         hideLoading();
                         // AUTH_REQUIRED is handled inside srv(); others toast.
                         if (!/AUTH_REQUIRED/.test(err.message || "")) {
@@ -247,12 +261,32 @@
                     .getBootData();
             }
 
+            function applyBootData(boot) {
+                currentUser = boot.session || { role: null };
+                employees = boot.employees || [];
+                trucks = boot.trucks || [];
+                waybillPrefixes = boot.waybillPrefixes || [];
+                outlets = boot.outlets || [];
+                defaultAssignments = boot.defaultAssignments || [];
+                billingCategories = boot.billingCategories || [];
+                routeTypeMap = boot.routeTypeMap || [];
+
+                applyRoleToUI(currentUser.role);
+                hideLoading();
+
+                // Signed in but not authorized → the gate is shown.
+                if (!currentUser.role) return;
+
+                populatePrefixSelects();
+                onMasterDataReady();
+            }
+
             function onMasterDataReady() {
                 renderTruckList();
                 renderEmpList();
                 renderOutlets();
                 populateAddTripSelects();
-                loadDispatch();
+                loadDispatch(true);
             }
 
             // ── RBAC ──────────────────────────────────────────────────
@@ -327,6 +361,7 @@
                 const t = sessionToken;
                 sessionToken = null;
                 storeDel("oms_session");
+                storeDel("oms_boot");
                 currentUser = { email: "", displayName: "", role: null };
                 if (t) google.script.run.logout(t); // best-effort server cleanup
                 closeAccountMenu();
@@ -382,7 +417,7 @@
                 document.getElementById("nav-" + name).classList.add("active");
 
                 if (name === "dispatch") {
-                    loadDispatch();
+                    loadDispatch(true);
                 }
                 if (name === "roster") {
                     renderTruckList();
@@ -407,6 +442,7 @@
             function statusChipClass(status) {
                 const map = {
                     Prepping: "sc-prepping",
+                    Backlog: "sc-backlog",
                     Scheduled: "sc-scheduled",
                     Preload: "sc-preload",
                     Delivered: "sc-delivered",
@@ -421,6 +457,7 @@
             function shortStatus(status) {
                 const map = {
                     Prepping: "Prepping",
+                    Backlog: "Backlog",
                     Scheduled: "Scheduled",
                     Preload: "Preload",
                     Delivered: "Delivered",
@@ -473,6 +510,65 @@
                 if (!name) return "";
                 const h = labelHue(name);
                 return `<span class="cat-swatch" title="${esc(name)}" style="background:hsl(${h} 60% 55%)"></span>`;
+            }
+
+            // Single source of truth for a day's row order — used by both the
+            // dispatch board (getFilteredTrips) and the export builder
+            // (buildFinalRouteModel in Export.html), so the printed/exported
+            // route always matches what the dispatcher arranged on screen.
+            //
+            // Order: explicit Sort Order (blank sorts last) with id as a
+            // stable tiebreak, then convoy members are pulled contiguous by
+            // anchoring each convoy block at its earliest position in that
+            // sorted order (mirrors the group/FO anchor trick already used
+            // in Export.html).
+            // The FO is the load: after import every FO rides exactly one truck
+            // (Import.html hands a convoy's surplus trucks to the following
+            // FOs rather than piling them on the anchor), so one FO = one crew
+            // = one waybill. Split shares are suffixed (e.g. "437463/B") and
+            // key separately — a share is a different truck. Null = no FO #,
+            // i.e. a group of one. Shared by the board and the exports so the
+            // two can't drift apart.
+            function foKey(t) {
+                return t && t.foNumber
+                    ? t.foNumber + "-" + (t.foSplitSuffix || "")
+                    : null;
+            }
+
+            // Keeps every row of a group adjacent: each member sorts to where
+            // the group's FIRST member landed, ties broken by incoming order.
+            // Rows with a null key keep their own position.
+            function clusterBy(list, keyOf) {
+                const idx = new Map(list.map((t, i) => [t.id, i]));
+                const anchor = {};
+                list.forEach((t, i) => {
+                    const k = keyOf(t);
+                    if (k && !(k in anchor)) anchor[k] = i;
+                });
+                const at = (t) => {
+                    const k = keyOf(t);
+                    return k ? anchor[k] : idx.get(t.id);
+                };
+                return [...list].sort(
+                    (a, b) => at(a) - at(b) || idx.get(a.id) - idx.get(b.id),
+                );
+            }
+
+            // Day order: the dispatcher's sortOrder, then clustered so a load's
+            // rows sit together and a convoy's loads sit together. Clustering
+            // is applied on every read, so no drag can leave a load's rows
+            // scattered — the board's merged cells depend on that adjacency.
+            // Convoy runs last because it is the larger unit (a convoy contains
+            // whole FOs); its stable tie-break preserves the FO clustering.
+            function orderedDayTrips(trips) {
+                const list = [...(trips || [])].sort((a, b) => {
+                    const sa = a.sortOrder == null ? Infinity : a.sortOrder;
+                    const sb = b.sortOrder == null ? Infinity : b.sortOrder;
+                    return sa - sb || a.id - b.id;
+                });
+                return clusterBy(clusterBy(list, foKey), (t) =>
+                    t.convoyGroup ? "cg-" + t.convoyGroup : null,
+                );
             }
 
             function indexById(arr) {

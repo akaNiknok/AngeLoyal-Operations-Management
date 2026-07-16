@@ -188,7 +188,7 @@ The core transactional table of the system. Each row tracks an individual delive
 | Driver ID | Number | Foreign Key → Employees.ID pointing to the operating driver |
 | Helper IDs | String | Comma-separated Employee IDs for assigned crew; Nullable |
 | Truck Billing Category | String | Historical snapshot of the vehicle's billing class at the exact moment of dispatch |
-| Trip Status | String | Current execution state: Prepping, Scheduled, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
+| Trip Status | String | Current execution state: Prepping, Backlog, Scheduled, Preload, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
 | Parent Trip ID | Number | Foreign Key → Trips.ID. Points to the initiating record for all redeliveries or foul trip tracking |
 | Source | String | Generation origin: Import, Manual, or Carry-over |
 | Tier | Number | Client priority ranking (1, 2, 3); Nullable for manual entries |
@@ -198,12 +198,15 @@ The core transactional table of the system. Each row tracks an individual delive
 | Added By | String | Email address of the user who generated the record |
 | Added At | DateTime | Creation timestamp |
 | Convoy Group | String | Token grouping trips whose trucks must travel together (convoys / split loads); unique within a Trip Date; Nullable (blank = not in a convoy) |
+| Sort Order | Number | Manual display/route order within a Trip Date, set by dragging rows on the dispatch board; Nullable (blank sorts last) |
 
 #### **Status & Carry-Over Workflow**
 
 ```
 Prepping (imported, pre-waybill — dispatcher merges/splits/reassigns freely)
   → Scheduled (day promoted via markDayScheduled; waybills suggested)
+  → Backlog (day promoted but still no crew — no waybill; carries over to the
+             next business day as a fresh Prepping trip)
 Scheduled
   → Preload (goods loaded onto the truck, not yet delivered)
       → Delivered
@@ -215,16 +218,19 @@ Scheduled
       → Two-Day Trip (spans 2 days, single billing, covers both days)
 ```
 
-When a trip status transitions to `Foul Trip - For Redeliver` or `Redeliver`, the system automatically inserts a new row into the Trips log for the following business day using these parameters:
+When a trip status transitions to `Foul Trip - For Redeliver`, `Redeliver`, or `Backlog`, the system automatically inserts a new row into the Trips log for the following business day using these parameters:
 
 * Trip Date \= Next business day
 * Billing Date \= Preserves the original initiating trip's Billing Date
 * Parent Trip ID \= Links back to the original trip's ID
 * Source \= Carry-over
+* Trip Status \= Scheduled, or Prepping for a `Backlog` carry-over (it still needs a crew, and gets no suggested waybill)
 
 ### **Sheet 9: Route Frequency Log**
 
-An append-only table compiled automatically upon saving any trip. It acts as the data source for real-time compliance alerts regarding driver delivery frequencies.
+An append-only table recording the driver-outlet assignments that were actually scheduled. It acts as the data source for real-time compliance alerts regarding driver delivery frequencies.
+
+A trip is logged when it **leaves Prepping** — via `markDayScheduled`, a manual status change, or creation at a status other than Prepping (manual trips and carry-overs, which are born Scheduled). Imported trips log nothing at import: their crew comes from the truck's default assignment and the dispatcher reshuffles it freely during Prepping, so logging then would credit drivers for trips they never took. Reassigning the driver of an already-scheduled trip appends another row.
 
 | Column | Type | Notes |
 | :---- | :---- | :---- |

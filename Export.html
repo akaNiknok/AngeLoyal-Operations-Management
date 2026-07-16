@@ -44,36 +44,21 @@
              * row that carries the driver/helper/waybill/plate annotations.
              */
             function buildFinalRouteModel() {
-                const trips = [...((dispatchData && dispatchData.trips) || [])];
+                // orderedDayTrips (Core.html) is the single source of truth for
+                // day order — the board and the export must always agree.
+                const trips = orderedDayTrips(
+                    (dispatchData && dispatchData.trips) || [],
+                );
                 const outletMap = indexById(outlets);
                 const truckMap = indexById(trucks);
                 const empMap = indexById(employees);
 
-                const boardIdx = new Map(trips.map((t, i) => [t.id, i]));
-                const groupAnchor = {};
-                const foAnchor = {};
-                trips.forEach((t, i) => {
-                    if (t.convoyGroup && !(t.convoyGroup in groupAnchor))
-                        groupAnchor[t.convoyGroup] = i;
-                    const fk = t.foNumber || "t" + t.id;
-                    if (!(fk in foAnchor)) foAnchor[fk] = i;
-                });
-                const sortKey = (t) =>
-                    t.convoyGroup
-                        ? groupAnchor[t.convoyGroup]
-                        : foAnchor[t.foNumber || "t" + t.id];
-                trips.sort(
-                    (a, b) =>
-                        sortKey(a) - sortKey(b) ||
-                        boardIdx.get(a.id) - boardIdx.get(b.id),
-                );
-
                 const seenLoad = new Set();
                 return trips.map((t) => {
-                    const loadKey =
-                        (t.foNumber || "t" + t.id) +
-                        "|" +
-                        (t.truckId || "t" + t.id);
+                    // Same load key as the dispatch board (Core.html) — the
+                    // export's annotated "load start" rows and the board's
+                    // merged cells must mark out the same loads.
+                    const loadKey = foKey(t) || "t" + t.id;
                     const loadStart = !seenLoad.has(loadKey);
                     seenLoad.add(loadKey);
 
@@ -148,8 +133,7 @@
                 let prevLoadKey = null;
                 rows.forEach((r) => {
                     const t = r.trip;
-                    const loadKey =
-                        (t.foNumber || "t" + t.id) + "|" + (t.truckId || "t" + t.id);
+                    const loadKey = foKey(t) || "t" + t.id;
                     if (prevLoadKey !== null && loadKey !== prevLoadKey)
                         batchParity ^= 1;
                     prevLoadKey = loadKey;
@@ -252,10 +236,7 @@
                         byKey[key] = card;
                         cards.push(card);
                     }
-                    const legKey =
-                        (t.foNumber || "t" + t.id) +
-                        "|" +
-                        (t.truckId || "t" + t.id);
+                    const legKey = foKey(t) || "t" + t.id;
                     if (!card.legKeys[legKey]) {
                         card.legKeys[legKey] = true;
                         card.legs.push({

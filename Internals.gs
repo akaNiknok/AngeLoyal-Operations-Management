@@ -202,7 +202,12 @@ function _deleteSuggestedWaybillsForTrip(tripId) {
 
 /**
  * Creates a carry-over trip for the next business day.
- * Called automatically when a trip is marked as Redeliver or Foul Trip - For Redeliver.
+ * Called automatically when a trip is marked as Redeliver, Foul Trip - For
+ * Redeliver, or Backlog.
+ *
+ * A Backlog trip never left the yard (no crew at the scheduling cutoff), so it
+ * has no waybill to carry a suffix from and re-enters the next day's planning
+ * phase as Prepping instead of Scheduled.
  *
  * @param {Array}  originalRow   The raw row array from the Trips sheet
  * @param {Array}  headers       The header row array
@@ -213,12 +218,13 @@ function _deleteSuggestedWaybillsForTrip(tripId) {
 function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason) {
   const nextDay = _nextBusinessDay(new Date());
   const nextDayStr = _formatDate(nextDay);
+  const isBacklog = statusReason === 'Backlog';
 
   // Determine waybill type for the new trip's suggested waybill
   const waybillType = statusReason === 'Redeliver' ? 'Redeliver' : 'Foul Trip';
 
   // Find the confirmed waybill for the original trip (to get prefix and parent ID)
-  const wbs           = getWaybillsForTrip(originalTripId);
+  const wbs           = isBacklog ? [] : getWaybillsForTrip(originalTripId);
   const confirmedWb   = wbs.find(w => w.locked) || wbs[0];
   const prefixId      = confirmedWb ? confirmedWb.prefixId : null;
   const parentWbId    = confirmedWb ? confirmedWb.id       : null;
@@ -255,7 +261,7 @@ function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason
     driverId,
     helperIds.join(','),
     billingCat,
-    'Scheduled',     // New trip starts as Scheduled
+    isBacklog ? 'Prepping' : 'Scheduled',
     originalTripId,  // Parent Trip ID
     'Carry-over',
     tier,

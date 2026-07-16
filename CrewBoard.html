@@ -105,17 +105,45 @@
                 e.dataTransfer.setData("text/plain", String(truckId));
                 e.dataTransfer.effectAllowed = "move";
             }
-            function cbDragOver(e) {
-                e.preventDefault();
-                e.currentTarget.classList.add("cb-drop-hover");
+            // The rows a crew drop actually writes: a multi-selection if the
+            // hovered row is in one, else the row's whole load (assignCrew
+            // covers every row of the FO — it never assigns half a load).
+            // Highlighting the hovered row alone would under-promise on a
+            // merged load, and tint only the slice of a merged cell sitting
+            // over that row.
+            function cbDropTargetIds(tripId) {
+                return selectedForGroup.has(tripId) && selectedForGroup.size > 1
+                    ? [...selectedForGroup]
+                    : loadBlockIds(tripId);
             }
-            function cbDragLeave(e) {
-                e.currentTarget.classList.remove("cb-drop-hover");
+            function cbClearDropHover() {
+                document
+                    .querySelectorAll(".cb-drop-hover")
+                    .forEach((el) => el.classList.remove("cb-drop-hover"));
+            }
+            function cbDragOver(e, tripId) {
+                e.preventDefault();
+                cbClearDropHover();
+                cbDropTargetIds(tripId).forEach((id) =>
+                    document
+                        .querySelector(`tr[data-tid="${id}"]`)
+                        ?.classList.add("cb-drop-hover"),
+                );
+            }
+            function cbDragLeave() {
+                cbClearDropHover();
             }
             function cbTripDrop(e, tripId) {
                 e.preventDefault();
-                e.currentTarget.classList.remove("cb-drop-hover");
+                cbClearDropHover();
                 const truckId = Number(e.dataTransfer.getData("text/plain"));
-                if (truckId) assignCrew(tripId, truckId);
+                if (!truckId) return;
+                // Dropping onto a row that's part of a multi-selection
+                // assigns the same crew to every selected trip.
+                if (selectedForGroup.has(tripId) && selectedForGroup.size > 1) {
+                    selectedForGroup.forEach((id) => assignCrew(id, truckId));
+                } else {
+                    assignCrew(tripId, truckId);
+                }
             }
         </script>

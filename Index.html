@@ -197,6 +197,7 @@
                         type="date"
                         id="dispatch-date"
                         style="width: 140px"
+                        onchange="loadDispatch(true)"
                     />
                     <button
                         class="btn btn-ghost btn-sm"
@@ -256,6 +257,17 @@
                         </button>
                     </div>
                     <div class="tb-spacer"></div>
+                    <span
+                        id="selection-count"
+                        class="selection-count"
+                        style="display: none"
+                    ></span>
+                    <select
+                        class="cell-select"
+                        id="bulk-status"
+                        style="display: none; width: 140px"
+                        onchange="bulkChangeStatus(this.value); this.selectedIndex = 0;"
+                    ></select>
                     <button
                         class="btn btn-ghost btn-sm"
                         id="btn-group-convoy"
@@ -354,7 +366,7 @@
                 <!-- Stat bar -->
                 <div class="stat-bar">
                     <div class="stat-cell">
-                        <div class="stat-label">Total trips</div>
+                        <div class="stat-label">Total drops</div>
                         <div class="stat-val blue" id="ds-total">—</div>
                     </div>
                     <div class="stat-cell">
@@ -392,6 +404,10 @@
                 <div class="dispatch-layout">
                     <!-- Main table -->
                     <div class="dispatch-main">
+                        <div class="board-loading" id="dispatch-loading">
+                            <div class="spinner"></div>
+                            <div class="loading-text">Loading trips…</div>
+                        </div>
                         <div class="table-wrap" id="dispatch-table-wrap">
                             <div class="empty-board" id="dispatch-empty">
                                 <div class="icon">📋</div>
@@ -409,6 +425,12 @@
                                 <thead>
                                     <tr>
                                         <th style="width: 110px">FO #</th>
+                                        <th
+                                            style="width: 90px"
+                                            title="Requested Delivery Date"
+                                        >
+                                            RDD
+                                        </th>
                                         <th style="width: 110px">
                                             Cust. Grp.
                                         </th>
@@ -710,6 +732,12 @@
                         oninput="renderTrucksAdmin()"
                         style="width: 220px"
                     />
+                    <select
+                        id="trucks-category-filter"
+                        onchange="renderTrucksAdmin()"
+                    >
+                        <option value="">All categories</option>
+                    </select>
                     <span class="tb-label" id="trucks-count"></span>
                     <label
                         class="tb-label"
@@ -762,6 +790,15 @@
                         oninput="renderEmployeesAdmin()"
                         style="width: 220px"
                     />
+                    <select
+                        id="employees-role-filter"
+                        onchange="renderEmployeesAdmin()"
+                    >
+                        <option value="">All roles</option>
+                        <option value="Driver">Driver</option>
+                        <option value="Helper">Helper</option>
+                        <option value="Driver-Helper">Driver-Helper</option>
+                    </select>
                     <span class="tb-label" id="employees-count"></span>
                     <label
                         class="tb-label"
@@ -1025,10 +1062,12 @@
                     <div class="form-row">
                         <div id="mds-summary" style="font-size: 13px"></div>
                         <span class="form-hint"
-                            >Promotes every Prepping trip on this date to
+                            >Promotes every crewed Prepping trip on this date to
                             Scheduled and suggests waybill numbers — one per
-                            truck load (same FO + same truck share a
-                            waybill).</span
+                            truck load (same FO + same truck share a waybill).
+                            Prepping trips still without a crew are marked
+                            Backlog and carried over to the next business
+                            day.</span
                         >
                     </div>
                     <div class="form-row">

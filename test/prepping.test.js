@@ -28,6 +28,7 @@ function preppingSheets(tripRows, extra = {}) {
       Trips: [HEADERS.Trips.slice(), ...tripRows],
       Waybills: emptySheet('Waybills'),
       'Waybill Prefixes': [HEADERS['Waybill Prefixes'].slice(), [1, 'AL', 'AngeLoyal', 40]],
+      'Route Frequency Log': emptySheet('Route Frequency Log'),
       'Audit Log': emptySheet('Audit Log'),
     },
     extra
@@ -41,13 +42,13 @@ function asDispatcher(sheets) {
 test('markDayScheduled promotes Prepping trips of the date and suggests grouped waybills', () => {
   // FO-1 on truck 3: two drops -> one shared waybill.
   // FO-1 on truck 4: split load -> own waybill.
-  // FO-2 unassigned: own waybill.
+  // FO-2 on truck 5: own waybill.
   const { api, ss } = asDispatcher(
     preppingSheets([
       tripRow({ ID: 1, 'FO Number': 'FO-1', 'Truck ID': 3 }),
       tripRow({ ID: 2, 'FO Number': 'FO-1', 'Truck ID': 3 }),
       tripRow({ ID: 3, 'FO Number': 'FO-1', 'Truck ID': 4 }),
-      tripRow({ ID: 4, 'FO Number': 'FO-2' }),
+      tripRow({ ID: 4, 'FO Number': 'FO-2', 'Truck ID': 5 }),
     ])
   );
 
@@ -70,12 +71,34 @@ test('markDayScheduled promotes Prepping trips of the date and suggests grouped 
   assert.deepEqual(Object.values(byTrip).sort(), ['AL-41', 'AL-41', 'AL-42', 'AL-43'].sort());
 });
 
+test('markDayScheduled logs route frequency for promoted trips with a driver + outlet', () => {
+  const { api, ss } = asDispatcher(
+    preppingSheets([
+      tripRow({ ID: 1, 'FO Number': 'FO-1', 'Truck ID': 3, 'Driver ID': 9, 'Outlet ID': 12 }),
+      tripRow({ ID: 2, 'FO Number': 'FO-2', 'Truck ID': 4, 'Driver ID': 10, 'Outlet ID': 13 }),
+      tripRow({ ID: 3, 'FO Number': 'FO-3', 'Truck ID': 5, 'Outlet ID': 14 }),   // no driver
+      tripRow({ ID: 4, 'FO Number': 'FO-4', 'Driver ID': 9 }),                   // no outlet
+      tripRow({ ID: 5, 'FO Number': 'FO-5', 'Driver ID': 9, 'Outlet ID': 15, 'Trip Date': '6/17/2026' }),
+    ])
+  );
+
+  api.markDayScheduled('6/16/2026', 1);
+
+  const { headers, rows } = dump(ss, 'Route Frequency Log');
+  const logged = rows.map((r) => rowObject(headers, r));
+  assert.equal(logged.length, 2);   // trips 3, 4 incomplete; trip 5 is another date
+  assert.deepEqual(logged.map((f) => Number(f['Trip ID'])).sort(), [1, 2]);
+  assert.deepEqual(logged.map((f) => f['Trip Date']), ['6/16/2026', '6/16/2026']);
+  assert.equal(Number(logged[0]['Driver ID']), 9);
+  assert.equal(Number(logged[0]['Outlet ID']), 12);
+});
+
 test('markDayScheduled leaves other dates and non-Prepping trips alone', () => {
   const { api, ss } = asDispatcher(
     preppingSheets([
-      tripRow({ ID: 1, 'FO Number': 'FO-1' }),
-      tripRow({ ID: 2, 'FO Number': 'FO-2', 'Trip Date': '6/17/2026' }),          // other date
-      tripRow({ ID: 3, 'FO Number': 'FO-3', 'Trip Status': 'Delivered' }),        // not Prepping
+      tripRow({ ID: 1, 'FO Number': 'FO-1', 'Truck ID': 3 }),
+      tripRow({ ID: 2, 'FO Number': 'FO-2', 'Truck ID': 4, 'Trip Date': '6/17/2026' }), // other date
+      tripRow({ ID: 3, 'FO Number': 'FO-3', 'Truck ID': 5, 'Trip Status': 'Delivered' }), // not Prepping
     ])
   );
 
@@ -88,26 +111,43 @@ test('markDayScheduled leaves other dates and non-Prepping trips alone', () => {
   assert.equal(dump(ss, 'Waybills').rows.length, 1);
 });
 
-test('markDayScheduled trips of one FO with no truck share one waybill', () => {
-  // ponytail-documented delta: unassigned slots of an FO collapse to one
-  // waybill at promotion (Prepping exists so trucks get assigned first).
+test('markDayScheduled marks crewless Prepping trips Backlog and carries them over', () => {
   const { api, ss } = asDispatcher(
     preppingSheets([
-      tripRow({ ID: 1, 'FO Number': 'FO-1' }),
-      tripRow({ ID: 2, 'FO Number': 'FO-1' }),
+      tripRow({ ID: 1, 'FO Number': 'FO-1', 'Truck ID': 3, 'Driver ID': 9, 'Outlet ID': 12 }),
+      tripRow({ ID: 2, 'FO Number': 'FO-2', 'Outlet ID': 13 }),   // no crew
     ])
   );
+
   const res = api.markDayScheduled('6/16/2026', 1);
-  assert.equal(res.waybillsSuggested, 1);
+  assert.equal(res.success, true);
+  assert.equal(res.promoted, 1);
+  assert.equal(res.backlogged, 1);
+  assert.equal(res.waybillsSuggested, 1);   // only the crewed trip
+  assert.equal(res.newTripIds.length, 1);
+
+  const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
+  assert.equal(trips.find((t) => Number(t.ID) === 1)['Trip Status'], 'Scheduled');
+  assert.equal(trips.find((t) => Number(t.ID) === 2)['Trip Status'], 'Backlog');
+
+  // The carry-over re-enters the next day's planning phase, un-waybilled.
+  const carried = trips.find((t) => Number(t.ID) === res.newTripIds[0]);
+  assert.equal(carried['Trip Status'], 'Prepping');
+  assert.equal(carried.Source, 'Carry-over');
+  assert.equal(Number(carried['Parent Trip ID']), 2);
+  assert.equal(carried['FO Number'], 'FO-2');
+  assert.equal(carried['Billing Date'], '6/16/2026');     // original day preserved
+  assert.notEqual(carried['Trip Date'], '6/16/2026');
+
   const wbs = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
-  assert.equal(wbs[0]['Waybill Number'], wbs[1]['Waybill Number']);
+  assert.deepEqual(wbs.map((w) => Number(w['Trip ID'])), [1]);
 });
 
 test('markDayScheduled gives blank-FO trips their own waybills', () => {
   const { api, ss } = asDispatcher(
     preppingSheets([
-      tripRow({ ID: 1 }),
-      tripRow({ ID: 2 }),
+      tripRow({ ID: 1, 'Truck ID': 3 }),
+      tripRow({ ID: 2, 'Truck ID': 4 }),
     ])
   );
   const res = api.markDayScheduled('6/16/2026', 1);
@@ -119,7 +159,7 @@ test('markDayScheduled gives blank-FO trips their own waybills', () => {
 test('markDayScheduled skips trips that already have a waybill (idempotent-ish)', () => {
   const { api, ss } = asDispatcher(
     preppingSheets(
-      [tripRow({ ID: 1, 'FO Number': 'FO-1' })],
+      [tripRow({ ID: 1, 'FO Number': 'FO-1', 'Truck ID': 3 })],
       { Waybills: [HEADERS.Waybills.slice(), [9, 'AL-40', 1, 40, 1, 'FO-1', 'Regular', '', 'Suggested', false, '', '']] }
     )
   );
@@ -153,8 +193,8 @@ test('markDayScheduled fails cleanly for an unknown prefix', () => {
 test('markDayScheduled writes batched TRIP_STATUS_CHANGE audit rows', () => {
   const { api, ss } = asDispatcher(
     preppingSheets([
-      tripRow({ ID: 1, 'FO Number': 'FO-1' }),
-      tripRow({ ID: 2, 'FO Number': 'FO-2' }),
+      tripRow({ ID: 1, 'FO Number': 'FO-1', 'Truck ID': 3 }),
+      tripRow({ ID: 2, 'FO Number': 'FO-2', 'Truck ID': 4 }),
     ])
   );
   api.markDayScheduled('6/16/2026', 1);

@@ -85,6 +85,24 @@
                 reader.readAsArrayBuffer(file);
             }
 
+            /** Groups truck units (['L300','L300','6W']) back into slots. */
+            function slotsFromUnits(units) {
+                const out = [];
+                units.forEach((t) => {
+                    const hit = out.find((s) => s.type === t);
+                    if (hit) hit.count++;
+                    else out.push({ type: t, count: 1 });
+                });
+                return out;
+            }
+
+            /** "2×L300, 6W" — the preview's Type column. */
+            function displayFromSlots(slots) {
+                return slots
+                    .map((s) => (s.count > 1 ? `${s.count}×${s.type}` : s.type))
+                    .join(", ");
+            }
+
             /**
              * Parses the raw Rebisco route file rows into structured trip objects.
              * The Rebisco file has a fixed header row; we find it by looking for "FREIGHT ORDER".
@@ -228,11 +246,7 @@
                 let lastRowType = "";
                 result.forEach((r) => {
                     if (r.slots.length) {
-                        r.displayType = r.slots
-                            .map((s) =>
-                                s.count > 1 ? `${s.count}×${s.type}` : s.type,
-                            )
-                            .join(", ");
+                        r.displayType = displayFromSlots(r.slots);
                         lastRowType = r.slots[0].type;
                         if (r.foNumber)
                             primaryTypeByFO[r.foNumber] = lastRowType;
@@ -273,8 +287,6 @@
                     });
                     if (units.length <= 1) return;
 
-                    r.slots = [{ type: units[0], count: 1 }];
-                    r.displayType = units[0];
                     let unitIdx = 1;
                     for (
                         let j = i + 1;
@@ -289,6 +301,13 @@
                         cand.displayType = units[unitIdx];
                         unitIdx++;
                     }
+                    // Anchor keeps its own truck PLUS any surplus that found no
+                    // recipient row (short blank run) — assigning the anchor
+                    // before placing would silently drop those trucks. The
+                    // dispatcher re-seats them on the board; importRouteFile
+                    // expands count>1 into one trip per truck.
+                    r.slots = slotsFromUnits([units[0], ...units.slice(unitIdx)]);
+                    r.displayType = displayFromSlots(r.slots);
                 });
                 return result;
             }
@@ -488,7 +507,10 @@
                         // names show blank on the Dispatch board until reload.
                         (r.newOutlets || []).forEach((o) => outlets.push(o));
                         clearImport();
-                        // Switch to dispatch for the imported date
+                        // Switch to dispatch for the imported date. Drop that
+                        // date's dispatch cache first — the panel switch paints
+                        // from cache, which doesn't have the new trips yet.
+                        delete dispatchCache[isoToMDY(dateVal)];
                         document.getElementById("dispatch-date").value =
                             dateVal;
                         switchPanel("dispatch");

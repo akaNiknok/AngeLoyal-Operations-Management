@@ -104,6 +104,15 @@ class FakeRange {
     return this;
   }
 
+  clearContent() {
+    for (let r = 0; r < this.numRows; r++) {
+      const srcRow = this.sheet.data[this.row - 1 + r];
+      if (!srcRow) continue;
+      for (let c = 0; c < this.numCols; c++) srcRow[this.col - 1 + c] = '';
+    }
+    return this;
+  }
+
   setValues(vals) {
     for (let r = 0; r < vals.length; r++) {
       const tr = this.row - 1 + r;
@@ -134,6 +143,10 @@ class FakeSheet {
     return this.data.length;
   }
 
+  getLastColumn() {
+    return this._width();
+  }
+
   getDataRange() {
     return new FakeRange(this, 1, 1, this.data.length, this._width());
   }
@@ -161,6 +174,10 @@ class FakeSpreadsheet {
 
   getSheetByName(name) {
     return this.sheets[name] || null;
+  }
+
+  getSheets() {
+    return Object.values(this.sheets);
   }
 
   insertSheet(name) {
@@ -229,6 +246,16 @@ function makeEnv(opts = {}) {
       getScriptProperties: () => ({
         getProperty: (k) => (opts.scriptProperties || {})[k] || null,
       }),
+    },
+    ContentService: {
+      MimeType: { JSON: 'JSON' },
+      createTextOutput: (text) => {
+        const output = {
+          getContent: () => text,
+          setMimeType: () => output,
+        };
+        return output;
+      },
     },
     UrlFetchApp: {
       fetch: (url, params) => {

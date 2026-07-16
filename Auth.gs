@@ -223,6 +223,8 @@ const RPC_ALLOWED = {
   // writers
   createTrip: true,
   saveTripChanges: true,
+  bulkSetTripStatus: true,
+  reorderTrips: true,
   confirmWaybill: true,
   importRouteFile: true,
   deleteImportedTrip: true,

@@ -13,7 +13,8 @@
  * Creates a new trip row from a Rebisco import payload.
  * Also auto-seeds the Outlets sheet with any new outlet names.
  * Also writes a suggested waybill row.
- * Also appends to Route Frequency Log.
+ * Also appends to Route Frequency Log — unless the trip is created 'Prepping',
+ * in which case markDayScheduled logs it at promotion.
  *
  * @param {Object} tripData  Fields matching the Trips sheet columns.
  * @returns {{ success: boolean, tripId: number, waybillSuggested: string } | { success: false, error: string }}
@@ -40,6 +41,7 @@ function createTrip(tripData) {
 
     const tripDate    = tripData.tripDate    || _formatDate(now);
     const billingDate = tripData.billingDate || tripDate;
+    const tripStatus  = tripData.tripStatus  || 'Scheduled';
 
     sheet.appendRow([
       nextId,
@@ -56,7 +58,7 @@ function createTrip(tripData) {
       tripData.driverId        || '',
       Array.isArray(tripData.helperIds) ? tripData.helperIds.join(',') : (tripData.helperIds || ''),
       truckBillingCategory,
-      tripData.tripStatus      || 'Scheduled',
+      tripStatus,
       tripData.parentTripId    || '',
       tripData.source          || 'Manual',
       tripData.tier            || '',
@@ -75,8 +77,9 @@ function createTrip(tripData) {
       waybillSuggested = wb.waybillNumber;
     }
 
-    // 5. Append to Route Frequency Log if driver and outlet are set
-    if (tripData.driverId && outletId) {
+    // 5. Append to Route Frequency Log — only once the trip is out of Prepping;
+    //    a Prepping trip's crew is still being shuffled (markDayScheduled logs it).
+    if (tripStatus !== 'Prepping' && tripData.driverId && outletId) {
       _appendRouteFrequency(nextId, tripDate, tripData.driverId, outletId);
     }
 
@@ -99,8 +102,8 @@ function createTrip(tripData) {
  *   driver/outlet combo and returns a `routeFrequencyWarning` if the
  *   driver will have been assigned to this outlet more than 5 times in
  *   the last 21 days (per schema rule), then logs the new assignment.
- * - If `tripStatus` becomes 'Foul Trip - For Redeliver' or 'Redeliver',
- *   creates the next-day carry-over trip as before.
+ * - If `tripStatus` becomes 'Foul Trip - For Redeliver', 'Redeliver' or
+ *   'Backlog', creates the next-day carry-over trip as before.
  *
  * @param {number} tripId
  * @param {Object} changes  Any of: { truckId, driverId, helperIds, tripStatus, remarks }
@@ -164,13 +167,21 @@ function saveTripChanges(tripId, changes) {
       _auditLog('TRIP_STATUS_CHANGE', SHEET_TRIPS, tripId, oldStatus, changes.tripStatus);
     }
 
-    // Route frequency check + log if driver changed
+    // Route frequency check + log. A trip only counts once it's out of Prepping:
+    // imported trips land Prepping and get reassigned freely, so logging earlier
+    // credits drivers for trips they never took. Logged on the transition out of
+    // Prepping (this endpoint or markDayScheduled), and on later driver changes.
+    const newStatus     = changes.tripStatus !== undefined ? changes.tripStatus : oldStatus;
+    const newDriverId   = changes.driverId   !== undefined ? changes.driverId   : oldDriverId;
+    const justScheduled = oldStatus === 'Prepping' && newStatus !== 'Prepping';
+    const driverChanged = changes.driverId !== undefined && changes.driverId !== oldDriverId;
+
     let routeFrequencyWarning = null;
-    if (changes.driverId !== undefined && changes.driverId !== oldDriverId && changes.driverId) {
+    if (newStatus !== 'Prepping' && newDriverId && (justScheduled || driverChanged)) {
       const outletId = _numOrNull(_val(row, headers, 'Outlet ID'));
       const tripDate = _formatDate(_readDateCell(_val(row, headers, 'Trip Date')));
       if (outletId) {
-        const freq     = getRouteFrequencyForDriver(changes.driverId);
+        const freq     = getRouteFrequencyForDriver(newDriverId);
         const existing = freq.find(f => f.outletId === Number(outletId));
         const newCount = (existing ? existing.count : 0) + 1;
         if (newCount > 5) {
@@ -179,13 +190,13 @@ function saveTripChanges(tripId, changes) {
             count:      newCount,
           };
         }
-        _appendRouteFrequency(tripId, tripDate, changes.driverId, outletId);
+        _appendRouteFrequency(tripId, tripDate, newDriverId, outletId);
       }
     }
 
     // Carry-over: create a follow-up trip for next business day
     let newTripId = null;
-    const carryoverStatuses = ['Foul Trip - For Redeliver', 'Redeliver'];
+    const carryoverStatuses = ['Foul Trip - For Redeliver', 'Redeliver', 'Backlog'];
     if (changes.tripStatus !== undefined && carryoverStatuses.includes(changes.tripStatus)) {
       newTripId = _createCarryoverTrip(row, headers, tripId, changes.tripStatus);
     }
@@ -216,6 +227,38 @@ function saveTripChanges(tripId, changes) {
   }
 }
 
+/**
+ * Sets Trip Status on multiple trips in one call (bulk row-selection action
+ * on the dispatch board). Reuses saveTripChanges per trip so the carry-over
+ * spawn (_createCarryoverTrip), audit trail, and route-frequency check all
+ * fire exactly as they do for a single-trip status change.
+ *
+ * @param {number[]} tripIds
+ * @param {string}   status
+ * @returns {{ success: true, updated: number, newTripIds: number[] } | { success: false, error: string }}
+ */
+function bulkSetTripStatus(tripIds, status) {
+  _requirePermission('ASSIGN_CREW');
+  try {
+    const ids = (tripIds || []).map(Number).filter(Boolean);
+    if (ids.length === 0) throw new Error('No trips selected.');
+
+    const newTripIds = [];
+    let updated = 0;
+    ids.forEach(id => {
+      const r = saveTripChanges(id, { tripStatus: status });
+      if (r && r.success) {
+        updated++;
+        if (r.newTripId) newTripIds.push(r.newTripId);
+      }
+    });
+
+    return { success: true, updated: updated, newTripIds: newTripIds };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 
 // ============================================================
 //  DATA WRITERS — Waybills
@@ -225,9 +268,16 @@ function saveTripChanges(tripId, changes) {
  * Confirms a waybill number (locking it permanently).
  * The dispatcher may pass a custom number; the system checks for duplicates.
  *
- * @param {number} waybillId          The ID of the Suggested waybill row.
+ * A multi-stop load has ONE waybill spread over one Waybill row per trip, all
+ * carrying the same number/prefix/sequence (see `_suggestWaybillsForGroups`).
+ * They are a single waybill, so confirming locks every row of it — confirming
+ * one at a time would leave the rest of the load Suggested, and a second call
+ * carrying the same custom number would trip the duplicate check below.
+ *
+ * @param {number} waybillId          The ID of any Suggested row of the waybill.
  * @param {string} [customNumber]     If provided, use this instead of the suggested number.
- * @returns {{ success: boolean, waybillNumber: string } | { success: false, error: string }}
+ * @returns {{ success: boolean, waybillNumber: string, confirmed: number }
+ *           | { success: false, error: string }}
  */
 function confirmWaybill(waybillId, customNumber) {
   _requirePermission('CONFIRM_WAYBILL');
@@ -244,15 +294,30 @@ function confirmWaybill(waybillId, customNumber) {
       throw new Error(`Waybill ${_val(row, headers, 'Waybill Number')} is already confirmed and locked.`);
     }
 
-    let finalNumber = _val(row, headers, 'Waybill Number');
-    const prefixId  = _numOrNull(_val(row, headers, 'Prefix ID'));
-    let seqNumber   = _numOrNull(_val(row, headers, 'Sequence Number'));
+    const origNumber = _val(row, headers, 'Waybill Number');
+    let finalNumber  = origNumber;
+    const prefixId   = _numOrNull(_val(row, headers, 'Prefix ID'));
+    let seqNumber    = _numOrNull(_val(row, headers, 'Sequence Number'));
+
+    // Every unlocked row of THIS waybill (same number + prefix + sequence).
+    // An already-locked sibling is left alone rather than re-confirmed.
+    const groupIdxs = [];
+    for (let i = 1; i < rows.length; i++) {
+      if (_val(rows[i], headers, 'Waybill Number') === origNumber
+          && _numOrNull(_val(rows[i], headers, 'Prefix ID')) === prefixId
+          && _numOrNull(_val(rows[i], headers, 'Sequence Number')) === seqNumber
+          && !_isTrue(_val(rows[i], headers, 'Locked'))) {
+        groupIdxs.push(i);
+      }
+    }
+    if (groupIdxs.indexOf(rowIdx) === -1) groupIdxs.push(rowIdx);
 
     // If dispatcher provided a custom number, validate and parse it
     if (customNumber && customNumber !== finalNumber) {
-      // Check for duplicate confirmed waybills
+      // Check for duplicate confirmed waybills. This waybill's own rows are not
+      // duplicates of each other — sharing the number is the point.
       const isDuplicate = rows.slice(1).some((r, i) => {
-        if (i === rowIdx - 1) return false; // skip current row
+        if (groupIdxs.indexOf(i + 1) !== -1) return false; // this waybill's own rows
         return _val(r, headers, 'Waybill Number') === customNumber
             && _isTrue(_val(r, headers, 'Locked'));
       });
@@ -266,19 +331,23 @@ function confirmWaybill(waybillId, customNumber) {
 
       // Log the override
       _auditLog('WAYBILL_OVERRIDE', SHEET_WAYBILLS, waybillId,
-        _val(row, headers, 'Waybill Number'), finalNumber);
+        origNumber, finalNumber);
     }
 
-    // Lock the row — single batched write for all 6 fields
+    // Lock every row of the waybill — batched write per row, 6 fields each
     const email = _getCurrentUserEmail();
     const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
-    _writeRowFields(sheet, row, rowIdx, headers, {
-      'Waybill Number':  finalNumber,
-      'Sequence Number': seqNumber,
-      'Status':          'Confirmed',
-      'Locked':          true,
-      'Confirmed By':    email,
-      'Confirmed At':    now,
+    groupIdxs.forEach(i => {
+      _writeRowFields(sheet, rows[i], i, headers, {
+        'Waybill Number':  finalNumber,
+        'Sequence Number': seqNumber,
+        'Status':          'Confirmed',
+        'Locked':          true,
+        'Confirmed By':    email,
+        'Confirmed At':    now,
+      });
+      _auditLog('WAYBILL_CONFIRM', SHEET_WAYBILLS,
+        _numOrNull(_val(rows[i], headers, 'ID')), 'Suggested', finalNumber);
     });
 
     // Update Last Sequence Number in Waybill Prefixes
@@ -286,9 +355,7 @@ function confirmWaybill(waybillId, customNumber) {
       _updateWaybillPrefixSequence(prefixId, seqNumber);
     }
 
-    _auditLog('WAYBILL_CONFIRM', SHEET_WAYBILLS, waybillId, 'Suggested', finalNumber);
-
-    return { success: true, waybillNumber: finalNumber };
+    return { success: true, waybillNumber: finalNumber, confirmed: groupIdxs.length };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -419,16 +486,13 @@ function importRouteFile(tripDate, rowData) {
     };
 
     // --- Next IDs for the sheets we'll append to ---
-    const tripsSheet     = _getSheet(SHEET_TRIPS);
-    const routeFreqSheet = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
-    const auditSheet     = _getSheet(SHEET_AUDIT);
-    let nextTripId      = _nextRowId(tripsSheet);
-    let nextRouteFreqId = _nextRowId(routeFreqSheet);
-    let nextAuditId     = _nextRowId(auditSheet);
+    const tripsSheet = _getSheet(SHEET_TRIPS);
+    const auditSheet = _getSheet(SHEET_AUDIT);
+    let nextTripId  = _nextRowId(tripsSheet);
+    let nextAuditId = _nextRowId(auditSheet);
 
-    const newTripRows      = [];
-    const newRouteFreqRows = [];
-    const newAuditRows     = [];
+    const newTripRows  = [];
+    const newAuditRows = [];
 
     let imported = 0;
     let skipped  = 0;
@@ -470,10 +534,6 @@ function importRouteFile(tripDate, rowData) {
         nowStr,
         rd.convoyGroup ? String(convoyTokenBase + Number(rd.convoyGroup)) : '',
       ]);
-
-      if (driverId && outletId) {
-        newRouteFreqRows.push([nextRouteFreqId++, tripId, tripDate, driverId, outletId]);
-      }
 
       newAuditRows.push([
         nextAuditId++,
@@ -542,7 +602,6 @@ function importRouteFile(tripDate, rowData) {
 
     _appendRows(outletsSheet, newOutletRows);
     _appendRows(tripsSheet, newTripRows);
-    _appendRows(routeFreqSheet, newRouteFreqRows);
     _appendRows(auditSheet, newAuditRows);
 
     return { success: true, imported, skipped, errors, newOutlets };
@@ -552,9 +611,10 @@ function importRouteFile(tripDate, rowData) {
 }
 
 /**
- * Deletes a trip row that was imported but is not applicable.
+ * Deletes a trip row that is not applicable (any source: imported, manual,
+ * or a carry-over spawned from a mis-set status).
  * Only allowed before the trip has a confirmed waybill.
- * This is the only genuine delete in the system — used only during import cleanup.
+ * This is the only genuine delete in the system.
  *
  * @param {number} tripId
  * @returns {{ success: boolean } | { success: false, error: string }}
@@ -579,7 +639,7 @@ function deleteImportedTrip(tripId) {
     // Also delete any suggested (not confirmed) waybill rows for this trip
     _deleteSuggestedWaybillsForTrip(tripId);
 
-    _auditLog('TRIP_DELETE', SHEET_TRIPS, tripId, 'Imported trip deleted (pre-confirmation)', '');
+    _auditLog('TRIP_DELETE', SHEET_TRIPS, tripId, 'Trip deleted (pre-confirmation)', '');
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -590,17 +650,19 @@ function deleteImportedTrip(tripId) {
  * Promotes every 'Prepping' trip on a date to 'Scheduled' and suggests
  * their waybills — the end of the planning phase started by importRouteFile.
  *
+ * Prepping trips still without a crew at this point aren't going out today:
+ * they're marked 'Backlog' instead and carried over to the next business day
+ * (as fresh Prepping trips), so they don't get a waybill or count as scheduled.
+ *
  * Waybills are grouped by (FO Number, Truck ID): a truck's several drops on
  * one FO share one waybill; each truck of a split FO gets its own. Trips
  * with no FO Number each get their own waybill. Trips that already have a
  * waybill row are skipped, so a second click is a no-op.
- * ponytail: trips of one FO left with NO truck share one waybill (import
- * used to give each unassigned slot its own) — Prepping exists precisely
- * so trucks are assigned before promotion.
  *
  * @param {string} tripDate  'M/d/yyyy'
  * @param {number} prefixId  Waybill prefix for the suggested numbers
- * @returns {{ success: boolean, promoted: number, waybillsSuggested: number }
+ * @returns {{ success: boolean, promoted: number, waybillsSuggested: number,
+ *             backlogged: number, newTripIds: number[] }
  *           | { success: false, error: string }}
  */
 function markDayScheduled(tripDate, prefixId) {
@@ -614,21 +676,25 @@ function markDayScheduled(tripDate, prefixId) {
     const rows    = sheet.getDataRange().getValues();
     const headers = rows[0].map(h => h.toString().trim());
 
-    const promoted = [];   // { rowIdx, tripId, foNumber, truckId }
+    const promoted   = [];  // { rowIdx, tripId, foNumber, truckId, driverId, outletId } → Scheduled
+    const backlogged = [];  // same, but no crew → Backlog + next-day carry-over
     rows.forEach((row, i) => {
       if (i === 0) return;
       if (_val(row, headers, 'Trip Status') !== 'Prepping') return;
       if (_formatDate(_readDateCell(_val(row, headers, 'Trip Date'))) !== tripDate) return;
-      promoted.push({
+      const rec = {
         rowIdx:   i,
         tripId:   _numOrNull(_val(row, headers, 'ID')),
         foNumber: String(_val(row, headers, 'FO Number') || ''),
         truckId:  _numOrNull(_val(row, headers, 'Truck ID')),
-      });
+        driverId: _numOrNull(_val(row, headers, 'Driver ID')),
+        outletId: _numOrNull(_val(row, headers, 'Outlet ID')),
+      };
+      (rec.truckId || rec.driverId ? promoted : backlogged).push(rec);
     });
 
-    if (promoted.length === 0) {
-      return { success: true, promoted: 0, waybillsSuggested: 0 };
+    if (promoted.length === 0 && backlogged.length === 0) {
+      return { success: true, promoted: 0, waybillsSuggested: 0, backlogged: 0, newTripIds: [] };
     }
 
     // Batch the status stamps: mutate the in-memory rows, write back the
@@ -637,22 +703,39 @@ function markDayScheduled(tripDate, prefixId) {
     const email  = _getCurrentUserEmail();
     const nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
     const colOf  = (name) => headers.indexOf(name);
-    promoted.forEach(p => {
-      rows[p.rowIdx][colOf('Trip Status')]       = 'Scheduled';
+    const touched = promoted.concat(backlogged).sort((a, b) => a.rowIdx - b.rowIdx);
+    const statusOf = (p) => (p.truckId || p.driverId ? 'Scheduled' : 'Backlog');
+    touched.forEach(p => {
+      rows[p.rowIdx][colOf('Trip Status')]       = statusOf(p);
       rows[p.rowIdx][colOf('Status Changed By')] = email;
       rows[p.rowIdx][colOf('Status Changed At')] = nowStr;
     });
-    const minIdx = promoted[0].rowIdx;
-    const maxIdx = promoted[promoted.length - 1].rowIdx;
+    const minIdx = touched[0].rowIdx;
+    const maxIdx = touched[touched.length - 1].rowIdx;
     sheet.getRange(minIdx + 1, 1, maxIdx - minIdx + 1, headers.length)
       .setValues(rows.slice(minIdx, maxIdx + 1));
 
     // Batched audit rows (mirrors importRouteFile's batching rationale).
     const auditSheet  = _getSheet(SHEET_AUDIT);
     let   nextAuditId = _nextRowId(auditSheet);
-    _appendRows(auditSheet, promoted.map(p =>
-      [nextAuditId++, nowStr, email || 'unknown', 'TRIP_STATUS_CHANGE', '', SHEET_TRIPS, p.tripId, 'Prepping', 'Scheduled']
+    _appendRows(auditSheet, touched.map(p =>
+      [nextAuditId++, nowStr, email || 'unknown', 'TRIP_STATUS_CHANGE', '', SHEET_TRIPS, p.tripId, 'Prepping', statusOf(p)]
     ));
+
+    // Backlogged trips get their next-day copy. Reuses the same helper as a
+    // Redeliver/Foul carry-over, so parenting, audit and remarks all match.
+    const newTripIds = backlogged.map(p =>
+      _createCarryoverTrip(rows[p.rowIdx], headers, p.tripId, 'Backlog'));
+
+    // Route frequency is logged here rather than at import: a Prepping trip's
+    // crew is still being shuffled, so only the promoted assignment ran.
+    // ponytail: no over-threshold warning on bulk promotion — the dispatcher
+    // gets one per driver reassignment already. Add if they ask to see it here.
+    const freqSheet = _getOrCreateSheet(SHEET_ROUTE_FREQ, ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID']);
+    let nextFreqId  = _nextRowId(freqSheet);
+    _appendRows(freqSheet, promoted
+      .filter(p => p.driverId && p.outletId)
+      .map(p => [nextFreqId++, p.tripId, tripDate, p.driverId, p.outletId]));
 
     // Suggest waybills: skip trips that already have a waybill row.
     const wbSheet   = _getSheet(SHEET_WAYBILLS);
@@ -678,7 +761,13 @@ function markDayScheduled(tripDate, prefixId) {
     _suggestWaybillsForGroups(prefixId, groups);
 
     // groups.length = distinct waybill numbers (every group has ≥1 trip)
-    return { success: true, promoted: promoted.length, waybillsSuggested: groups.length };
+    return {
+      success:           true,
+      promoted:          promoted.length,
+      waybillsSuggested: groups.length,
+      backlogged:        backlogged.length,
+      newTripIds:        newTripIds,
+    };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -737,6 +826,39 @@ function setTripConvoyGroup(tripIds, action) {
     });
 
     return { success: true, group };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Persists the dispatcher's manual row order for a Trip Date. Writes
+ * `Sort Order = index * 10` (leaving gaps for future manual nudges) for each
+ * id in `orderedTripIds`, in order. Purely presentational — not audited.
+ *
+ * @param {string}   dateStr         'M/d/yyyy' — unused beyond intent; every
+ *                                   id is trusted as belonging to that date
+ *                                   (the client only ever sends the day it has loaded).
+ * @param {number[]} orderedTripIds  Full ordered list of trip ids for the day.
+ * @returns {{ success: true } | { success: false, error: string }}
+ */
+function reorderTrips(dateStr, orderedTripIds) {
+  _requirePermission('ASSIGN_CREW');
+  try {
+    const ids = (orderedTripIds || []).map(Number).filter(Boolean);
+    if (ids.length === 0) throw new Error('No trips to reorder.');
+
+    const sheet   = _getSheet(SHEET_TRIPS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    ids.forEach((id, i) => {
+      const rowIdx = _findRowById(rows, headers, id);
+      if (rowIdx === -1) throw new Error(`Trip ID ${id} not found.`);
+      _writeRowFields(sheet, rows[rowIdx], rowIdx, headers, { 'Sort Order': i * 10 });
+    });
+
+    return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
   }
