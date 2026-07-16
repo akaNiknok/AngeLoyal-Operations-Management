@@ -45,6 +45,34 @@ test('suggested waybill number = prefix + (lastSeq+1) with type suffix', () => {
   assert.equal(rowObject(HEADERS['Waybill Prefixes'], rows[0])['Last Sequence Number'], 5);
 });
 
+test('sequence pads to the width implied by the stored value, and never truncates', () => {
+  // Width 4 is implied by the stored "0357".
+  const sheets = baseSheets();
+  sheets['Waybill Prefixes'][1] = [1, 'AL', 'AngeLoyal', '0357'];
+  const { api } = asAdmin(sheets);
+
+  assert.equal(api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null).waybillNumber, 'AL-0358');
+  // suffix rides after the padded number
+  assert.equal(api._createSuggestedWaybill(102, 1, 'FO-2', 'Redeliver', null).waybillNumber, 'AL-0358-R');
+
+  // A value already wider than any leading zeros prints in full — no truncation.
+  const wide = baseSheets();
+  wide['Waybill Prefixes'][1] = [1, 'AL', 'AngeLoyal', 12118];
+  assert.equal(asAdmin(wide).api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null).waybillNumber, 'AL-12119');
+});
+
+test('confirming preserves the padded width in the stored Last Sequence Number', () => {
+  const sheets = baseSheets();
+  sheets['Waybill Prefixes'][1] = [1, 'AL', 'AngeLoyal', '0357'];
+  const { api, ss } = asAdmin(sheets);
+
+  const { id } = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+  api.confirmWaybill(id, null);
+
+  const stored = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0])['Last Sequence Number'];
+  assert.equal(stored, '0358'); // stored as text, width preserved for the next number
+});
+
 test('blank prefix produces a bare sequence number, no leading dash', () => {
   const sheets = baseSheets({ lastSeq: 5 });
   sheets['Waybill Prefixes'][1] = [1, '', 'AngeLoyal', 5]; // Prefix column blank
