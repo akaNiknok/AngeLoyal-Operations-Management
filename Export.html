@@ -263,6 +263,13 @@
                 const rows = buildFinalRouteModel();
                 const cards = [];
                 const byKey = {};
+                // Driver group-chat cards go by nickname, unlike the Rebisco
+                // xlsx which is first-name-first — so re-resolve names here.
+                const empMap = indexById(employees);
+                const shareName = (id) => {
+                    const e = empMap[id] || {};
+                    return String(e.nick || e.firstName || "").toUpperCase();
+                };
                 rows.forEach((r) => {
                     const t = r.trip;
                     const key = t.convoyGroup
@@ -286,8 +293,10 @@
                         card.legKeys[legKey] = true;
                         card.legs.push({
                             plate: r.plate,
-                            driverName: r.driverName,
-                            helperNames: r.helperNames,
+                            driverName: shareName(t.driverId),
+                            helperNames: (t.helperIds || [])
+                                .map(shareName)
+                                .filter(Boolean),
                         });
                     }
                     card.stops.push({
