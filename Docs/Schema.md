@@ -101,7 +101,7 @@ Tracks the alphanumeric code sequences allocated to each company or subcontracto
 | ID | Number | Auto-incrementing primary key |
 | Prefix | String | Unique short code (e.g., AY) prepended to the numeric sequence. May be left blank for "no prefix" — the waybill number is then just the bare sequence (e.g., `10761` instead of `AY-10761`). |
 | Company Name | String | Corporate identity associated with the prefix (e.g., AngeLoyal Logistics) |
-| Last Sequence Number | Number | The most recent sequence number issued. **Updated by the backend on every waybill confirmation.** |
+| Last Sequence Number | String | The most recent sequence number issued, stored **as text at the booklet's fixed digit width** (e.g. `0357`, `10760`). The backend infers the zero-pad width from this value's length, pads each generated waybill number to it (padding never truncates — a longer sequence prints in full), and rewrites this at that width on every confirmation. **Seed a new prefix at its full width (e.g. `0000`) and format the column as _Plain text_** so leading zeros aren't coerced away. |
 
 **Initial seed:**
 
