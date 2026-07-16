@@ -315,6 +315,7 @@
 
                         return `<tr data-tid="${t.id}" class="${sourceCls} ${foGroupCls[i]} ${cgCls}${selCls}" ${dz} ${rowClick} onmouseenter="hoverLoad(${t.id}, true)" onmouseleave="hoverLoad(${t.id}, false)">
       <td class="td-fo">${dragHandle}${esc(foFull) || "—"}</td>
+      <td class="td-rdd">${esc(t.billingDate) || "—"}</td>
       <td>${colorChip(custGroup)}</td>
       <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
       <td class="td-address" title="${esc(address)}">${esc(address) || "—"}</td>
