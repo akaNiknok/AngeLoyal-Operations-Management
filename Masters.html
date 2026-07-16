@@ -192,7 +192,7 @@
                                 ? `<input class="cell-input" value="${esc(val)}" onchange="updateEmployeeField(${e.id},'${field}',this.value)">`
                                 : esc(val) || "—";
                         const roleSel = isAdmin
-                            ? `<select class="cell-select" onchange="updateEmployeeField(${e.id},'role',this.value)">
+                            ? `<select class="cell-select ${roleBadgeClass(e.role)}" onchange="updateEmployeeField(${e.id},'role',this.value)">
                  <option value="Driver" ${e.role === "Driver" ? "selected" : ""}>Driver</option>
                  <option value="Helper" ${e.role === "Helper" ? "selected" : ""}>Helper</option>
                  <option value="Driver-Helper" ${e.role === "Driver-Helper" ? "selected" : ""}>Driver-Helper</option>
