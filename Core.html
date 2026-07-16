@@ -520,28 +520,53 @@
             // anchoring each convoy block at its earliest position in that
             // sorted order (mirrors the group/FO anchor trick already used
             // in Export.html).
+            // The FO is the load: after import every FO rides exactly one truck
+            // (Import.html hands a convoy's surplus trucks to the following
+            // FOs rather than piling them on the anchor), so one FO = one crew
+            // = one waybill. Split shares are suffixed (e.g. "437463/B") and
+            // key separately — a share is a different truck. Null = no FO #,
+            // i.e. a group of one. Shared by the board and the exports so the
+            // two can't drift apart.
+            function foKey(t) {
+                return t && t.foNumber
+                    ? t.foNumber + "-" + (t.foSplitSuffix || "")
+                    : null;
+            }
+
+            // Keeps every row of a group adjacent: each member sorts to where
+            // the group's FIRST member landed, ties broken by incoming order.
+            // Rows with a null key keep their own position.
+            function clusterBy(list, keyOf) {
+                const idx = new Map(list.map((t, i) => [t.id, i]));
+                const anchor = {};
+                list.forEach((t, i) => {
+                    const k = keyOf(t);
+                    if (k && !(k in anchor)) anchor[k] = i;
+                });
+                const at = (t) => {
+                    const k = keyOf(t);
+                    return k ? anchor[k] : idx.get(t.id);
+                };
+                return [...list].sort(
+                    (a, b) => at(a) - at(b) || idx.get(a.id) - idx.get(b.id),
+                );
+            }
+
+            // Day order: the dispatcher's sortOrder, then clustered so a load's
+            // rows sit together and a convoy's loads sit together. Clustering
+            // is applied on every read, so no drag can leave a load's rows
+            // scattered — the board's merged cells depend on that adjacency.
+            // Convoy runs last because it is the larger unit (a convoy contains
+            // whole FOs); its stable tie-break preserves the FO clustering.
             function orderedDayTrips(trips) {
-                const list = [...(trips || [])];
-                list.sort((a, b) => {
+                const list = [...(trips || [])].sort((a, b) => {
                     const sa = a.sortOrder == null ? Infinity : a.sortOrder;
                     const sb = b.sortOrder == null ? Infinity : b.sortOrder;
                     return sa - sb || a.id - b.id;
                 });
-
-                const idx = new Map(list.map((t, i) => [t.id, i]));
-                const groupAnchor = {};
-                list.forEach((t, i) => {
-                    if (t.convoyGroup && !(t.convoyGroup in groupAnchor))
-                        groupAnchor[t.convoyGroup] = i;
-                });
-                const anchorOf = (t) =>
-                    t.convoyGroup ? groupAnchor[t.convoyGroup] : idx.get(t.id);
-                list.sort(
-                    (a, b) =>
-                        anchorOf(a) - anchorOf(b) ||
-                        idx.get(a.id) - idx.get(b.id),
+                return clusterBy(clusterBy(list, foKey), (t) =>
+                    t.convoyGroup ? "cg-" + t.convoyGroup : null,
                 );
-                return list;
             }
 
             function indexById(arr) {

@@ -55,10 +55,10 @@
 
                 const seenLoad = new Set();
                 return trips.map((t) => {
-                    const loadKey =
-                        (t.foNumber || "t" + t.id) +
-                        "|" +
-                        (t.truckId || "t" + t.id);
+                    // Same load key as the dispatch board (Core.html) — the
+                    // export's annotated "load start" rows and the board's
+                    // merged cells must mark out the same loads.
+                    const loadKey = foKey(t) || "t" + t.id;
                     const loadStart = !seenLoad.has(loadKey);
                     seenLoad.add(loadKey);
 
@@ -133,8 +133,7 @@
                 let prevLoadKey = null;
                 rows.forEach((r) => {
                     const t = r.trip;
-                    const loadKey =
-                        (t.foNumber || "t" + t.id) + "|" + (t.truckId || "t" + t.id);
+                    const loadKey = foKey(t) || "t" + t.id;
                     if (prevLoadKey !== null && loadKey !== prevLoadKey)
                         batchParity ^= 1;
                     prevLoadKey = loadKey;
@@ -237,10 +236,7 @@
                         byKey[key] = card;
                         cards.push(card);
                     }
-                    const legKey =
-                        (t.foNumber || "t" + t.id) +
-                        "|" +
-                        (t.truckId || "t" + t.id);
+                    const legKey = foKey(t) || "t" + t.id;
                     if (!card.legKeys[legKey]) {
                         card.legKeys[legKey] = true;
                         card.legs.push({

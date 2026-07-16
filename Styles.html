@@ -662,7 +662,7 @@
             table.dispatch-table tbody tr.fo-grp-1 td:first-child {
                 background: #eceae1;
             }
-            table.dispatch-table tbody tr:hover td:first-child {
+            table.dispatch-table tbody tr.load-hover td:first-child {
                 background: #eef1f5;
             }
             table.dispatch-table tbody tr.selected td:first-child {
@@ -679,7 +679,10 @@
             table.dispatch-table tbody tr.fo-grp-1 {
                 background: #eceae1;
             }
-            table.dispatch-table tbody tr:hover {
+            /* Hover is applied to every row of a load by hoverLoad(), not by
+               :hover — a merged cell is transparent, so tinting only the row
+               under the cursor would light up part of it and not the rest. */
+            table.dispatch-table tbody tr.load-hover {
                 background: #eef1f5;
             }
             table.dispatch-table tbody tr.selected {
