@@ -176,9 +176,10 @@
                         return n;
                     });
 
-                // Crew is a property of the load, not the row — one FO rides one
-                // truck, so its rows always share a crew cell.
-                const crewSpan = spanRuns(foKey);
+                // The load (FO) is the unit for what the row's stops share:
+                // one FO rides one truck, so its rows share a crew cell — and
+                // one grip drags the whole load.
+                const foSpan = spanRuns(foKey);
 
                 // "Same FO = same waybill" (Schema.md): a load's stops share one
                 // waybill number, stored as one Waybill row per trip. Keyed on
@@ -276,10 +277,16 @@
                             : "";
 
                         // Grip lives inside the frozen FO cell so the row
-                        // doesn't need a whole extra sticky column.
-                        const dragHandle = canE
-                            ? `<span class="row-drag-handle" draggable="true" ondragstart="rowDragStart(event, ${t.id})" ondragend="rowDragEnd(event)" title="Drag to reorder">⠿</span>`
-                            : "";
+                        // doesn't need a whole extra sticky column. One grip
+                        // per load, on the load's first row: a drag moves the
+                        // whole load, so a grip per row would promise a
+                        // per-row move that can't happen. The other rows keep
+                        // a same-width spacer so their FO #s stay aligned.
+                        const dragHandle = !canE
+                            ? ""
+                            : foSpan[i]
+                              ? `<span class="row-drag-handle" draggable="true" ondragstart="rowDragStart(event, ${t.id})" ondragend="rowDragEnd(event)" title="Drag to reorder">⠿</span>`
+                              : `<span class="row-drag-handle spacer"></span>`;
 
                         const billingCat = t.truckBillingCategory || "";
                         const foFull =
@@ -316,7 +323,7 @@
       <td class="td-qty">${t.cbm || "—"}</td>
       <td>${esc(t.tier) || "—"}</td>
       <td class="td-billingcat"><div class="billingcat-cell">${colorChip(billingCat)}${cgBadge}</div></td>
-      ${crewSpan[i] ? `<td class="td-crew col-divider"${crewSpan[i] > 1 ? ` rowspan="${crewSpan[i]}"` : ""}>${crewCell}</td>` : ""}
+      ${foSpan[i] ? `<td class="td-crew col-divider"${foSpan[i] > 1 ? ` rowspan="${foSpan[i]}"` : ""}>${crewCell}</td>` : ""}
       ${statusSpan[i] ? `<td class="td-status col-divider"${statusSpan[i] > 1 ? ` rowspan="${statusSpan[i]}"` : ""}>${statusCell}</td>` : ""}
       ${waybillSpan[i] ? `<td class="td-wb"${waybillSpan[i] > 1 ? ` rowspan="${waybillSpan[i]}"` : ""}>${waybillCellHtml(t, canE)}</td>` : ""}
       <td class="td-remarks"><div class="remarks-cell">${remarksCell}${delBtn}</div></td>
@@ -480,17 +487,83 @@
 
             function clearRowDropIndicator() {
                 document
-                    .querySelectorAll(".drop-before, .drop-after")
+                    .querySelectorAll(
+                        ".drop-before, .drop-after, .drop-after-merged",
+                    )
                     .forEach((el) =>
-                        el.classList.remove("drop-before", "drop-after"),
+                        el.classList.remove(
+                            "drop-before",
+                            "drop-after",
+                            "drop-after-merged",
+                        ),
                     );
+            }
+
+            // The set a drag actually moves: an explicit multi-selection, else
+            // the dragged row's convoy, else its load — in day order. A load's
+            // rows move together so a drag can never strand the rest (and
+            // orderedDayTrips re-clusters anyway). The indicator and the drop
+            // both read it, so what lights up is what moves.
+            function dragUnitIds(tripId) {
+                const trips = (dispatchData || {}).trips || [];
+                const byId = indexById(trips);
+                const order = orderedDayTrips(trips).map((t) => t.id);
+                if (selectedForGroup.has(tripId) && selectedForGroup.size > 1)
+                    return order.filter((id) => selectedForGroup.has(id));
+                const cg = (byId[tripId] || {}).convoyGroup;
+                if (cg)
+                    return order.filter(
+                        (id) => (byId[id] || {}).convoyGroup === cg,
+                    );
+                const fk = foKey(byId[tripId]);
+                return fk ? order.filter((id) => foKey(byId[id]) === fk) : [tripId];
+            }
+
+            // The rendered rows of a trip's load, top to bottom (DOM order, so
+            // the status filter can't scramble it).
+            function loadBlockRows(tripId) {
+                const ids = new Set(loadBlockIds(tripId));
+                return [
+                    ...document.querySelectorAll("#dispatch-tbody tr[data-tid]"),
+                ].filter((tr) => ids.has(Number(tr.dataset.tid)));
+            }
+
+            // Before/after is judged against the whole load block, not the row
+            // under the cursor: a 3-row load has one insertion point above it
+            // and one below, matching where finishRowReorder actually lands.
+            function dropBefore(e, rows) {
+                const top = rows[0].getBoundingClientRect().top;
+                const bottom =
+                    rows[rows.length - 1].getBoundingClientRect().bottom;
+                return e.clientY < (top + bottom) / 2;
+            }
+
+            // Draw the line on the load, not the hovered row. A merged cell
+            // lives on the block's first row and ends at the block's bottom,
+            // so the "after" line is drawn there too — otherwise it stops
+            // short at the Crew column (see the CSS).
+            function markRowDropIndicator(rows, before) {
+                if (before) rows[0].classList.add("drop-before");
+                else {
+                    rows[rows.length - 1].classList.add("drop-after");
+                    rows[0].classList.add("drop-after-merged");
+                }
             }
 
             function rowDragStart(e, tripId) {
                 e.dataTransfer.setData(ROW_DRAG_TYPE, String(tripId));
                 e.dataTransfer.effectAllowed = "move";
                 draggingTripId = tripId;
-                e.target.closest("tr")?.classList.add("row-dragging");
+                // Ghost the FO cell, not the grip — a lone "⠿" trailing the
+                // cursor says nothing about which load is in flight.
+                const cell = e.target.closest("td");
+                if (cell) e.dataTransfer.setDragImage(cell, 12, 12);
+                // Fade every row that's moving, not just the gripped one.
+                dragUnitIds(tripId).forEach((id) =>
+                    document
+                        .querySelector(`tr[data-tid="${id}"]`)
+                        ?.classList.add("row-dragging"),
+                );
             }
 
             function rowDragEnd() {
@@ -503,16 +576,24 @@
 
             function rowDragOver(e, tripId) {
                 if (!isRowDrag(e)) {
-                    cbDragOver(e);
+                    cbDragOver(e, tripId);
                     return;
                 }
                 e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                const tr = e.currentTarget;
-                const rect = tr.getBoundingClientRect();
-                const before = e.clientY < rect.top + rect.height / 2;
                 clearRowDropIndicator();
-                tr.classList.add(before ? "drop-before" : "drop-after");
+                const rows = loadBlockRows(tripId);
+                // Hovering the set that's being dragged is a no-op — show no
+                // insertion line rather than one the drop won't honour.
+                if (
+                    !rows.length ||
+                    draggingTripId == null ||
+                    dragUnitIds(draggingTripId).includes(tripId)
+                ) {
+                    e.dataTransfer.dropEffect = "none";
+                    return;
+                }
+                e.dataTransfer.dropEffect = "move";
+                markRowDropIndicator(rows, dropBefore(e, rows));
             }
 
             function rowDragLeave(e) {
@@ -525,9 +606,9 @@
                     return;
                 }
                 e.preventDefault();
-                const tr = e.currentTarget;
-                const rect = tr.getBoundingClientRect();
-                const before = e.clientY < rect.top + rect.height / 2;
+                const rows = loadBlockRows(tripId);
+                if (!rows.length) return;
+                const before = dropBefore(e, rows);
                 clearRowDropIndicator();
                 finishRowReorder(tripId, before);
             }
@@ -539,40 +620,20 @@
             // status filter currently applied on screen.
             function finishRowReorder(targetTripId, before) {
                 if (!dispatchData || draggingTripId == null) return;
-                const draggedId = draggingTripId;
-                if (draggedId === targetTripId) return;
+
+                const movedIds = dragUnitIds(draggingTripId);
+                const movedSet = new Set(movedIds);
+                // Dropping onto a row that's part of the moved set (its own
+                // load, convoy, or selection) has nowhere to land — leave the
+                // order alone rather than flinging it to the end of the day.
+                if (movedSet.has(targetTripId)) return;
 
                 const trips = dispatchData.trips || [];
-                const fullOrder = orderedDayTrips(trips).map((t) => t.id);
                 const byId = indexById(trips);
+                const remaining = orderedDayTrips(trips)
+                    .map((t) => t.id)
+                    .filter((id) => !movedSet.has(id));
 
-                // Drag the largest unit the row belongs to: an explicit
-                // multi-selection, else its convoy, else its load. A load's
-                // rows move together so dragging one can never strand the rest
-                // (and orderedDayTrips re-clusters anyway — moving the block
-                // keeps the drag doing what it looks like it does).
-                let movedIds;
-                const fk = foKey(byId[draggedId]);
-                if (
-                    selectedForGroup.has(draggedId) &&
-                    selectedForGroup.size > 1
-                ) {
-                    movedIds = fullOrder.filter((id) =>
-                        selectedForGroup.has(id),
-                    );
-                } else {
-                    const cg = (byId[draggedId] || {}).convoyGroup;
-                    movedIds = cg
-                        ? fullOrder.filter(
-                              (id) => (byId[id] || {}).convoyGroup === cg,
-                          )
-                        : fk
-                          ? fullOrder.filter((id) => foKey(byId[id]) === fk)
-                          : [draggedId];
-                }
-                const movedSet = new Set(movedIds);
-
-                const remaining = fullOrder.filter((id) => !movedSet.has(id));
                 // Land outside the target's whole load, never between two of
                 // its rows — a drop mid-load would split a merged cell.
                 const tk = foKey(byId[targetTripId]);
@@ -584,8 +645,7 @@
                         ? block[0]
                         : block[block.length - 1]
                     : targetTripId;
-                let idx = remaining.indexOf(anchorId);
-                if (idx === -1) idx = remaining.length; // target was itself moved — append
+                const idx = remaining.indexOf(anchorId);
                 remaining.splice(before ? idx : idx + 1, 0, ...movedIds);
 
                 applyReorder(remaining, movedIds);
