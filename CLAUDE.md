@@ -41,11 +41,15 @@ The project is contractually delivered in 3 phases. See [`BACKLOG.md`](BACKLOG.m
 - `Styles.html` — all CSS (DM Sans/DM Mono, design tokens).
 - `Core.html` — global JS state (`employees`, `trucks`, `dispatchData`, …), `bootApp()` boot sequence, RBAC UI gating, panel switching, shared utilities, SheetJS (XLSX) CDN loader.
 - `Dispatch.html` — dispatch board (the primary screen).
+- `Export.html` — client-only exports of a dispatch day: FINAL-ROUTE print/xlsx (mirrors the dispatcher-worked route-file layout) and "Share to Drivers" per-truck .jpg cards (modal markup lives in `Index.html`).
+- `CrewBoard.html` — crew rail: toggled panel of draggable crew cards (truck + default driver/helpers) dropped onto dispatch rows to assign a whole crew at once.
 - `Import.html` — Rebisco `.xlsx` route-file parsing + import.
 - `Roster.html` — truck roster (driver/helper ↔ truck assignment; edits Default Assignments) + Outlets admin.
 - `Masters.html` — admin master-detail panels (outlets, trucks, employees, billing categories, default assignments).
 
 The client calls the backend with `google.script.run.withSuccessHandler(...).fnName(args)`. There is **no router/framework** — `switchPanel()` toggles `.panel` visibility, state lives in module-level `let` globals in `Core.html`.
+
+`pages/index.html` is **not** a partial — it's the standalone public launcher page (redirects to the `/exec` URL with `?authuser=`), published from the separate `angeloyal-oms-launcher` repo. See [DEPLOY.md](DEPLOY.md) before touching it.
 
 ### Data flow
 
