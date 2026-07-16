@@ -1039,9 +1039,11 @@
                 font-family: "DM Mono", monospace;
             }
             .ds-wb {
-                margin-left: auto;
                 font-family: "DM Mono", monospace;
                 color: var(--muted);
+                font-size: 11px;
+                margin-left: auto;
+                white-space: nowrap;
             }
             .ds-stops {
                 margin-top: 5px;
@@ -1052,9 +1054,17 @@
                 font-size: 12px;
                 margin-bottom: 2px;
             }
+            .ds-stop-main {
+                display: flex;
+                align-items: baseline;
+                gap: 4px;
+            }
             .ds-stop-n {
                 font-weight: 600;
-                margin-right: 3px;
+            }
+            .ds-fo {
+                font-family: "DM Mono", monospace;
+                font-weight: 600;
             }
             .ds-area,
             .ds-qty {

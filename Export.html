@@ -197,6 +197,51 @@
                 }, 150);
             }
 
+            // Rasterizes the same print HTML to a downloadable .jpg. Renders
+            // into a fixed-width offscreen iframe (style isolation) so the
+            // capture width is deterministic, then html2canvas grabs it.
+            // ponytail: fixed width per orientation; make it a param if a
+            // third layout ever needs a different one.
+            async function exportHtmlAsJpg(html, filename, width) {
+                if (!html2canvasReady) {
+                    showToast("Image writer still loading — retry in a second.", "warning");
+                    return;
+                }
+                const old = document.getElementById("jpg-frame");
+                if (old) old.remove();
+                const frame = document.createElement("iframe");
+                frame.id = "jpg-frame";
+                frame.style.cssText = `position:fixed;left:-99999px;top:0;width:${width}px;height:10px;border:0;background:#fff`;
+                document.body.appendChild(frame);
+                const doc = frame.contentDocument;
+                doc.open();
+                doc.write(html);
+                doc.close();
+                await new Promise((r) => setTimeout(r, 250)); // let layout + fonts settle
+                const body = doc.body;
+                frame.style.height = body.scrollHeight + "px";
+                try {
+                    const canvas = await html2canvas(body, {
+                        scale: 2,
+                        backgroundColor: "#fff",
+                        windowWidth: width,
+                        width: body.scrollWidth,
+                        height: body.scrollHeight,
+                    });
+                    const a = document.createElement("a");
+                    a.href = canvas.toDataURL("image/jpeg", 0.92);
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                } catch (err) {
+                    showToast("Couldn't build the image — try Print instead.", "error");
+                    console.error(err);
+                } finally {
+                    frame.remove();
+                }
+            }
+
             const PRINT_BASE_CSS = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; padding: 12px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -243,7 +288,6 @@
                             plate: r.plate,
                             driverName: r.driverName,
                             helperNames: r.helperNames,
-                            waybill: r.waybill,
                         });
                     }
                     card.stops.push({
@@ -255,6 +299,8 @@
                         cbm: t.cbm,
                         remarks: t.remarks || "",
                         status: t.tripStatus,
+                        foNumber: t.foNumber || "",
+                        waybill: r.waybill,
                     });
                 });
                 return cards;
@@ -289,17 +335,20 @@
                         return `<div class="ds-leg">
         <span class="ds-crew">${crew}</span>
         <span class="ds-plate">${esc(l.plate) || "UNASSIGNED"}</span>
-        <span class="ds-wb">${esc(l.waybill) || "no waybill"}</span>
       </div>`;
                     })
                     .join("");
                 const stops = card.stops
                     .map(
                         (s, i) => `<div class="ds-stop">
-        <span class="ds-stop-n">${i + 1}.</span>
-        ${colorChip(s.customer)}
-        <span>${esc(s.outletName)} <span class="ds-area">(${esc(s.area)})</span></span>
-        <span class="ds-qty">${s.quantity || ""}${s.cbm ? " · " + s.cbm + " cbm" : ""}</span>
+        <div class="ds-stop-main">
+          <span class="ds-stop-n">${i + 1}.</span>
+          ${s.foNumber ? `<span class="ds-fo">FO ${esc(s.foNumber)}</span>` : ""}
+          ${colorChip(s.customer)}
+          <span>${esc(s.outletName)} <span class="ds-area">(${esc(s.area)})</span></span>
+          <span class="ds-qty">${s.quantity || ""}${s.cbm ? " · " + s.cbm + " cbm" : ""}</span>
+          ${s.waybill ? `<span class="ds-wb">WB ${esc(s.waybill)}</span>` : ""}
+        </div>
         ${s.address ? `<div class="ds-address">${esc(s.address)}</div>` : ""}
         ${s.remarks ? `<div class="ds-remarks">✎ ${esc(s.remarks)}</div>` : ""}
       </div>`,
@@ -327,12 +376,12 @@
                     .join("");
             }
 
-            function printDriverShare() {
+            function printDriverShare(mode) {
                 const dateVal = document.getElementById("dispatch-date").value;
                 const cards = driverShareCards
                     .map((c) => driverShareCardHtml(c, true))
                     .join("");
-                printHtmlDocument(`<!DOCTYPE html><html><head><title>Trips ${esc(dateVal)}</title>
+                const html = `<!DOCTYPE html><html><head><title>Trips ${esc(dateVal)}</title>
   <style>${PRINT_BASE_CSS}
     @page { size: portrait; margin: 10mm; }
     body { font-size: 11px; line-height: 1.4; }
@@ -346,19 +395,24 @@
     .ds-leg { display: flex; gap: 12px; align-items: baseline; font-size: 13px; font-weight: bold; margin-bottom: 4px; }
     .ds-crew { letter-spacing: 0.2px; }
     .ds-plate { font-family: monospace; }
-    .ds-wb { margin-left: auto; font-family: monospace; font-weight: normal; color: #555; }
+    .ds-wb { margin-left: auto; font-family: monospace; font-weight: normal; font-size: 11px; color: #333; white-space: nowrap; }
     .ds-stops { margin-top: 6px; border-top: 1px dashed #999; padding-top: 6px; }
     .ds-stop { font-size: 12px; margin-bottom: 4px; }
-    .ds-stop-n { font-weight: bold; margin-right: 5px; }
+    .ds-stop-main { display: flex; align-items: baseline; gap: 5px; }
+    .ds-stop-n { font-weight: bold; }
+    .ds-fo { font-family: monospace; font-weight: bold; color: #333; }
     .ds-area { color: #555; }
-    .ds-qty { color: #555; margin-left: 6px; }
+    .ds-qty { color: #555; }
     .ds-remarks { font-size: 10px; color: #333; margin-left: 16px; }
     .ds-address { font-size: 10px; color: #555; margin-left: 16px; }
     .color-chip { display: inline-block; font-size: 9px; font-weight: bold; padding: 1px 6px; border-radius: 99px; border: 1px solid #ccc; }
   </style></head><body>
   <h1>TRIPS ${esc(dateVal)} (ANGELOYAL)</h1>
   <div class="sub">Grouped by truck / convoy — sequence as arranged by the dispatcher</div>
-  ${cards}</body></html>`);
+  ${cards}</body></html>`;
+                if (mode === "jpg")
+                    exportHtmlAsJpg(html, `TRIPS ${dateVal} (ANGELOYAL).jpg`, 800);
+                else printHtmlDocument(html);
             }
 
             function truncate(s, max) {
@@ -376,7 +430,7 @@
                 return `rgba(${r},${g},${b},${alpha})`;
             }
 
-            function printDispatchDay() {
+            function printDispatchDay(mode) {
                 const rows = buildFinalRouteModel();
                 if (!rows.length) {
                     showToast("No trips to print for this date.", "warning");
@@ -443,7 +497,7 @@
                     })
                     .join("");
 
-                printHtmlDocument(`<!DOCTYPE html><html><head><title>ROUTE ${esc(dateVal)}</title>
+                const html = `<!DOCTYPE html><html><head><title>ROUTE ${esc(dateVal)}</title>
   <style>${PRINT_BASE_CSS}
     .color-chip { display: inline-block; font-size: 8px; font-weight: bold; padding: 1px 5px; border-radius: 99px; border: 1px solid #ccc; }
   </style></head><body>
@@ -453,6 +507,9 @@
     <th>FO</th><th>Cust</th><th>Outlet</th><th>Address</th><th>Area</th><th>Qty</th><th>CBM</th>
     <th>Restr</th><th>Type</th><th>Tier</th><th>Convoy</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Remarks</th>
   </tr></thead><tbody>${body}</tbody></table>
-  </body></html>`);
+  </body></html>`;
+                if (mode === "jpg")
+                    exportHtmlAsJpg(html, `FINAL ROUTE ${dateVal} (ANGELOYAL).jpg`, 1400);
+                else printHtmlDocument(html);
             }
         </script>
