@@ -164,6 +164,20 @@
                     return "fo-grp-" + foParityByKey[key];
                 });
 
+                // Crew is a property of the load, not the row: consecutive rows
+                // of the same FO share one merged (rowspan) crew cell. 0 = this
+                // row is covered by the run's first row and renders no cell.
+                // Rows of an FO that aren't adjacent (hand-reordered) just get
+                // their own cell — assignCrew keeps them in sync regardless.
+                const crewSpan = trips.map((t, i) => {
+                    const key = foKey(t);
+                    if (!key) return 1;
+                    if (foKey(trips[i - 1]) === key) return 0;
+                    let n = 1;
+                    while (foKey(trips[i + n]) === key) n++;
+                    return n;
+                });
+
                 // Convoy groups: cycle a small palette per distinct token on
                 // the loaded day (stripe + badge, distinct from FO shading).
                 const convoyCls = {};
@@ -273,7 +287,7 @@
       <td class="td-qty">${t.cbm || "—"}</td>
       <td>${esc(t.tier) || "—"}</td>
       <td class="td-billingcat"><div class="billingcat-cell">${colorChip(billingCat)}${cgBadge}</div></td>
-      <td class="td-crew col-divider">${crewCell}</td>
+      ${crewSpan[i] ? `<td class="td-crew col-divider"${crewSpan[i] > 1 ? ` rowspan="${crewSpan[i]}"` : ""}>${crewCell}</td>` : ""}
       <td class="td-status col-divider">${statusCell}</td>
       <td class="td-wb">${waybillCellHtml(t, canE)}</td>
       <td class="td-remarks"><div class="remarks-cell">${remarksCell}${delBtn}</div></td>
@@ -671,12 +685,23 @@
                     : `<span class="wb-none">—</span>`;
             }
 
+            // Rows sharing a displayed FO # are one load on one truck, so they
+            // share a crew. Split shipments (suffix A/B/C) are the case where
+            // one FO rides several trucks — they key separately and stay
+            // independent. Null = no FO #, i.e. group of one.
+            function foKey(t) {
+                return t && t.foNumber
+                    ? t.foNumber + "-" + (t.foSplitSuffix || "")
+                    : null;
+            }
+
             // Assign a whole crew (truck + its default driver & helpers) to a
-            // trip in one move. Optimistic: apply + re-render immediately.
+            // trip in one move — and to every other row of the same FO, which
+            // is what the board's merged crew cell promises. Optimistic: apply
+            // + re-render immediately.
             function assignCrew(tripId, truckIdRaw) {
-                const trip = (dispatchData.trips || []).find(
-                    (t) => t.id === tripId,
-                );
+                const trips = dispatchData.trips || [];
+                const trip = trips.find((t) => t.id === tripId);
                 if (!trip) return;
                 const truckId = Number(truckIdRaw) || null;
                 let driverId = null;
@@ -693,6 +718,26 @@
                         helperIds = (def.defaultHelperIds || []).map(Number);
                     }
                 }
+                const key = foKey(trip);
+                const targets = key
+                    ? trips.filter((t) => foKey(t) === key)
+                    : [trip];
+                targets.forEach((t) =>
+                    applyCrew(t, truckId, driverId, helperIds),
+                );
+            }
+
+            function applyCrew(trip, truckId, driverId, helperIds) {
+                const tripId = trip.id;
+                // Already carries this exact crew — an FO sibling reached twice
+                // (multi-select overlapping an FO, clear-all over an FO's rows)
+                // would otherwise re-save and re-audit a no-op.
+                if (
+                    trip.truckId === truckId &&
+                    trip.driverId === driverId &&
+                    String(trip.helperIds) === String(helperIds)
+                )
+                    return;
                 const old = {
                     truckId: trip.truckId,
                     driverId: trip.driverId,
