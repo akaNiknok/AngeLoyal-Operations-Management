@@ -431,7 +431,29 @@
                 if (!canEdit() || !status || !dispatchData) return;
                 const ids = [...selectedForGroup];
                 if (!ids.length) return;
+                // Same Prepping → Scheduled prompt as the per-row select:
+                // promotions need a booklet prefix for the suggested waybills.
+                const trips = dispatchData.trips || [];
+                if (
+                    status === "Scheduled" &&
+                    ids.some((id) => {
+                        const t = trips.find((x) => x.id === id);
+                        return (
+                            t &&
+                            t.tripStatus === "Prepping" &&
+                            !t.suggestedWaybillId &&
+                            !t.waybillConfirmed
+                        );
+                    })
+                ) {
+                    document.getElementById("bulk-status").value = "";
+                    openTripScheduleModal(ids);
+                    return;
+                }
+                doBulkStatus(ids, status, null);
+            }
 
+            function doBulkStatus(ids, status, prefixId) {
                 const olds = new Map();
                 ids.forEach((id) => {
                     const trip = (dispatchData.trips || []).find(
@@ -446,7 +468,7 @@
                 updateConvoyButtons();
                 renderDispatch();
 
-                bgSave("bulkSetTripStatus", [ids, status], {
+                bgSave("bulkSetTripStatus", [ids, status, prefixId], {
                     onOk: (r) => {
                         if (r.newTripIds && r.newTripIds.length) {
                             showToast(
@@ -459,6 +481,12 @@
                             delete dispatchCache[
                                 mdyAddDays(dispatchData.date, 1)
                             ];
+                        }
+                        if (prefixId) {
+                            // Refetch so the new suggested waybills show —
+                            // the bulk response doesn't carry them per trip.
+                            delete dispatchCache[dispatchData.date];
+                            loadDispatch();
                         }
                     },
                     revert: () => {
@@ -904,13 +932,26 @@
                 const trip = trips.find((t) => t.id === tripId);
                 if (!trip) return;
                 const key = wholeLoad && foKey(trip);
-                if (key) {
-                    trips
-                        .filter((t) => foKey(t) === key)
-                        .forEach((t) => applyStatus(t, status));
+                const targets = key
+                    ? trips.filter((t) => foKey(t) === key)
+                    : [trip];
+                // Prepping → Scheduled by hand still needs a suggested waybill
+                // (markDayScheduled covers the whole-day path). Ask which
+                // booklet prefix to draw from before saving.
+                if (
+                    status === "Scheduled" &&
+                    targets.some(
+                        (t) =>
+                            t.tripStatus === "Prepping" &&
+                            !t.suggestedWaybillId &&
+                            !t.waybillConfirmed,
+                    )
+                ) {
+                    openTripScheduleModal(targets.map((t) => t.id));
+                    renderDispatch(); // snap the select back until confirmed
                     return;
                 }
-                applyStatus(trip, status);
+                targets.forEach((t) => applyStatus(t, status));
             }
 
             function applyStatus(trip, status) {
@@ -1077,6 +1118,8 @@
                     showToast("Your role cannot schedule trips.", "warning");
                     return;
                 }
+                pendingScheduleIds = null;
+                document.getElementById("mds-hint").style.display = "";
                 const prepping = (dispatchData?.trips || []).filter(
                     (t) => t.tripStatus === "Prepping",
                 );
@@ -1097,6 +1140,22 @@
                 openModal("modal-mark-scheduled");
             }
 
+            // Trip ids the modal is prompting a prefix for on a manual
+            // Prepping → Scheduled change (per-row select, whole load, or
+            // bulk action) instead of the whole day. The save goes through
+            // bulkSetTripStatus — one sequential server call — so a load's
+            // first stop reserves a number and its later stops join it.
+            let pendingScheduleIds = null;
+
+            function openTripScheduleModal(ids) {
+                pendingScheduleIds = ids;
+                document.getElementById("mds-summary").textContent =
+                    `${ids.length} trip${ids.length === 1 ? "" : "s"} will be marked Scheduled and a waybill suggested.`;
+                document.getElementById("mds-hint").style.display = "none";
+                populatePrefixSelects();
+                openModal("modal-mark-scheduled");
+            }
+
             function submitMarkScheduled() {
                 const dateVal = document.getElementById("dispatch-date").value;
                 const prefixId = Number(
@@ -1107,6 +1166,12 @@
                     return;
                 }
                 closeModal("modal-mark-scheduled");
+                if (pendingScheduleIds) {
+                    const ids = pendingScheduleIds;
+                    pendingScheduleIds = null;
+                    doBulkStatus(ids, "Scheduled", prefixId);
+                    return;
+                }
                 setSyncing(true);
                 srv()
                     .withSuccessHandler((r) => {

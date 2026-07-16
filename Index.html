@@ -337,6 +337,14 @@
                             <button
                                 class="account-action"
                                 type="button"
+                                onclick="printDispatchDay('jpg')"
+                            >
+                                <span class="account-action-icon">📷</span>
+                                Image (.jpg)
+                            </button>
+                            <button
+                                class="account-action"
+                                type="button"
                                 onclick="exportDispatchXlsx()"
                             >
                                 <span class="account-action-icon">⬇</span>
@@ -1041,6 +1049,12 @@
                         Close
                     </button>
                     <button
+                        class="btn btn-ghost"
+                        onclick="printDriverShare('jpg')"
+                    >
+                        📷 Save as .jpg
+                    </button>
+                    <button
                         class="btn btn-primary"
                         onclick="printDriverShare()"
                     >
@@ -1065,7 +1079,7 @@
                 <div class="modal-body">
                     <div class="form-row">
                         <div id="mds-summary" style="font-size: 13px"></div>
-                        <span class="form-hint"
+                        <span class="form-hint" id="mds-hint"
                             >Promotes every crewed Prepping trip on this date to
                             Scheduled and suggests waybill numbers — one per
                             truck load (same FO + same truck share a waybill).

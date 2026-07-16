@@ -104,9 +104,12 @@ function createTrip(tripData) {
  *   the last 21 days (per schema rule), then logs the new assignment.
  * - If `tripStatus` becomes 'Foul Trip - For Redeliver', 'Redeliver' or
  *   'Backlog', creates the next-day carry-over trip as before.
+ * - If a 'Prepping' trip is promoted to 'Scheduled' by hand (rather than via
+ *   markDayScheduled) and `prefixId` is given, suggests its waybill too —
+ *   unless the trip already has a waybill row.
  *
  * @param {number} tripId
- * @param {Object} changes  Any of: { truckId, driverId, helperIds, tripStatus, remarks }
+ * @param {Object} changes  Any of: { truckId, driverId, helperIds, tripStatus, remarks, prefixId }
  * @returns {{ success: boolean, trip: Object, newTripId: number|null,
  *             routeFrequencyWarning: {outletName: string, count: number}|null }
  *           | { success: false, error: string }}
@@ -194,6 +197,15 @@ function saveTripChanges(tripId, changes) {
       }
     }
 
+    // Waybill: a Prepping trip promoted to Scheduled by hand still needs its
+    // suggested waybill (markDayScheduled covers the whole-day path). A stop
+    // whose load already has a suggested waybill joins that number; otherwise
+    // a new number is reserved from `changes.prefixId`.
+    let waybill = null;
+    if (justScheduled && newStatus === 'Scheduled') {
+      waybill = _suggestWaybillForScheduledTrip(rows, headers, row, tripId, changes.prefixId || null);
+    }
+
     // Carry-over: create a follow-up trip for next business day
     let newTripId = null;
     const carryoverStatuses = ['Foul Trip - For Redeliver', 'Redeliver', 'Backlog'];
@@ -206,19 +218,27 @@ function saveTripChanges(tripId, changes) {
       ? String(rawHelpers).split(',').map(s => _numOrNull(s.trim())).filter(n => n !== null)
       : [];
 
+    const tripOut = {
+      id:                   tripId,
+      truckId:              _numOrNull(_val(row, headers, 'Truck ID')),
+      driverId:             _numOrNull(_val(row, headers, 'Driver ID')),
+      helperIds:            helperIds,
+      truckBillingCategory: _val(row, headers, 'Truck Billing Category') || '',
+      tripStatus:           _val(row, headers, 'Trip Status') || 'Scheduled',
+      remarks:              _val(row, headers, 'Remarks') || '',
+      statusChangedBy:      _val(row, headers, 'Status Changed By') || '',
+      statusChangedAt:      _valDateTime(row, headers, 'Status Changed At'),
+    };
+    // Only set when a waybill was suggested — Object.assign on the client
+    // must not wipe existing waybill fields on unrelated saves.
+    if (waybill) {
+      tripOut.waybillSuggested   = waybill.waybillNumber;
+      tripOut.suggestedWaybillId = waybill.id;
+    }
+
     return {
       success: true,
-      trip: {
-        id:                   tripId,
-        truckId:              _numOrNull(_val(row, headers, 'Truck ID')),
-        driverId:             _numOrNull(_val(row, headers, 'Driver ID')),
-        helperIds:            helperIds,
-        truckBillingCategory: _val(row, headers, 'Truck Billing Category') || '',
-        tripStatus:           _val(row, headers, 'Trip Status') || 'Scheduled',
-        remarks:              _val(row, headers, 'Remarks') || '',
-        statusChangedBy:      _val(row, headers, 'Status Changed By') || '',
-        statusChangedAt:      _valDateTime(row, headers, 'Status Changed At'),
-      },
+      trip:                   tripOut,
       newTripId:              newTripId,
       routeFrequencyWarning:  routeFrequencyWarning,
     };
@@ -235,18 +255,23 @@ function saveTripChanges(tripId, changes) {
  *
  * @param {number[]} tripIds
  * @param {string}   status
+ * @param {number}   [prefixId]  Waybill prefix for Prepping → Scheduled promotions
  * @returns {{ success: true, updated: number, newTripIds: number[] } | { success: false, error: string }}
  */
-function bulkSetTripStatus(tripIds, status) {
+function bulkSetTripStatus(tripIds, status, prefixId) {
   _requirePermission('ASSIGN_CREW');
   try {
     const ids = (tripIds || []).map(Number).filter(Boolean);
     if (ids.length === 0) throw new Error('No trips selected.');
 
+    // Trips run sequentially, so a load's first stop reserves a number and
+    // its later stops join it (see _suggestWaybillForScheduledTrip); stops
+    // of different loads get distinct numbers.
+    const changes = prefixId ? { tripStatus: status, prefixId: prefixId } : { tripStatus: status };
     const newTripIds = [];
     let updated = 0;
     ids.forEach(id => {
-      const r = saveTripChanges(id, { tripStatus: status });
+      const r = saveTripChanges(id, changes);
       if (r && r.success) {
         updated++;
         if (r.newTripId) newTripIds.push(r.newTripId);

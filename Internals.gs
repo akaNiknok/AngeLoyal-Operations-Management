@@ -49,7 +49,8 @@ function _auditLog(action, table, rowId, oldValue, newValue) {
 
 /**
  * Creates a Suggested waybill row for a trip.
- * Does NOT confirm or lock it.
+ * Does NOT confirm or lock it, but DOES reserve the number: the prefix's
+ * Last Sequence Number advances so the next suggestion can't collide.
  *
  * @param {number} tripId
  * @param {number} prefixId
@@ -87,6 +88,7 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
     '',
   ]);
 
+  _updateWaybillPrefixSequence(prefixId, nextSeq);
   _auditLog('WAYBILL_SUGGEST', SHEET_WAYBILLS, nextId, '', waybillNumber);
   return { id: nextId, waybillNumber };
 }
@@ -95,8 +97,8 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
  * Batch-creates Suggested 'Regular' waybills for groups of trips.
  * One waybill number per group; every trip in a group shares that
  * number/sequence (= a truck's several drops on one load). Groups with
- * no trips are skipped. Does NOT bump the prefix's Last Sequence
- * Number — confirmation does.
+ * no trips are skipped. Reserves the numbers: the prefix's Last Sequence
+ * Number advances to the last one issued.
  *
  * @param {number} prefixId
  * @param {Array<{foNumber: string, tripIds: number[]}>} groups
@@ -137,6 +139,7 @@ function _suggestWaybillsForGroups(prefixId, groups) {
     });
   });
   _appendRows(sheet, newRows);
+  if (newRows.length) _updateWaybillPrefixSequence(prefixId, nextSeq);
 
   // Audit is best-effort, like _auditLog — but batched.
   try {
@@ -150,6 +153,76 @@ function _suggestWaybillsForGroups(prefixId, groups) {
   } catch (_) {}
 
   return out;
+}
+
+/**
+ * Waybill for one trip promoted out of Prepping by hand (saveTripChanges),
+ * honoring the one-waybill-per-truck-load rule now that suggestions reserve
+ * sequence numbers:
+ * - the trip already has a waybill row → null (nothing to do);
+ * - a sibling stop of the same load (same Trip Date + FO Number + Truck ID)
+ *   has a Suggested 'Regular' waybill → append a row sharing its number
+ *   (no new number reserved);
+ * - otherwise, if a prefixId is given → reserve the next number.
+ *
+ * @param {Array[]} tripRows     Full Trips sheet rows (incl. header row)
+ * @param {Array}   tripHeaders
+ * @param {Array}   tripRow      The promoted trip's row
+ * @param {number}  tripId
+ * @param {number|null} prefixId
+ * @returns {{ id: number, waybillNumber: string } | null}
+ */
+function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId, prefixId) {
+  const wbSheet   = _getSheet(SHEET_WAYBILLS);
+  const wbRows    = wbSheet.getDataRange().getValues();
+  const wbHeaders = wbRows[0].map(h => h.toString().trim());
+
+  const hasOwn = wbRows.slice(1).some(r =>
+    Number(_numOrNull(_val(r, wbHeaders, 'Trip ID'))) === Number(tripId));
+  if (hasOwn) return null;
+
+  const fo = String(_val(tripRow, tripHeaders, 'FO Number') || '');
+  if (fo) {
+    const date  = _formatDate(_readDateCell(_val(tripRow, tripHeaders, 'Trip Date')));
+    const truck = _numOrNull(_val(tripRow, tripHeaders, 'Truck ID')) || '';
+    const siblings = {};
+    tripRows.slice(1).forEach(r => {
+      const id = _numOrNull(_val(r, tripHeaders, 'ID'));
+      if (id === null || Number(id) === Number(tripId)) return;
+      if (String(_val(r, tripHeaders, 'FO Number') || '') !== fo) return;
+      if ((_numOrNull(_val(r, tripHeaders, 'Truck ID')) || '') !== truck) return;
+      if (_formatDate(_readDateCell(_val(r, tripHeaders, 'Trip Date'))) !== date) return;
+      siblings[id] = true;
+    });
+    const shared = wbRows.slice(1).find(r =>
+      siblings[_numOrNull(_val(r, wbHeaders, 'Trip ID'))] &&
+      _val(r, wbHeaders, 'Status') === 'Suggested' &&
+      _val(r, wbHeaders, 'Waybill Type') === 'Regular');
+    if (shared) {
+      const nextId = _nextRowId(wbSheet);
+      const number = _val(shared, wbHeaders, 'Waybill Number');
+      wbSheet.appendRow([
+        nextId,
+        number,
+        _numOrNull(_val(shared, wbHeaders, 'Prefix ID')),
+        _val(shared, wbHeaders, 'Sequence Number'),
+        tripId,
+        fo,
+        'Regular',
+        '',
+        'Suggested',
+        false,
+        '',
+        '',
+      ]);
+      _auditLog('WAYBILL_SUGGEST', SHEET_WAYBILLS, nextId, '', number);
+      return { id: nextId, waybillNumber: number };
+    }
+  }
+
+  return prefixId
+    ? _createSuggestedWaybill(tripId, prefixId, fo, 'Regular', null)
+    : null;
 }
 
 /**
