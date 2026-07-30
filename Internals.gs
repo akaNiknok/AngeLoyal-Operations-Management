@@ -249,13 +249,25 @@ function _updateWaybillPrefixSequence(prefixId, newSeqNumber) {
   // that width; when it carries a leading zero, write it as text (number
   // format "@") so Sheets doesn't coerce "0358" back to the number 358.
   const width  = String(rawCur == null ? '' : rawCur).trim().length;
-  const plain  = String(newSeqNumber);
-  const padded = plain.padStart(width, '0');
-  const cell   = sheet.getRange(rowIdx + 1, headers.indexOf('Last Sequence Number') + 1);
-  if (padded !== plain) {
-    cell.setNumberFormat('@').setValue(padded);
+  _writePrefixSequenceCell(sheet, rowIdx, headers, String(newSeqNumber).padStart(width, '0'));
+}
+
+/**
+ * Writes a Last Sequence Number cell, preserving the booklet's digit width.
+ * A value carrying leading zeros is written as text (number format "@") so
+ * Sheets doesn't coerce "0358" back to the number 358.
+ *
+ * @param {Sheet}  sheet
+ * @param {number} rowIdx   0-based index into the values array (header = 0)
+ * @param {Array}  headers
+ * @param {string} seqText  The sequence, already padded to its width
+ */
+function _writePrefixSequenceCell(sheet, rowIdx, headers, seqText) {
+  const cell = sheet.getRange(rowIdx + 1, headers.indexOf('Last Sequence Number') + 1);
+  if (seqText.charAt(0) === '0') {
+    cell.setNumberFormat('@').setValue(seqText);
   } else {
-    cell.setValue(newSeqNumber);
+    cell.setValue(Number(seqText));
   }
 }
 

@@ -327,6 +327,14 @@
                         .querySelectorAll(".admin-only")
                         .forEach((el) => el.classList.remove("admin-only"));
                 }
+                // Nav items open to both Admin and Dispatcher.
+                if (role === "Admin" || role === "Dispatcher") {
+                    document
+                        .querySelectorAll(".dispatcher-only")
+                        .forEach((el) =>
+                            el.classList.remove("dispatcher-only"),
+                        );
+                }
 
                 // A signed-in account with no role can't use the app — show the
                 // gate (with a way to sign out and try another account).
@@ -440,6 +448,7 @@
                 if (name === "employees") renderEmployeesAdmin();
                 if (name === "billing-categories") renderBillingCategoriesAdmin();
                 if (name === "route-type-map") renderRouteTypeMapAdmin();
+                if (name === "waybill-prefixes") renderWaybillPrefixesAdmin();
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────

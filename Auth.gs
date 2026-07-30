@@ -239,6 +239,8 @@ const RPC_ALLOWED = {
   updateBillingCategory: true,
   createRouteTypeMapping: true,
   updateRouteTypeMapping: true,
+  createWaybillPrefix: true,
+  updateWaybillPrefix: true,
   createEmployee: true,
   updateEmployee: true,
 };

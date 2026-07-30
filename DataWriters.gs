@@ -1343,6 +1343,136 @@ function updateRouteTypeMapping(mappingId, changes) {
 
 
 // ============================================================
+//  DATA WRITERS — Waybill Prefixes (Admin + Dispatcher)
+// ============================================================
+
+/**
+ * Normalizes a Last Sequence Number input. Kept as a digit string so the
+ * booklet's fixed width (leading zeros) survives the round trip.
+ * @param {*} value
+ * @returns {string}
+ */
+function _normalizeSequenceInput(value) {
+  const seq = String(value == null ? '' : value).trim();
+  if (!/^\d+$/.test(seq)) throw new Error('Last sequence number must be digits only (e.g. 0357).');
+  return seq;
+}
+
+/**
+ * Creates a new waybill prefix.
+ * @param {Object} data  { prefix, companyName, lastSequenceNumber }
+ * @returns {{ success: boolean, waybillPrefix: Object } | { success: false, error: string }}
+ */
+function createWaybillPrefix(data) {
+  _requirePermission('EDIT_WAYBILL_PREFIXES');
+  try {
+    // A blank prefix is legal (waybill number is then the bare sequence).
+    const prefix      = String(data.prefix || '').trim();
+    const companyName = String(data.companyName || '').trim();
+    const seq         = _normalizeSequenceInput(data.lastSequenceNumber);
+    if (!companyName) throw new Error('Company name is required.');
+
+    const sheet   = _getSheet(SHEET_WB_PREFIXES);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const dup = rows.slice(1).some(row =>
+      String(_val(row, headers, 'Prefix')).trim().toUpperCase() === prefix.toUpperCase());
+    if (dup) throw new Error(`A prefix "${prefix || '(blank)'}" already exists.`);
+
+    const nextId = _nextRowId(sheet);
+    sheet.appendRow([nextId, prefix, companyName, seq]);
+    _writePrefixSequenceCell(sheet, sheet.getLastRow() - 1, headers, seq);
+
+    _auditLog('WAYBILL_PREFIX_CREATE', SHEET_WB_PREFIXES, nextId, '',
+      JSON.stringify({ prefix, companyName, lastSequenceNumber: seq }));
+
+    return {
+      success: true,
+      waybillPrefix: {
+        id: nextId,
+        prefix,
+        companyName,
+        lastSequenceNumber: Number(seq),
+        sequenceWidth: seq.length,
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Updates a waybill prefix. Editing Last Sequence Number re-bases the
+ * numbering (and its zero-pad width) — suggestion/confirmation continue from
+ * whatever is stored here, so it is audited like any other master change.
+ *
+ * @param {number} prefixId
+ * @param {Object} changes  Any of { prefix, companyName, lastSequenceNumber }
+ * @returns {{ success: boolean, waybillPrefix: Object } | { success: false, error: string }}
+ */
+function updateWaybillPrefix(prefixId, changes) {
+  _requirePermission('EDIT_WAYBILL_PREFIXES');
+  try {
+    const sheet   = _getSheet(SHEET_WB_PREFIXES);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const rowIdx = _findRowById(rows, headers, prefixId);
+    if (rowIdx === -1) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+
+    const row    = rows[rowIdx];
+    const oldVal = {
+      prefix:             _val(row, headers, 'Prefix'),
+      companyName:        _val(row, headers, 'Company Name'),
+      lastSequenceNumber: _val(row, headers, 'Last Sequence Number'),
+    };
+
+    const updates = {};
+    if (changes.prefix !== undefined) {
+      const prefix = String(changes.prefix).trim();
+      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
+        && String(_val(r, headers, 'Prefix')).trim().toUpperCase() === prefix.toUpperCase());
+      if (dup) throw new Error(`A prefix "${prefix || '(blank)'}" already exists.`);
+      updates['Prefix'] = prefix;
+    }
+    if (changes.companyName !== undefined) {
+      const companyName = String(changes.companyName).trim();
+      if (!companyName) throw new Error('Company name is required.');
+      updates['Company Name'] = companyName;
+    }
+
+    let seq = null;
+    if (changes.lastSequenceNumber !== undefined) {
+      seq = _normalizeSequenceInput(changes.lastSequenceNumber);
+    }
+
+    if (Object.keys(updates).length > 0) {
+      _writeRowFields(sheet, row, rowIdx, headers, updates);
+    }
+    if (seq !== null) _writePrefixSequenceCell(sheet, rowIdx, headers, seq);
+
+    _auditLog('WAYBILL_PREFIX_EDIT', SHEET_WB_PREFIXES, prefixId,
+      JSON.stringify(oldVal), JSON.stringify(changes));
+
+    const stored = seq !== null ? seq : String(oldVal.lastSequenceNumber || '').trim();
+    return {
+      success: true,
+      waybillPrefix: {
+        id:                 prefixId,
+        prefix:             _val(row, headers, 'Prefix'),
+        companyName:        _val(row, headers, 'Company Name'),
+        lastSequenceNumber: Number(stored) || 0,
+        sequenceWidth:      stored.length,
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ============================================================
 //  DATA WRITERS — Employees (Admin only)
 // ============================================================
 

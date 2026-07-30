@@ -387,13 +387,52 @@
                     .join("");
             }
 
+            // The .jpg goes to the drivers' Messenger group chat. On Android,
+            // Messenger's image viewer only zooms an image until it fills the
+            // phone's width — you can't pinch in past that. So the on-screen
+            // text size at max zoom is font_px × (phoneWidth ÷ imageWidth):
+            // the FINAL ROUTE table above stays wide (800px, ~11px font) and
+            // becomes unreadable there. For the share card we instead render
+            // narrow with big fonts so that font÷width stays high enough for
+            // the text to survive fit-to-width on a phone (~13–14px). The
+            // Print/PDF path keeps its compact A4-portrait sizing.
+            const SHARE_JPG_WIDTH = 520; // px; ≈ phone width, so fit-to-width barely shrinks it
+
             function printDriverShare(mode) {
+                const isJpg = mode === "jpg";
                 const dateVal = document.getElementById("dispatch-date").value;
                 const cards = driverShareCards
                     .map((c) => driverShareCardHtml(c, true))
                     .join("");
-                const html = `<!DOCTYPE html><html><head><title>Trips ${esc(dateVal)}</title>
-  <style>${PRINT_BASE_CSS}
+                // Two size profiles for the same markup: compact for A4 print,
+                // enlarged for the phone-shared .jpg (see SHARE_JPG_WIDTH note).
+                const shareCss = isJpg
+                    ? `
+    body { font-size: 18px; line-height: 1.4; padding: 14px; }
+    h1 { font-size: 22px; }
+    .sub { font-size: 15px; }
+    .ds-card { border: 2px solid #333; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+    .ds-convoy {
+      display: inline-block; font-weight: bold; font-size: 18px; margin-bottom: 8px;
+      padding: 5px 10px; border: 2px solid #5c3a8f; border-radius: 5px;
+      color: #5c3a8f; background: #f5f0fa;
+    }
+    .ds-leg { display: flex; gap: 14px; align-items: baseline; font-size: 22px; font-weight: bold; margin-bottom: 6px; }
+    .ds-crew { letter-spacing: 0.2px; }
+    .ds-plate { font-family: monospace; }
+    .ds-wb { margin-left: auto; font-family: monospace; font-weight: normal; font-size: 16px; color: #333; white-space: nowrap; }
+    .ds-stops { margin-top: 8px; border-top: 1px dashed #999; padding-top: 8px; }
+    .ds-stop { font-size: 18px; margin-bottom: 9px; }
+    .ds-stop-top { display: flex; align-items: baseline; gap: 8px; }
+    .ds-stop-n { font-weight: bold; }
+    .ds-fo { font-family: monospace; font-weight: bold; color: #333; white-space: nowrap; }
+    .ds-outlet { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; margin-left: 20px; }
+    .ds-area { color: #555; white-space: nowrap; }
+    .ds-qty { color: #555; white-space: nowrap; }
+    .ds-remarks { font-size: 15px; color: #333; margin-left: 20px; }
+    .ds-address { font-size: 15px; color: #555; margin-left: 20px; }
+    .color-chip { display: inline-block; font-size: 14px; font-weight: bold; padding: 2px 8px; border-radius: 99px; border: 1px solid #ccc; }`
+                    : `
     @page { size: portrait; margin: 10mm; }
     body { font-size: 11px; line-height: 1.4; }
     .ds-card { border: 1.5px solid #333; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; page-break-inside: avoid; }
@@ -417,13 +456,19 @@
     .ds-qty { color: #555; white-space: nowrap; }
     .ds-remarks { font-size: 10px; color: #333; margin-left: 16px; }
     .ds-address { font-size: 10px; color: #555; margin-left: 16px; }
-    .color-chip { display: inline-block; font-size: 9px; font-weight: bold; padding: 1px 6px; border-radius: 99px; border: 1px solid #ccc; }
+    .color-chip { display: inline-block; font-size: 9px; font-weight: bold; padding: 1px 6px; border-radius: 99px; border: 1px solid #ccc; }`;
+                const html = `<!DOCTYPE html><html><head><title>Trips ${esc(dateVal)}</title>
+  <style>${PRINT_BASE_CSS}${shareCss}
   </style></head><body>
   <h1>TRIPS ${esc(dateVal)} (ANGELOYAL)</h1>
   <div class="sub">Grouped by truck / convoy — sequence as arranged by the dispatcher</div>
   ${cards}</body></html>`;
-                if (mode === "jpg")
-                    exportHtmlAsJpg(html, `TRIPS ${dateVal} (ANGELOYAL).jpg`, 800);
+                if (isJpg)
+                    exportHtmlAsJpg(
+                        html,
+                        `TRIPS ${dateVal} (ANGELOYAL).jpg`,
+                        SHARE_JPG_WIDTH,
+                    );
                 else printHtmlDocument(html);
             }
 
