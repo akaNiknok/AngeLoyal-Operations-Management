@@ -1374,14 +1374,14 @@ function createWaybillPrefix(data) {
 
     const sheet   = _getSheet(SHEET_WB_PREFIXES);
     const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
+    const headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
 
     const dup = rows.slice(1).some(row =>
       String(_val(row, headers, 'Prefix')).trim().toUpperCase() === prefix.toUpperCase());
     if (dup) throw new Error(`A prefix "${prefix || '(blank)'}" already exists.`);
 
     const nextId = _nextRowId(sheet);
-    sheet.appendRow([nextId, prefix, companyName, seq]);
+    sheet.appendRow([nextId, prefix, companyName, seq, true]);
     _writePrefixSequenceCell(sheet, sheet.getLastRow() - 1, headers, seq);
 
     _auditLog('WAYBILL_PREFIX_CREATE', SHEET_WB_PREFIXES, nextId, '',
@@ -1395,6 +1395,7 @@ function createWaybillPrefix(data) {
         companyName,
         lastSequenceNumber: Number(seq),
         sequenceWidth: seq.length,
+        active: true,
       },
     };
   } catch (e) {
@@ -1407,8 +1408,11 @@ function createWaybillPrefix(data) {
  * numbering (and its zero-pad width) — suggestion/confirmation continue from
  * whatever is stored here, so it is audited like any other master change.
  *
+ * Setting active=false removes the prefix from the pickers; existing waybills
+ * keep referencing it, so it is a soft delete like every other master record.
+ *
  * @param {number} prefixId
- * @param {Object} changes  Any of { prefix, companyName, lastSequenceNumber }
+ * @param {Object} changes  Any of { prefix, companyName, lastSequenceNumber, active }
  * @returns {{ success: boolean, waybillPrefix: Object } | { success: false, error: string }}
  */
 function updateWaybillPrefix(prefixId, changes) {
@@ -1416,7 +1420,7 @@ function updateWaybillPrefix(prefixId, changes) {
   try {
     const sheet   = _getSheet(SHEET_WB_PREFIXES);
     const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
+    const headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
 
     const rowIdx = _findRowById(rows, headers, prefixId);
     if (rowIdx === -1) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
@@ -1426,6 +1430,7 @@ function updateWaybillPrefix(prefixId, changes) {
       prefix:             _val(row, headers, 'Prefix'),
       companyName:        _val(row, headers, 'Company Name'),
       lastSequenceNumber: _val(row, headers, 'Last Sequence Number'),
+      active:             _val(row, headers, 'Active') !== false,
     };
 
     const updates = {};
@@ -1441,6 +1446,7 @@ function updateWaybillPrefix(prefixId, changes) {
       if (!companyName) throw new Error('Company name is required.');
       updates['Company Name'] = companyName;
     }
+    if (changes.active !== undefined) updates['Active'] = !!changes.active;
 
     let seq = null;
     if (changes.lastSequenceNumber !== undefined) {
@@ -1464,6 +1470,7 @@ function updateWaybillPrefix(prefixId, changes) {
         companyName:        _val(row, headers, 'Company Name'),
         lastSequenceNumber: Number(stored) || 0,
         sequenceWidth:      stored.length,
+        active:             _val(row, headers, 'Active') !== false,
       },
     };
   } catch (e) {
