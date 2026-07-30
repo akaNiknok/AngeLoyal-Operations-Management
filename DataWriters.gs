@@ -1359,6 +1359,27 @@ function _normalizeSequenceInput(value) {
 }
 
 /**
+ * Returns the "already exists" error message if another row already uses this
+ * prefix, or '' if it's free. A removed (inactive) row still collides — it's
+ * only hidden from the pickers — so the message points at Restore instead of
+ * leaving the user hunting for a prefix they can't see.
+ *
+ * @param {Array[]}  rows       All sheet rows, header included.
+ * @param {string[]} headers
+ * @param {string}   prefix     The candidate prefix, already trimmed.
+ * @param {number}   [skipRowIdx] Row index (into rows) to ignore — the row being edited.
+ * @returns {string}
+ */
+function _prefixDupMessage(rows, headers, prefix, skipRowIdx) {
+  const dup = rows.slice(1).find((r, i) => (i + 1) !== skipRowIdx
+    && String(_val(r, headers, 'Prefix')).trim().toUpperCase() === prefix.toUpperCase());
+  if (!dup) return '';
+  const removed = _val(dup, headers, 'Active') === false;
+  return `A prefix "${prefix || '(blank)'}" already exists`
+    + (removed ? ' but was removed — restore it instead of adding it again.' : '.');
+}
+
+/**
  * Creates a new waybill prefix.
  * @param {Object} data  { prefix, companyName, lastSequenceNumber }
  * @returns {{ success: boolean, waybillPrefix: Object } | { success: false, error: string }}
@@ -1376,9 +1397,8 @@ function createWaybillPrefix(data) {
     const rows    = sheet.getDataRange().getValues();
     const headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
 
-    const dup = rows.slice(1).some(row =>
-      String(_val(row, headers, 'Prefix')).trim().toUpperCase() === prefix.toUpperCase());
-    if (dup) throw new Error(`A prefix "${prefix || '(blank)'}" already exists.`);
+    const dup = _prefixDupMessage(rows, headers, prefix);
+    if (dup) throw new Error(dup);
 
     const nextId = _nextRowId(sheet);
     sheet.appendRow([nextId, prefix, companyName, seq, true]);
@@ -1436,9 +1456,8 @@ function updateWaybillPrefix(prefixId, changes) {
     const updates = {};
     if (changes.prefix !== undefined) {
       const prefix = String(changes.prefix).trim();
-      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
-        && String(_val(r, headers, 'Prefix')).trim().toUpperCase() === prefix.toUpperCase());
-      if (dup) throw new Error(`A prefix "${prefix || '(blank)'}" already exists.`);
+      const dup = _prefixDupMessage(rows, headers, prefix, rowIdx);
+      if (dup) throw new Error(dup);
       updates['Prefix'] = prefix;
     }
     if (changes.companyName !== undefined) {
