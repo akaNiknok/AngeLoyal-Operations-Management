@@ -142,3 +142,17 @@ test('a sheet without an Active column self-migrates, and its rows stay active',
   assert.equal(after.find((p) => p.id === 1).active, true);  // untouched row stays active
   assert.equal(after.find((p) => p.id === 2).active, false);
 });
+
+test('re-adding a removed prefix points at Restore', () => {
+  const { api } = makeEnv({ sheets: base(), userEmail: EMAIL.Admin });
+
+  api.updateWaybillPrefix(1, { active: false });
+
+  const res = api.createWaybillPrefix({
+    prefix: 'ay',
+    companyName: 'AngeLoyal Logistics',
+    lastSequenceNumber: '0357',
+  });
+  assert.equal(res.success, false);
+  assert.match(res.error, /already exists but was removed — restore it/);
+});
