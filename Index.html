@@ -122,6 +122,13 @@
                     >
                         Route Type Map
                     </button>
+                    <button
+                        class="nav-btn dispatcher-only"
+                        id="nav-waybill-prefixes"
+                        onclick="switchPanel('waybill-prefixes')"
+                    >
+                        Waybill Prefixes
+                    </button>
                 </nav>
 
                 <div class="header-right">
@@ -936,6 +943,38 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: WAYBILL PREFIXES (admin + dispatcher)
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-waybill-prefixes">
+                <div class="toolbar">
+                    <span class="tb-label" id="waybill-prefixes-count"></span>
+                    <div class="tb-spacer"></div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="openAddWaybillPrefixModal()"
+                    >
+                        + Add prefix
+                    </button>
+                </div>
+                <div class="admin-split">
+                    <div class="admin-list-wrap">
+                        <table class="data-table" id="waybill-prefixes-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th style="width: 120px">Prefix</th>
+                                    <th>Company Name</th>
+                                    <th style="width: 160px">Last Sequence</th>
+                                    <th>Next waybill</th>
+                                </tr>
+                            </thead>
+                            <tbody id="waybill-prefixes-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
         <!-- /.app -->
 
@@ -1367,6 +1406,61 @@
                         onclick="submitAddRouteTypeMap()"
                     >
                         Add mapping
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-backdrop" id="modal-add-waybill-prefix">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Add waybill prefix</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-add-waybill-prefix')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">Prefix</label>
+                        <input
+                            type="text"
+                            id="nwp-prefix"
+                            placeholder="e.g. AY (blank = no prefix)"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Company name</label>
+                        <input
+                            type="text"
+                            id="nwp-company"
+                            placeholder="e.g. AngeLoyal Logistics"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Last sequence number</label>
+                        <input
+                            type="text"
+                            id="nwp-sequence"
+                            inputmode="numeric"
+                            placeholder="e.g. 0000 — digits set the booklet width"
+                        />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-add-waybill-prefix')"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        onclick="submitAddWaybillPrefix()"
+                    >
+                        Add prefix
                     </button>
                 </div>
             </div>

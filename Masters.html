@@ -551,4 +551,148 @@
                     })
                     .createRouteTypeMapping({ fileTypeCode, billingCategory });
             }
+
+            // ── WAYBILL PREFIXES (admin + dispatcher) ────────────────
+            // The stored Last Sequence Number carries the booklet's digit
+            // width in its own length ("0357" → width 4), so edits round-trip
+            // as text and the padding survives.
+            function prefixSeqText(p) {
+                return String(p.lastSequenceNumber).padStart(
+                    p.sequenceWidth || 0,
+                    "0",
+                );
+            }
+
+            function renderWaybillPrefixesAdmin() {
+                const tbody = document.getElementById("waybill-prefixes-tbody");
+                const canEdit =
+                    currentUser.role === "Admin" ||
+                    currentUser.role === "Dispatcher";
+                document.getElementById(
+                    "waybill-prefixes-count",
+                ).textContent = `${waybillPrefixes.length} prefixes`;
+
+                tbody.innerHTML = waybillPrefixes
+                    .map((p) => {
+                        const seq = prefixSeqText(p);
+                        const next = String(p.lastSequenceNumber + 1).padStart(
+                            p.sequenceWidth || 0,
+                            "0",
+                        );
+                        const cell = (field, value, mono) =>
+                            canEdit
+                                ? `<input class="cell-input" value="${esc(value)}" onchange="updateWaybillPrefixField(${p.id},'${field}',this.value)">`
+                                : `<span${mono ? ` style="font-family:'DM Mono',monospace"` : ""}>${esc(value)}</span>`;
+                        return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${p.id}</td>
+    <td>${cell("prefix", p.prefix, true)}</td>
+    <td>${cell("companyName", p.companyName)}</td>
+    <td>${cell("lastSequenceNumber", seq, true)}</td>
+    <td style="font-family:'DM Mono',monospace;color:var(--muted)">${esc(p.prefix ? `${p.prefix}-${next}` : next)}</td>
+  </tr>`;
+                    })
+                    .join("");
+            }
+
+            function updateWaybillPrefixField(id, field, value) {
+                const p = waybillPrefixes.find((x) => x.id === id);
+                if (!p) return;
+                const old =
+                    field === "lastSequenceNumber" ? prefixSeqText(p) : p[field];
+                if (field === "companyName" && !value.trim()) {
+                    showToast("Company name is required.", "error");
+                    renderWaybillPrefixesAdmin();
+                    return;
+                }
+                if (
+                    field === "lastSequenceNumber" &&
+                    !/^\d+$/.test(value.trim())
+                ) {
+                    showToast(
+                        "Last sequence number must be digits only.",
+                        "error",
+                    );
+                    renderWaybillPrefixesAdmin();
+                    return;
+                }
+                if (field === "lastSequenceNumber") {
+                    p.lastSequenceNumber = Number(value.trim());
+                    p.sequenceWidth = value.trim().length;
+                } else {
+                    p[field] = value.trim();
+                }
+                renderWaybillPrefixesAdmin();
+                bgSave("updateWaybillPrefix", [id, { [field]: value.trim() }], {
+                    onOk: (r) => {
+                        Object.assign(p, r.waybillPrefix);
+                        renderWaybillPrefixesAdmin();
+                        populatePrefixSelects();
+                    },
+                    revert: () => {
+                        if (field === "lastSequenceNumber") {
+                            p.lastSequenceNumber = Number(old);
+                            p.sequenceWidth = String(old).length;
+                        } else {
+                            p[field] = old;
+                        }
+                        renderWaybillPrefixesAdmin();
+                    },
+                });
+            }
+
+            function openAddWaybillPrefixModal() {
+                document.getElementById("nwp-prefix").value = "";
+                document.getElementById("nwp-company").value = "";
+                document.getElementById("nwp-sequence").value = "";
+                openModal("modal-add-waybill-prefix");
+            }
+
+            function submitAddWaybillPrefix() {
+                const prefix = document
+                    .getElementById("nwp-prefix")
+                    .value.trim();
+                const companyName = document
+                    .getElementById("nwp-company")
+                    .value.trim();
+                const lastSequenceNumber = document
+                    .getElementById("nwp-sequence")
+                    .value.trim();
+                if (!companyName) {
+                    showToast("Company name is required.", "error");
+                    return;
+                }
+                if (!/^\d+$/.test(lastSequenceNumber)) {
+                    showToast(
+                        "Last sequence number must be digits only (e.g. 0000).",
+                        "error",
+                    );
+                    return;
+                }
+                setSyncing(true);
+                srv()
+                    .withSuccessHandler((r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Add failed: " + r.error, "error");
+                            return;
+                        }
+                        waybillPrefixes.push(r.waybillPrefix);
+                        closeModal("modal-add-waybill-prefix");
+                        showToast(
+                            `${r.waybillPrefix.prefix || "(blank prefix)"} added.`,
+                            "success",
+                        );
+                        renderWaybillPrefixesAdmin();
+                        populatePrefixSelects();
+                    })
+                    .withFailureHandler((e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    })
+                    .createWaybillPrefix({
+                        prefix,
+                        companyName,
+                        lastSequenceNumber,
+                    });
+            }
         </script>

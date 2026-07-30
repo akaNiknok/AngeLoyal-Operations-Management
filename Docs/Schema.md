@@ -44,7 +44,8 @@ Maps Google account emails to specific system roles to manage access control.
 | Confirm waybill numbers | ✓ | ✓ | — | — |
 | Edit the truck roster (Default Assignments) | ✓ | ✓ | — | — |
 | Edit Outlets | ✓ | — | — | — |
-| Edit Billing Categories, Waybill Prefixes | ✓ | — | — | — |
+| Edit Billing Categories | ✓ | — | — | — |
+| Edit Waybill Prefixes | ✓ | ✓ | — | — |
 | Edit Users sheet | ✓ | — | — | — |
 | View Audit Log | ✓ | — | — | — |
 
@@ -308,7 +309,9 @@ The global ledger recording all administrative, operational, and data state modi
 * BILLING\_CATEGORY\_CREATE — New entry added to the Billing Categories list  
 * BILLING\_CATEGORY\_EDIT — Administrative updates to a billing category (rename, Active/Inactive toggling)  
 * ROUTE\_TYPE\_MAP\_CREATE — New route-file truck-type → billing-category mapping added  
-* ROUTE\_TYPE\_MAP\_EDIT — Administrative updates to a route type mapping (code, category, Active/Inactive toggling)
+* ROUTE\_TYPE\_MAP\_EDIT — Administrative updates to a route type mapping (code, category, Active/Inactive toggling)  
+* WAYBILL\_PREFIX\_CREATE — New prefix added to the Waybill Prefixes list  
+* WAYBILL\_PREFIX\_EDIT — Updates to a waybill prefix (prefix code, company name, re-basing the Last Sequence Number)
 
 ## **Structural Implementation Conventions**
 

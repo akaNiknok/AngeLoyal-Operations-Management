@@ -45,7 +45,7 @@ The project is contractually delivered in 3 phases. See [`BACKLOG.md`](BACKLOG.m
 - `CrewBoard.html` — crew rail: toggled panel of draggable crew cards (truck + default driver/helpers) dropped onto dispatch rows to assign a whole crew at once.
 - `Import.html` — Rebisco `.xlsx` route-file parsing + import.
 - `Roster.html` — truck roster (driver/helper ↔ truck assignment; edits Default Assignments) + Outlets admin.
-- `Masters.html` — admin master-detail panels (outlets, trucks, employees, billing categories, default assignments).
+- `Masters.html` — admin master-detail panels (outlets, trucks, employees, billing categories, route type map, default assignments) plus the Waybill Prefixes panel (Admin **and** Dispatcher — gated by `EDIT_WAYBILL_PREFIXES` / the `dispatcher-only` nav class).
 
 The client calls the backend with `google.script.run.withSuccessHandler(...).fnName(args)`. There is **no router/framework** — `switchPanel()` toggles `.panel` visibility, state lives in module-level `let` globals in `Core.html`.
 

@@ -1034,13 +1034,14 @@
                     waybillSuggested: t.waybillSuggested,
                     suggestedWaybillId: t.suggestedWaybillId,
                 }));
+                const waybillId = trip.suggestedWaybillId;
                 targets.forEach((t) => {
                     t.waybillConfirmed = customNumber;
                     t.waybillSuggested = "";
                     t.suggestedWaybillId = null;
                 });
                 renderDispatch();
-                bgSave("confirmWaybill", [trip.suggestedWaybillId, customNumber], {
+                bgSave("confirmWaybill", [waybillId, customNumber], {
                     onOk: (r) => {
                         targets.forEach((t) => (t.waybillConfirmed = r.waybillNumber));
                         showToast(
