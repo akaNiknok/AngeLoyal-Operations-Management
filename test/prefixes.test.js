@@ -108,3 +108,37 @@ test('waybill prefix writers are gated to Admin + Dispatcher', () => {
     );
   });
 });
+
+test('removing a prefix is a soft delete, and restoring it brings it back', () => {
+  const { api, ss } = makeEnv({ sheets: base(), userEmail: EMAIL.Dispatcher });
+
+  const removed = api.updateWaybillPrefix(1, { active: false });
+  assert.equal(removed.success, true);
+  assert.equal(removed.waybillPrefix.active, false);
+  assert.equal(prefixRows(ss).find((r) => r.ID === 1).Active, false);
+  // Soft delete: the row (and its sequence) survives for waybills already issued.
+  assert.equal(api.getWaybillPrefixes().find((p) => p.id === 1).lastSequenceNumber, 357);
+
+  const restored = api.updateWaybillPrefix(1, { active: true });
+  assert.equal(restored.waybillPrefix.active, true);
+  assert.equal(api.getWaybillPrefixes().find((p) => p.id === 1).active, true);
+});
+
+test('a sheet without an Active column self-migrates, and its rows stay active', () => {
+  const legacy = base();
+  legacy['Waybill Prefixes'] = [
+    ['ID', 'Prefix', 'Company Name', 'Last Sequence Number'],
+    [1, 'AY', 'AngeLoyal Logistics', '0357'],
+    [2, 'RB', 'Rebisco Hauling', '0000'],
+  ];
+  const { api, ss } = makeEnv({ sheets: legacy, userEmail: EMAIL.Admin });
+
+  assert.equal(api.getWaybillPrefixes().every((p) => p.active), true);
+
+  api.updateWaybillPrefix(2, { active: false });
+  assert.equal(dump(ss, 'Waybill Prefixes').headers.includes('Active'), true);
+
+  const after = api.getWaybillPrefixes();
+  assert.equal(after.find((p) => p.id === 1).active, true);  // untouched row stays active
+  assert.equal(after.find((p) => p.id === 2).active, false);
+});

@@ -564,15 +564,22 @@
             }
 
             function renderWaybillPrefixesAdmin() {
+                const showInactive = document.getElementById(
+                    "waybill-prefixes-show-inactive",
+                ).checked;
                 const tbody = document.getElementById("waybill-prefixes-tbody");
                 const canEdit =
                     currentUser.role === "Admin" ||
                     currentUser.role === "Dispatcher";
+
+                const filtered = waybillPrefixes.filter(
+                    (p) => showInactive || p.active !== false,
+                );
                 document.getElementById(
                     "waybill-prefixes-count",
-                ).textContent = `${waybillPrefixes.length} prefixes`;
+                ).textContent = `${filtered.length} prefixes`;
 
-                tbody.innerHTML = waybillPrefixes
+                tbody.innerHTML = filtered
                     .map((p) => {
                         const seq = prefixSeqText(p);
                         const next = String(p.lastSequenceNumber + 1).padStart(
@@ -589,6 +596,8 @@
     <td>${cell("companyName", p.companyName)}</td>
     <td>${cell("lastSequenceNumber", seq, true)}</td>
     <td style="font-family:'DM Mono',monospace;color:var(--muted)">${esc(p.prefix ? `${p.prefix}-${next}` : next)}</td>
+    <td>${statusChip(p.active)}</td>
+    <td>${canEdit ? rowActionBtn("toggleWaybillPrefixActive", p.id, p.active) : ""}</td>
   </tr>`;
                     })
                     .join("");
@@ -636,6 +645,27 @@
                             p[field] = old;
                         }
                         renderWaybillPrefixesAdmin();
+                    },
+                });
+            }
+
+            function toggleWaybillPrefixActive(id) {
+                const p = waybillPrefixes.find((x) => x.id === id);
+                if (!p) return;
+                const label = p.prefix || "(blank prefix)";
+                const makeActive = p.active === false;
+                const verb = makeActive ? "restore" : "remove";
+                if (!confirm(`Are you sure you want to ${verb} ${label}?`))
+                    return;
+                bgSave("updateWaybillPrefix", [id, { active: makeActive }], {
+                    onOk: (r) => {
+                        Object.assign(p, r.waybillPrefix);
+                        showToast(
+                            `${label} ${makeActive ? "restored" : "removed"}.`,
+                            "success",
+                        );
+                        renderWaybillPrefixesAdmin();
+                        populatePrefixSelects();
                     },
                 });
             }

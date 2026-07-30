@@ -39,6 +39,27 @@ function _getOrCreateSheet(name, headers, seedRows) {
 }
 
 /**
+ * Appends a column header to row 1 if the sheet doesn't have it yet, so a
+ * Sheet that predates the feature self-migrates instead of erroring. Mutates
+ * (and returns) the passed headers array so callers can keep using it.
+ *
+ * Existing rows are left blank — readers treat a blank Active cell as active
+ * (`_val(...) !== false`), so no backfill is needed.
+ *
+ * @param {Sheet}    sheet
+ * @param {string[]} headers  Header row already read from the sheet.
+ * @param {string}   colName
+ * @returns {string[]} The headers array, including colName.
+ */
+function _ensureColumn(sheet, headers, colName) {
+  if (headers.indexOf(colName) === -1) {
+    sheet.getRange(1, headers.length + 1).setValue(colName);
+    headers.push(colName);
+  }
+  return headers;
+}
+
+/**
  * Gets the value at a named column header position in a row.
  * Returns '' if the column doesn't exist or the value is null/undefined.
  *

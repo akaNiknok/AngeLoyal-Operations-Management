@@ -153,7 +153,7 @@ function getRouteTypeCategoryLookup() {
 
 /**
  * Returns all waybill prefix entries.
- * @returns {Object[]} Array of { id, prefix, companyName, lastSequenceNumber, sequenceWidth }
+ * @returns {Object[]} Array of { id, prefix, companyName, lastSequenceNumber, sequenceWidth, active }
  *   sequenceWidth is the booklet's fixed digit width, inferred from the length
  *   of the stored Last Sequence Number (e.g. "0357" → 4). 0 = no padding.
  */
@@ -170,6 +170,7 @@ function getWaybillPrefixes() {
       companyName:        _val(row, headers, 'Company Name'),
       lastSequenceNumber: Number(rawLast) || 0,
       sequenceWidth:      String(rawLast == null ? '' : rawLast).trim().length,
+      active:             _val(row, headers, 'Active') !== false,
     };
   }).filter(r => r.id !== null);
 }
