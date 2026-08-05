@@ -250,6 +250,14 @@ function makeEnv(opts = {}) {
         getProperty: (k) => (opts.scriptProperties || {})[k] || null,
       }),
     },
+    // Single-threaded tests never contend, so the lock always grants. Set
+    // opts.lockUnavailable to exercise the "someone else is issuing" path.
+    LockService: {
+      getScriptLock: () => ({
+        tryLock: () => !opts.lockUnavailable,
+        releaseLock: () => {},
+      }),
+    },
     ContentService: {
       MimeType: { JSON: 'JSON' },
       createTextOutput: (text) => {

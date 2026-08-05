@@ -102,14 +102,17 @@ Tracks the alphanumeric code sequences allocated to each company or subcontracto
 | ID | Number | Auto-incrementing primary key |
 | Prefix | String | Unique short code (e.g., AY) prepended to the numeric sequence. May be left blank for "no prefix" — the waybill number is then just the bare sequence (e.g., `10761` instead of `AY-10761`). |
 | Company Name | String | Corporate identity associated with the prefix (e.g., AngeLoyal Logistics) |
-| Last Sequence Number | String | The most recent sequence number issued, stored **as text at the booklet's fixed digit width** (e.g. `0357`, `10760`). The backend infers the zero-pad width from this value's length, pads each generated waybill number to it (padding never truncates — a longer sequence prints in full), and rewrites this at that width whenever a number is issued — **suggestion reserves the number** (advances this counter) and confirmation advances it further only if a higher custom number is entered. **Seed a new prefix at its full width (e.g. `0000`) and format the column as _Plain text_** so leading zeros aren't coerced away. |
+| Last Sequence Number | Number | The most recent sequence number issued, stored as a **plain number** (e.g. `357`, `10760`) — never zero-padded text. **Suggestion reserves the number** (advances this counter) and confirmation advances it further only if a higher custom number is entered. The counter is only a cache: the backend also reads the highest Sequence Number already in the Waybills ledger for the prefix and issues past whichever is higher, so a counter that fails to write can never re-issue a live number. |
+| Sequence Width | Number | The booklet's fixed digit width — how many digits the generated waybill number is zero-padded to (`4` prints `0358`). Padding never truncates: a sequence longer than the width prints in full. Set from the length of the value typed into the admin panel, so entering `0000` records width 4. **A row with no width falls back to the length of the Last Sequence Number**, which keeps pre-migration sheets printing correctly until their next issue rewrites both fields; the column is appended automatically when a sheet lacks it. |
 | Active | Boolean | Inactive prefixes are hidden from the waybill-prefix pickers but stay valid for waybills already issued under them. A blank cell reads as active, and the column is appended automatically on the first edit if a pre-existing sheet lacks it. |
+
+> **Why the width is its own column.** It used to be inferred from the *formatting* of Last Sequence Number — the counter was stored as text (`0358`) and its length was the width. Persisting that took a `setNumberFormat('@').setValue(…)` write which silently did nothing, so **every zero-padded booklet froze**: `AY` stayed at `0358` and re-issued `AY-0359` across four different FOs, `GL` stayed at `039` and re-issued `GL-040` across two, while every prefix stored without a leading zero advanced normally. Re-basing this counter to a number the booklet has already issued is now refused.
 
 **Initial seed:**
 
-| Prefix | Company Name | Last Sequence Number | Active |
-|---|---|---|---|
-| AY | AngeLoyal Logistics | (set at deployment, e.g. 10760) | TRUE |
+| Prefix | Company Name | Last Sequence Number | Active | Sequence Width |
+|---|---|---|---|---|
+| AY | AngeLoyal Logistics | (set at deployment, e.g. 10760) | TRUE | (booklet digits, e.g. 5) |
 
 ## **Group 2: People & Trucks**
 

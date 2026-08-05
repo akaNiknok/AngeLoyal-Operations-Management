@@ -54,6 +54,11 @@ Phase 2 (billing & payroll) is not built yet — write its tests alongside the c
 - `fixtures.js` holds the sheet **header rows**, mirrored from `Docs/Schema.md`
   and the column order the writers append in. **Keep these in sync** if the
   schema changes — a drift here is a real bug the tests should surface.
+- **The fakes keep each cell's JS type and treat formatting as a no-op**
+  (`FakeRange.setNumberFormat()`). Anything that leans on how Sheets coerces a
+  written value is therefore invisible here — that is exactly how the
+  zero-padded waybill counter shipped broken past a green suite. Keep backend
+  logic independent of cell formatting rather than testing around this.
 - Objects returned *from* the bundle live in the vm realm, so their prototype
   differs from the host's: prefer field-by-field assertions over
   `deepStrictEqual` on returned objects. The host `Date` is shared into the vm

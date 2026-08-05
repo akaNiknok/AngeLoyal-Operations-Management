@@ -48,6 +48,105 @@ function _auditLog(action, table, rowId, oldValue, newValue) {
 // ============================================================
 
 /**
+ * Runs `fn` holding the script lock.
+ *
+ * Minting a waybill number is a read → reserve → append sequence, and nothing
+ * serializes client calls: the dispatch board fires saves in the background
+ * (`bgSave`), so two promotions can run as parallel executions, both read the
+ * same Last Sequence Number and both mint it.
+ *
+ * Never nest these — a second getScriptLock() in the same execution blocks on
+ * the first.
+ *
+ * @param {Function} fn
+ * @returns {*} whatever `fn` returns
+ */
+function _withWaybillLock(fn) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) {
+    throw new Error('Another waybill number is being issued right now. Please try again.');
+  }
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Looks up a waybill prefix by ID.
+ * @param {number} prefixId
+ * @returns {Object} the prefix record from getWaybillPrefixes()
+ */
+function _requireWaybillPrefix(prefixId) {
+  const pref = getWaybillPrefixes().find(p => Number(p.id) === Number(prefixId));
+  if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+  return pref;
+}
+
+/**
+ * Highest Sequence Number already recorded against a prefix in the Waybills
+ * ledger.
+ *
+ * The prefix's Last Sequence Number is only a cache of this. Consulting the
+ * ledger as well means a counter that failed to advance — or one an admin
+ * re-based too low — can still never re-issue a number that is already out.
+ *
+ * @param {number}  prefixId
+ * @param {Array[]} wbRows     Waybills rows, header included.
+ * @param {Array}   wbHeaders
+ * @returns {number} 0 if the prefix has never been used
+ */
+function _highestIssuedSequence(prefixId, wbRows, wbHeaders) {
+  let max = 0;
+  for (let i = 1; i < wbRows.length; i++) {
+    if (Number(_numOrNull(_val(wbRows[i], wbHeaders, 'Prefix ID'))) !== Number(prefixId)) continue;
+    const seq = Number(_numOrNull(_val(wbRows[i], wbHeaders, 'Sequence Number'))) || 0;
+    if (seq > max) max = seq;
+  }
+  return max;
+}
+
+/**
+ * Reserves a sequence number on a prefix: writes Last Sequence Number and the
+ * booklet's pad width, then reads the cell back to prove the write landed.
+ *
+ * Both are written as plain numbers. The previous version stored the counter
+ * zero-padded *as text* and inferred the width from that text's length, so
+ * every padded booklet took a `setNumberFormat('@').setValue(...)` write that
+ * silently did nothing — those prefixes never advanced and re-issued the same
+ * number forever (AY froze at 0358, GL at 039, both minting one number across
+ * several loads). The width now lives in its own column, so no code path
+ * depends on how a cell happens to be formatted.
+ *
+ * @param {number} prefixId
+ * @param {number} newSeqNumber
+ * @param {number} width         Booklet pad width to persist alongside.
+ */
+function _reserveWaybillSequence(prefixId, newSeqNumber, width) {
+  const sheet   = _getSheet(SHEET_WB_PREFIXES);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Sequence Width');
+  const rowIdx  = _findRowById(rows, headers, prefixId);
+  if (rowIdx === -1) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+
+  _writeRowFields(sheet, rows[rowIdx], rowIdx, headers, {
+    'Last Sequence Number': Number(newSeqNumber),
+    'Sequence Width':       Number(width) || String(newSeqNumber).length,
+  });
+
+  // Read back. The defect this replaces was a write that no-opped in silence
+  // while the waybill row was minted anyway; a caller that can't reserve must
+  // fail instead of handing out a number it hasn't secured.
+  const col    = headers.indexOf('Last Sequence Number') + 1;
+  const stored = Number(sheet.getRange(rowIdx + 1, col).getValue());
+  if (stored !== Number(newSeqNumber)) {
+    throw new Error(
+      `Could not reserve waybill sequence ${newSeqNumber} — the prefix counter still reads ${stored}.`);
+  }
+}
+
+/**
  * Creates a Suggested waybill row for a trip.
  * Does NOT confirm or lock it, but DOES reserve the number: the prefix's
  * Last Sequence Number advances so the next suggestion can't collide.
@@ -60,37 +159,45 @@ function _auditLog(action, table, rowId, oldValue, newValue) {
  * @returns {{ id: number, waybillNumber: string }}
  */
 function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parentWaybillId) {
-  const sheet    = _getSheet(SHEET_WAYBILLS);
-  const prefixes = getWaybillPrefixes();
-  const pref     = prefixes.find(p => Number(p.id) === Number(prefixId));
-  if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+  return _withWaybillLock(() => {
+    const sheet     = _getSheet(SHEET_WAYBILLS);
+    const wbRows    = sheet.getDataRange().getValues();
+    const wbHeaders = wbRows[0].map(h => h.toString().trim());
+    const pref      = _requireWaybillPrefix(prefixId);
 
-  const nextSeq = (pref.lastSequenceNumber || 0) + 1;
-  let suffix    = '';
-  if (waybillType === 'Redeliver')  suffix = '-R';
-  if (waybillType === 'Foul Trip')  suffix = '-FT';
+    const nextSeq = Math.max(
+      pref.lastSequenceNumber || 0,
+      _highestIssuedSequence(prefixId, wbRows, wbHeaders)) + 1;
 
-  const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth, suffix);
-  const nextId        = _nextRowId(sheet);
+    let suffix = '';
+    if (waybillType === 'Redeliver')  suffix = '-R';
+    if (waybillType === 'Foul Trip')  suffix = '-FT';
 
-  sheet.appendRow([
-    nextId,
-    waybillNumber,
-    prefixId,
-    nextSeq,
-    tripId,
-    foNumber,
-    waybillType,
-    parentWaybillId || '',
-    'Suggested',
-    false,
-    '',
-    '',
-  ]);
+    const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth, suffix);
 
-  _updateWaybillPrefixSequence(prefixId, nextSeq);
-  _auditLog('WAYBILL_SUGGEST', SHEET_WAYBILLS, nextId, '', waybillNumber);
-  return { id: nextId, waybillNumber };
+    // Reserve before minting: the old order appended the waybill first and
+    // swallowed a failed bump, which is exactly how duplicates got out.
+    _reserveWaybillSequence(prefixId, nextSeq, pref.sequenceWidth);
+
+    const nextId = _nextRowIdFromRows(wbRows);
+    sheet.appendRow([
+      nextId,
+      waybillNumber,
+      prefixId,
+      nextSeq,
+      tripId,
+      foNumber,
+      waybillType,
+      parentWaybillId || '',
+      'Suggested',
+      false,
+      '',
+      '',
+    ]);
+
+    _auditLog('WAYBILL_SUGGEST', SHEET_WAYBILLS, nextId, '', waybillNumber);
+    return { id: nextId, waybillNumber };
+  });
 }
 
 /**
@@ -105,54 +212,63 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
  * @returns {Array<{tripId: number, waybillId: number, waybillNumber: string}>}
  */
 function _suggestWaybillsForGroups(prefixId, groups) {
-  const prefixes = getWaybillPrefixes();
-  const pref     = prefixes.find(p => Number(p.id) === Number(prefixId));
-  if (!pref) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+  return _withWaybillLock(() => {
+    const sheet     = _getSheet(SHEET_WAYBILLS);
+    const wbRows    = sheet.getDataRange().getValues();
+    const wbHeaders = wbRows[0].map(h => h.toString().trim());
+    const pref      = _requireWaybillPrefix(prefixId);
 
-  const sheet   = _getSheet(SHEET_WAYBILLS);
-  let nextId    = _nextRowId(sheet);
-  let nextSeq   = pref.lastSequenceNumber || 0;
+    let nextId  = _nextRowIdFromRows(wbRows);
+    let nextSeq = Math.max(
+      pref.lastSequenceNumber || 0,
+      _highestIssuedSequence(prefixId, wbRows, wbHeaders));
 
-  const newRows = [];
-  const out     = [];
-  groups.forEach(g => {
-    if (!g.tripIds || g.tripIds.length === 0) return;
-    nextSeq += 1;
-    const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth);
-    g.tripIds.forEach(tripId => {
-      const id = nextId++;
-      newRows.push([
-        id,
-        waybillNumber,
-        prefixId,
-        nextSeq,
-        tripId,
-        g.foNumber || '',
-        'Regular',
-        '',                      // Parent Waybill ID
-        'Suggested',
-        false,
-        '',                      // Confirmed By
-        '',                      // Confirmed At
-      ]);
-      out.push({ tripId, waybillId: id, waybillNumber });
+    const newRows = [];
+    const out     = [];
+    groups.forEach(g => {
+      if (!g.tripIds || g.tripIds.length === 0) return;
+      nextSeq += 1;
+      const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth);
+      g.tripIds.forEach(tripId => {
+        const id = nextId++;
+        newRows.push([
+          id,
+          waybillNumber,
+          prefixId,
+          nextSeq,
+          tripId,
+          g.foNumber || '',
+          'Regular',
+          '',                      // Parent Waybill ID
+          'Suggested',
+          false,
+          '',                      // Confirmed By
+          '',                      // Confirmed At
+        ]);
+        out.push({ tripId, waybillId: id, waybillNumber });
+      });
     });
+
+    // Reserve the whole span before appending, so a counter that won't advance
+    // aborts the batch rather than issuing numbers it hasn't secured.
+    if (newRows.length) {
+      _reserveWaybillSequence(prefixId, nextSeq, pref.sequenceWidth);
+      _appendRows(sheet, newRows);
+    }
+
+    // Audit is best-effort, like _auditLog — but batched.
+    try {
+      const auditSheet = _getSheet(SHEET_AUDIT);
+      let nextAuditId  = _nextRowId(auditSheet);
+      const email      = _getCurrentUserEmail() || 'unknown';
+      const nowStr     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+      _appendRows(auditSheet, out.map(o =>
+        [nextAuditId++, nowStr, email, 'WAYBILL_SUGGEST', '', SHEET_WAYBILLS, o.waybillId, '', o.waybillNumber]
+      ));
+    } catch (_) {}
+
+    return out;
   });
-  _appendRows(sheet, newRows);
-  if (newRows.length) _updateWaybillPrefixSequence(prefixId, nextSeq);
-
-  // Audit is best-effort, like _auditLog — but batched.
-  try {
-    const auditSheet = _getSheet(SHEET_AUDIT);
-    let nextAuditId  = _nextRowId(auditSheet);
-    const email      = _getCurrentUserEmail() || 'unknown';
-    const nowStr     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
-    _appendRows(auditSheet, out.map(o =>
-      [nextAuditId++, nowStr, email, 'WAYBILL_SUGGEST', '', SHEET_WAYBILLS, o.waybillId, '', o.waybillNumber]
-    ));
-  } catch (_) {}
-
-  return out;
 }
 
 /**
@@ -226,9 +342,13 @@ function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId,
 }
 
 /**
- * Updates the Last Sequence Number in the Waybill Prefixes sheet.
- * Only updates if the new sequence number is higher than the stored one
- * (protects against out-of-order confirmations).
+ * Advances the Last Sequence Number in the Waybill Prefixes sheet, keeping the
+ * booklet's stored pad width. Only moves forward — a lower number is ignored,
+ * which protects against out-of-order confirmations.
+ *
+ * Used by the confirmation path, where a dispatcher may key in a custom number
+ * ahead of the counter. Suggestion goes through `_reserveWaybillSequence`,
+ * which must not be skipped silently.
  *
  * @param {number} prefixId
  * @param {number} newSeqNumber
@@ -240,35 +360,11 @@ function _updateWaybillPrefixSequence(prefixId, newSeqNumber) {
   const rowIdx  = _findRowById(rows, headers, prefixId);
   if (rowIdx === -1) return;
 
-  const rawCur  = _val(rows[rowIdx], headers, 'Last Sequence Number');
-  const current = Number(rawCur) || 0;
+  const current = Number(_val(rows[rowIdx], headers, 'Last Sequence Number')) || 0;
   if (newSeqNumber <= current) return;   // only advances, never regresses
 
-  // Preserve the booklet's fixed digit width — implied by the stored value's
-  // length (a new prefix is seeded as text like "0000"). Pad the new value to
-  // that width; when it carries a leading zero, write it as text (number
-  // format "@") so Sheets doesn't coerce "0358" back to the number 358.
-  const width  = String(rawCur == null ? '' : rawCur).trim().length;
-  _writePrefixSequenceCell(sheet, rowIdx, headers, String(newSeqNumber).padStart(width, '0'));
-}
-
-/**
- * Writes a Last Sequence Number cell, preserving the booklet's digit width.
- * A value carrying leading zeros is written as text (number format "@") so
- * Sheets doesn't coerce "0358" back to the number 358.
- *
- * @param {Sheet}  sheet
- * @param {number} rowIdx   0-based index into the values array (header = 0)
- * @param {Array}  headers
- * @param {string} seqText  The sequence, already padded to its width
- */
-function _writePrefixSequenceCell(sheet, rowIdx, headers, seqText) {
-  const cell = sheet.getRange(rowIdx + 1, headers.indexOf('Last Sequence Number') + 1);
-  if (seqText.charAt(0) === '0') {
-    cell.setNumberFormat('@').setValue(seqText);
-  } else {
-    cell.setValue(Number(seqText));
-  }
+  const pref = getWaybillPrefixes().find(p => Number(p.id) === Number(prefixId));
+  _reserveWaybillSequence(prefixId, newSeqNumber, pref ? pref.sequenceWidth : 0);
 }
 
 /**

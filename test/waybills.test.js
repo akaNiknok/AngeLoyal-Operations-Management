@@ -61,7 +61,7 @@ test('sequence pads to the width implied by the stored value, and never truncate
   assert.equal(asAdmin(wide).api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null).waybillNumber, 'AL-12119');
 });
 
-test('confirming preserves the padded width in the stored Last Sequence Number', () => {
+test('confirming preserves the booklet width alongside the stored sequence', () => {
   const sheets = baseSheets();
   sheets['Waybill Prefixes'][1] = [1, 'AL', 'AngeLoyal', '0357'];
   const { api, ss } = asAdmin(sheets);
@@ -69,8 +69,12 @@ test('confirming preserves the padded width in the stored Last Sequence Number',
   const { id } = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
   api.confirmWaybill(id, null);
 
-  const stored = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0])['Last Sequence Number'];
-  assert.equal(stored, '0358'); // stored as text, width preserved for the next number
+  // The counter is a plain number; the width it prints at lives in its own
+  // column, so the next number still comes out as AL-0359.
+  const stored = rowObject(HEADERS['Waybill Prefixes'], dump(ss, 'Waybill Prefixes').rows[0]);
+  assert.equal(stored['Last Sequence Number'], 358);
+  assert.equal(stored['Sequence Width'], 4);
+  assert.equal(api._createSuggestedWaybill(102, 1, 'FO-2', 'Regular', null).waybillNumber, 'AL-0359');
 });
 
 test('blank prefix produces a bare sequence number, no leading dash', () => {

@@ -448,7 +448,10 @@
                 if (name === "employees") renderEmployeesAdmin();
                 if (name === "billing-categories") renderBillingCategoriesAdmin();
                 if (name === "route-type-map") renderRouteTypeMapAdmin();
-                if (name === "waybill-prefixes") renderWaybillPrefixesAdmin();
+                if (name === "waybill-prefixes") {
+                    renderWaybillPrefixesAdmin();
+                    refreshWaybillPrefixes();
+                }
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────

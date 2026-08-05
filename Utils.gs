@@ -204,6 +204,19 @@ function _nextRowId(sheet) {
 }
 
 /**
+ * Same as `_nextRowId`, but from a values array the caller has already read.
+ * Saves a round trip when the whole sheet is in hand anyway.
+ *
+ * @param {Array[]} rows  Sheet rows, header included.
+ * @returns {number}
+ */
+function _nextRowIdFromRows(rows) {
+  if (!rows || rows.length < 2) return 1;
+  const lastId = Number(rows[rows.length - 1][0]);
+  return isNaN(lastId) ? rows.length : lastId + 1;
+}
+
+/**
  * Appends multiple rows to a sheet in a single Sheets API call.
  * No-op if `rows2D` is empty.
  *
@@ -252,6 +265,12 @@ function _writeRowFields(sheet, row, rowIdx, headers, updates) {
     if (colIdx === -1) throw new Error(`Column "${colName}" not found in sheet "${sheet.getName()}".`);
     row[colIdx] = updates[colName];
   });
+  // Writing a column a freshly-migrated row doesn't reach yet (a sheet that
+  // just gained one via _ensureColumn) leaves holes behind it; setValues
+  // rejects undefined, so fill them.
+  for (let i = 0; i < row.length; i++) {
+    if (row[i] === undefined) row[i] = '';
+  }
   sheet.getRange(rowIdx + 1, 1, 1, row.length).setValues([row]);
 }
 

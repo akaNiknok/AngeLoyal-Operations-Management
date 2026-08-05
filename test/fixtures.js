@@ -33,7 +33,9 @@ const HEADERS = {
     'Confirmed By', 'Confirmed At',
   ],
 
-  'Waybill Prefixes': ['ID', 'Prefix', 'Company Name', 'Last Sequence Number', 'Active'],
+  'Waybill Prefixes': [
+    'ID', 'Prefix', 'Company Name', 'Last Sequence Number', 'Active', 'Sequence Width',
+  ],
 
   'Audit Log': [
     'ID', 'Timestamp', 'User', 'Action', 'Detail',
