@@ -563,6 +563,23 @@
                 );
             }
 
+            // The counter advances server-side every time the board issues a
+            // waybill, so the copy taken at boot goes stale the moment anyone
+            // schedules a trip. Re-pull on panel open, otherwise the "Next"
+            // column advertises a number that is already out — and editing the
+            // sequence from that stale view would try to rewind the booklet.
+            function refreshWaybillPrefixes() {
+                srv()
+                    .withSuccessHandler((list) => {
+                        if (!list) return;
+                        waybillPrefixes = list;
+                        renderWaybillPrefixesAdmin();
+                        populatePrefixSelects();
+                    })
+                    .withFailureHandler(() => {})
+                    .getWaybillPrefixes();
+            }
+
             function renderWaybillPrefixesAdmin() {
                 const showInactive = document.getElementById(
                     "waybill-prefixes-show-inactive",

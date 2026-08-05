@@ -163,13 +163,21 @@ function getWaybillPrefixes() {
   const headers = rows[0].map(h => h.toString().trim());
 
   return rows.slice(1).map(row => {
-    const rawLast = _val(row, headers, 'Last Sequence Number');
+    const rawLast  = _val(row, headers, 'Last Sequence Number');
+    const rawWidth = Number(_val(row, headers, 'Sequence Width')) || 0;
     return {
       id:                 _numOrNull(_val(row, headers, 'ID')),
       prefix:             _val(row, headers, 'Prefix'),
       companyName:        _val(row, headers, 'Company Name'),
       lastSequenceNumber: Number(rawLast) || 0,
-      sequenceWidth:      String(rawLast == null ? '' : rawLast).trim().length,
+      // The booklet's pad width has its own column. Rows written before that
+      // column existed fall back to the old rule — the stored value's own
+      // length ("0358" → 4) — so a sheet carrying hand-seeded zero-padded
+      // counters keeps printing at the right width until the next issue
+      // rewrites both fields as plain numbers.
+      sequenceWidth:      rawWidth > 0
+        ? rawWidth
+        : String(rawLast == null ? '' : rawLast).trim().length,
       active:             _val(row, headers, 'Active') !== false,
     };
   }).filter(r => r.id !== null);

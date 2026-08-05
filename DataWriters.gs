@@ -1393,16 +1393,27 @@ function createWaybillPrefix(data) {
     const seq         = _normalizeSequenceInput(data.lastSequenceNumber);
     if (!companyName) throw new Error('Company name is required.');
 
-    const sheet   = _getSheet(SHEET_WB_PREFIXES);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
+    const sheet    = _getSheet(SHEET_WB_PREFIXES);
+    const rows     = sheet.getDataRange().getValues();
+    let   headers  = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
+    headers        = _ensureColumn(sheet, headers, 'Sequence Width');
 
     const dup = _prefixDupMessage(rows, headers, prefix);
     if (dup) throw new Error(dup);
 
+    // The typed value carries the booklet width in its own length ("0000" → 4);
+    // that width is stored in its own column and the counter as a plain number,
+    // so nothing later depends on the cell's formatting.
     const nextId = _nextRowId(sheet);
-    sheet.appendRow([nextId, prefix, companyName, seq, true]);
-    _writePrefixSequenceCell(sheet, sheet.getLastRow() - 1, headers, seq);
+    const values = {
+      'ID':                   nextId,
+      'Prefix':               prefix,
+      'Company Name':         companyName,
+      'Last Sequence Number': Number(seq),
+      'Active':               true,
+      'Sequence Width':       seq.length,
+    };
+    sheet.appendRow(headers.map(h => (values[h] !== undefined ? values[h] : '')));
 
     _auditLog('WAYBILL_PREFIX_CREATE', SHEET_WB_PREFIXES, nextId, '',
       JSON.stringify({ prefix, companyName, lastSequenceNumber: seq }));
@@ -1440,7 +1451,8 @@ function updateWaybillPrefix(prefixId, changes) {
   try {
     const sheet   = _getSheet(SHEET_WB_PREFIXES);
     const rows    = sheet.getDataRange().getValues();
-    const headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
+    let   headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
+    headers       = _ensureColumn(sheet, headers, 'Sequence Width');
 
     const rowIdx = _findRowById(rows, headers, prefixId);
     if (rowIdx === -1) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
@@ -1469,26 +1481,46 @@ function updateWaybillPrefix(prefixId, changes) {
 
     let seq = null;
     if (changes.lastSequenceNumber !== undefined) {
-      seq = _normalizeSequenceInput(changes.lastSequenceNumber);
+      // The typed text carries the booklet width in its length ("0357" → 4).
+      const text = _normalizeSequenceInput(changes.lastSequenceNumber);
+      seq = { value: Number(text), width: text.length };
+
+      // Re-basing at or below a number already out would re-mint it. The
+      // automatic path only ever advances; the manual one used to write
+      // whatever was typed, so a stale panel could silently rewind the booklet.
+      const wbRows    = _getSheet(SHEET_WAYBILLS).getDataRange().getValues();
+      const wbHeaders = wbRows[0].map(h => h.toString().trim());
+      const highest   = _highestIssuedSequence(prefixId, wbRows, wbHeaders);
+      if (seq.value < highest) {
+        throw new Error(
+          `This booklet has already issued up to ${highest}. `
+          + `Set the last sequence number to ${highest} or higher.`);
+      }
+
+      updates['Last Sequence Number'] = seq.value;
+      updates['Sequence Width']       = seq.width;
     }
 
     if (Object.keys(updates).length > 0) {
       _writeRowFields(sheet, row, rowIdx, headers, updates);
     }
-    if (seq !== null) _writePrefixSequenceCell(sheet, rowIdx, headers, seq);
 
     _auditLog('WAYBILL_PREFIX_EDIT', SHEET_WB_PREFIXES, prefixId,
       JSON.stringify(oldVal), JSON.stringify(changes));
 
-    const stored = seq !== null ? seq : String(oldVal.lastSequenceNumber || '').trim();
+    const storedSeq   = seq !== null ? seq.value : Number(oldVal.lastSequenceNumber) || 0;
+    const storedWidth = seq !== null
+      ? seq.width
+      : (Number(_val(row, headers, 'Sequence Width'))
+         || String(oldVal.lastSequenceNumber == null ? '' : oldVal.lastSequenceNumber).trim().length);
     return {
       success: true,
       waybillPrefix: {
         id:                 prefixId,
         prefix:             _val(row, headers, 'Prefix'),
         companyName:        _val(row, headers, 'Company Name'),
-        lastSequenceNumber: Number(stored) || 0,
-        sequenceWidth:      stored.length,
+        lastSequenceNumber: storedSeq,
+        sequenceWidth:      storedWidth,
         active:             _val(row, headers, 'Active') !== false,
       },
     };
