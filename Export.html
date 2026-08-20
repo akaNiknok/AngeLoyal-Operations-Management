@@ -88,6 +88,8 @@
                             String(h.firstName || h.nick || "").toUpperCase(),
                         ),
                         plate: truck.plate || "",
+                        billingCategory:
+                            t.truckBillingCategory || truck.billingCategory || "",
                         typeCode: categoryToTypeCode(
                             t.truckBillingCategory || truck.billingCategory,
                         ),
@@ -293,6 +295,7 @@
                         card.legKeys[legKey] = true;
                         card.legs.push({
                             plate: r.plate,
+                            billingCategory: r.billingCategory,
                             driverName: shareName(t.driverId),
                             helperNames: (t.helperIds || [])
                                 .map(shareName)
@@ -344,6 +347,7 @@
                         return `<div class="ds-leg">
         <span class="ds-crew">${crew}</span>
         <span class="ds-plate">${esc(l.plate) || "UNASSIGNED"}</span>
+        ${l.billingCategory ? colorChip(l.billingCategory) : ""}
       </div>`;
                     })
                     .join("");
