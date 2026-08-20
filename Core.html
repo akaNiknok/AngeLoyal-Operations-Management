@@ -525,8 +525,23 @@
                     h = (h * 31 + s.charCodeAt(i)) % 360;
                 return h;
             }
+            // Chain codes the client already reads by color on the Rebisco
+            // route file (col G fills — see Docs/Schema.md). Fixed palette
+            // wins over the hash so the board matches the paper.
+            const CG_COLORS = {
+                PG: "#92d050",
+                SM: "#00b0f0",
+                WM: "#ffe94d",
+                RO: "#e5b8b7",
+                SW: "#e5b8b7",
+                PS: "#ffc000",
+                ALFA: "#ffc000",
+            };
             function colorChip(label) {
                 if (!label) return `<span class="color-chip empty">—</span>`;
+                const fixed = CG_COLORS[String(label).trim().toUpperCase()];
+                if (fixed)
+                    return `<span class="color-chip" title="${esc(label)}" style="background:${fixed};color:#1f2328;border-color:rgba(0,0,0,.2)">${esc(label)}</span>`;
                 const h = labelHue(label);
                 return `<span class="color-chip" title="${esc(label)}" style="background:hsl(${h} 62% 91%);color:hsl(${h} 55% 30%);border-color:hsl(${h} 45% 78%)">${esc(label)}</span>`;
             }
