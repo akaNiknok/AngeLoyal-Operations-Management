@@ -1,0 +1,23 @@
+# Cloudflare Pages response headers. Apps Script could set none of these — it
+# forced ALLOWALL framing and no CSP at all — so this is new ground the move
+# buys us. Keep the allowlist tight: every entry below is here for a reason.
+#
+#   script-src   'self' + accounts.google.com (the GIS button). The libraries
+#                that used to come from cdnjs are vendored, so no other script
+#                origin is allowed. 'unsafe-inline' is required only because
+#                the markup carries ~100 onclick/onchange attributes.
+#                ponytail: drop 'unsafe-inline' once those become addEventListener
+#                bindings — that is the one change that makes this CSP strict.
+#   connect-src  the /exec endpoint plus googleusercontent.com, which /exec
+#                302s to (CSP re-checks the redirect target), and GIS.
+#   style-src    fonts.googleapis.com for the @import in styles.css;
+#                'unsafe-inline' for the style="" attributes in the markup.
+#   img-src      data:/blob: for the html2canvas .jpg export, googleusercontent
+#                for the signed-in account's avatar.
+#   frame-src    GIS renders its account chooser in an iframe.
+#   frame-ancestors / X-Frame-Options: nothing may embed the OMS.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleusercontent.com; frame-src https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

@@ -249,19 +249,19 @@ test('_resolveOrCreateOutlet returns existing id (case-insensitive) or creates o
   assert.equal(api._resolveOrCreateOutlet('', 'X', 'Y'), ''); // empty name -> ''
 });
 
-// ---------------- parseRebiscoFile (Import.html, client-side) ----------------
+// ---------------- parseRebiscoFile (web/import.js, client-side) --------------
 // The convoy redistribution runs in the browser, before importRouteFile ever
-// sees a row. Load Import.html's single <script> block into a vm the same way
-// the harness loads the .gs bundle. Only stub what top-level code touches.
+// sees a row. Load the frontend's import module into a vm the same way the
+// harness loads the .gs bundle. Only stub what top-level code touches.
 
 function loadParseRebiscoFile() {
-  const html = fs.readFileSync(path.resolve(__dirname, '..', 'Import.html'), 'utf8');
-  const src = html.replace(/^[\s\S]*?<script>/, '').replace(/<\/script>[\s\S]*$/, '');
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'web', 'import.js'), 'utf8');
   const sandbox = { showToast() {}, console };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(`${src}\n;globalThis.__parse = parseRebiscoFile;`, sandbox, {
-    filename: 'Import.html',
+  vm.runInContext(`${src}
+;globalThis.__parse = parseRebiscoFile;`, sandbox, {
+    filename: 'web/import.js',
   });
   // Round-trip out of the vm's realm: its objects carry a different
   // Object.prototype, which deepStrictEqual counts as a mismatch.

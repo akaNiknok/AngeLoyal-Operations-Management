@@ -149,10 +149,9 @@ function getUserSession() {
 // ============================================================
 
 /**
- * Serves the web app HTML page. Also handles the Google OAuth redirect: when
- * Google sends the user back with ?code=&state=, we exchange it for a session
- * here and inject the session token into the page so the client can adopt it.
- * Deploy as: Execute as ME, access Anyone (with a Google account).
+ * GET on /exec. The UI now lives on Cloudflare Pages (see web/), so this only
+ * keeps the token-gated dev endpoints alive and bounces everyone else to the
+ * real frontend — old bookmarks of this URL still land somewhere useful.
  */
 function doGet(e) {
   const params = (e && e.parameter) || {};
@@ -163,17 +162,28 @@ function doGet(e) {
     return _devClear(params);
   }
 
-  // OAuth callback → mint a session and hand its token to the client. On any
-  // failure (e.g. a reused code on refresh) bootToken stays '' and the client
-  // falls back to its stored session or the sign-in screen.
-  const bootToken = params.code ? (_handleOAuthCallback(params.code, params.state) || '') : '';
+  const url = _frontendUrl();
+  return HtmlService.createHtmlOutput(
+    '<!doctype html><meta charset="utf-8">' +
+    '<meta http-equiv="refresh" content="0; url=' + url + '">' +
+    '<title>AngeLoyal OMS</title>' +
+    '<p style="font:15px/1.5 sans-serif;padding:24px">' +
+    'AngeLoyal OMS has moved. <a href="' + url + '" target="_top">Open the app</a>.</p>'
+  ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
 
-  const template = HtmlService.createTemplateFromFile('Index');
-  template.bootToken = bootToken;
-  return template
-    .evaluate()
-    .setTitle('AngeLoyal OMS')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+/**
+ * Where the frontend for *this* script lives. The DEV script points at the DEV
+ * Pages project via Script Properties; prod is the default.
+ * @returns {string}
+ */
+function _frontendUrl() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('FRONTEND_URL') ||
+      'https://angeloyal-oms.pages.dev';
+  } catch (_) {
+    return 'https://angeloyal-oms.pages.dev';
+  }
 }
 
 /**
@@ -219,15 +229,4 @@ function _jsonOut(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
-}
-
-/**
- * Includes another HTML file's content inline. Used by Index.html to
- * assemble the page from Styles.html + script partials via
- * `<?!= include('Name'); ?>` template tags.
- * @param {string} filename
- * @returns {string}
- */
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }

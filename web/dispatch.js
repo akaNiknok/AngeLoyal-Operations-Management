@@ -1,4 +1,3 @@
-<script>
             // ── DISPATCH BOARD ────────────────────────────────────────
             // Per-date cache. Navigation (useCache=true) paints instantly from
             // cache then revalidates in the background. After a load, the
@@ -1323,4 +1322,3 @@
                     })
                     .createTrip(tripData);
             }
-        </script>

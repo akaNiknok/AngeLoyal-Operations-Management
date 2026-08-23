@@ -34,108 +34,14 @@ function _getOAuthClientId() {
   }
 }
 
-/**
- * The OAuth client secret, used only server-side to exchange the auth code.
- * Stored in Script Properties (OAUTH_CLIENT_SECRET) — never sent to the client.
- * @returns {string}
- */
-function _getOAuthClientSecret() {
-  try {
-    return PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_SECRET') || '';
-  } catch (_) {
-    return '';
-  }
-}
-
-/**
- * The web app URL Google redirects back to after sign-in. This lives on the
- * stable script.google.com host (unlike the sandbox iframe origin), so it can
- * be registered as an Authorized redirect URI on the OAuth client.
- * @returns {string}
- */
-function _getRedirectUri() {
-  try {
-    return ScriptApp.getService().getUrl() || '';
-  } catch (_) {
-    return '';
-  }
-}
-
-/**
- * Client-callable: builds the Google sign-in URL the UI links to (top-level).
- * A one-time state token is cached for CSRF protection on the callback.
- * @returns {{ url: string }}
- */
-function getLoginUrl() {
-  const clientId = _getOAuthClientId();
-  if (!clientId) return { url: '' };
-
-  // Cache the exact redirect_uri with the state. OAuth requires the token
-  // exchange to use the *same* redirect_uri as the auth request — and for
-  // Google Workspace users the browser is rewritten to a domain-scoped URL
-  // (…/a/macros/<domain>/…), so doGet can't safely recompute it later.
-  const state = Utilities.getUuid();
-  const redirectUri = _getRedirectUri();
-  CacheService.getScriptCache().put('oms_state_' + state, redirectUri, 600); // 10 min
-
-  const url = 'https://accounts.google.com/o/oauth2/v2/auth' +
-    '?client_id=' + encodeURIComponent(clientId) +
-    '&redirect_uri=' + encodeURIComponent(redirectUri) +
-    '&response_type=code' +
-    '&scope=' + encodeURIComponent('openid email profile') +
-    '&include_granted_scopes=true' +
-    '&prompt=select_account' +
-    '&state=' + encodeURIComponent(state);
-  return { url: url };
-}
-
-/**
- * Decodes the identity claims from an ID token returned by Google's token
- * endpoint. The token arrives directly from Google over TLS (it was just
- * exchanged), so we read its payload and still verify the audience.
- * @param {string} idToken
- * @returns {{ email: string, displayName: string } | null}
- */
-function _identityFromIdToken(idToken) {
-  try {
-    const parts = String(idToken).split('.');
-    if (parts.length < 2) return null;
-    const json = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[1])).getDataAsString();
-    return _identityFromClaims(JSON.parse(json));
-  } catch (_) {
-    return null;
-  }
-}
-
-/**
- * Applies the identity checks shared by both sign-in paths to a decoded set of
- * ID-token claims: the token must be for *our* client and carry a verified
- * email. Neither caller may skip these — `aud` is what stops a token minted
- * for some other app from being replayed at us.
- * @param {Object} claims  Decoded ID token payload.
- * @returns {{ email: string, displayName: string } | null}
- */
-function _identityFromClaims(claims) {
-  if (!claims) return null;
-  if (claims.aud !== _getOAuthClientId()) return null;
-  if (!(claims.email_verified === true || claims.email_verified === 'true')) return null;
-  if (!claims.email) return null;
-
-  return {
-    email:       String(claims.email).trim().toLowerCase(),
-    displayName: claims.name || claims.email,
-  };
-}
 
 /**
  * Verifies an ID token that arrived **from the browser** (GIS sign-in on the
  * Cloudflare Pages frontend) and returns its identity, or null.
  *
- * Unlike _identityFromIdToken — whose token came straight from Google's token
- * endpoint over TLS and is therefore trusted on arrival — this token is fully
- * attacker-controlled, so its signature must be checked before any claim in it
- * is believed. Decoding it locally would be an auth bypass: anyone could mint
- * `{email: <an admin>}` and sign in as them.
+ * The token is fully attacker-controlled, so its signature must be checked
+ * before any claim in it is believed. Decoding it locally would be an auth
+ * bypass: anyone could mint `{email: <an admin>}` and sign in as them.
  *
  * ponytail: Google's tokeninfo endpoint does the signature + expiry check for
  * us (one UrlFetch, no key handling). Swap in local RS256 verification against
@@ -152,7 +58,17 @@ function _verifyIdToken(idToken) {
     );
     // Non-200 = bad signature, expired, or malformed. Google already rejected it.
     if (res.getResponseCode() !== 200) return null;
-    return _identityFromClaims(JSON.parse(res.getContentText()));
+
+    const claims = JSON.parse(res.getContentText());
+    // `aud` is what stops a token minted for some other app being replayed here.
+    if (claims.aud !== _getOAuthClientId()) return null;
+    if (!(claims.email_verified === true || claims.email_verified === 'true')) return null;
+    if (!claims.email) return null;
+
+    return {
+      email:       String(claims.email).trim().toLowerCase(),
+      displayName: claims.name || claims.email,
+    };
   } catch (_) {
     return null;
   }
@@ -220,53 +136,6 @@ function _destroySession(token) {
 }
 
 /**
- * Handles the OAuth redirect back from Google (called by doGet when ?code is
- * present). Validates the CSRF state, exchanges the auth code for tokens,
- * derives the identity, and opens a session. Returns the new session token to
- * inject into the served page, or null on any failure (e.g. a reused code on
- * refresh — the client then falls back to its stored session).
- * @param {string} code   Authorization code from Google.
- * @param {string} state  CSRF state echoed back by Google.
- * @returns {string|null} a session token, or null
- */
-function _handleOAuthCallback(code, state) {
-  if (!code || !state) return null;
-
-  const cache = CacheService.getScriptCache();
-  const redirectUri = cache.get('oms_state_' + state);
-  if (!redirectUri) return null; // unknown/expired/replayed state
-  cache.remove('oms_state_' + state);
-
-  const clientId = _getOAuthClientId();
-  const secret   = _getOAuthClientSecret();
-  if (!clientId || !secret) return null;
-
-  try {
-    const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
-      method: 'post',
-      muteHttpExceptions: true,
-      payload: {
-        code: code,
-        client_id: clientId,
-        client_secret: secret,
-        // Must equal the redirect_uri from the auth request (cached with state).
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      },
-    });
-    if (res.getResponseCode() !== 200) return null;
-
-    const data = JSON.parse(res.getContentText());
-    const identity = _identityFromIdToken(data.id_token);
-    if (!identity) return null;
-
-    return _createSession(identity.email, identity.displayName);
-  } catch (_) {
-    return null;
-  }
-}
-
-/**
  * Client-callable sign-out. Drops the server session.
  * @param {string} sessionToken
  * @returns {{ success: true }}
@@ -287,6 +156,8 @@ const RPC_ALLOWED = {
   getBootData: true,
   getDispatchBoardData: true,
   getWaybillPrefixes: true,
+  // session
+  logout: true,
   // writers
   createTrip: true,
   saveTripChanges: true,
