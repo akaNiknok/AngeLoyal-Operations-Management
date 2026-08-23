@@ -91,6 +91,14 @@ test('rpc only dispatches allow-listed functions', () => {
   assert.throws(() => api.rpc(token, '_createSession', ['x', 'y']), /Unknown action/);
 });
 
+test('the Admin panel clear reaches the backend through rpc, with the phrase enforced', () => {
+  const { api } = authEnv({ 'tok-admin': { email: 'admin@angeloyal.com' } });
+  const token = signIn(api, 'tok-admin');
+  // Wrong phrase: allow-listed and authorized, but nothing is deleted.
+  assert.equal(api.rpc(token, 'clearAllData', ['nope']).success, false);
+  assert.equal(api.rpc(token, 'clearAllData', ['PERMANENTLY DELETE ALL DATA']).success, true);
+});
+
 test('logout invalidates the session', () => {
   const { api } = authEnv({ 'tok-admin': { email: 'admin@angeloyal.com' } });
   const token = signIn(api, 'tok-admin');

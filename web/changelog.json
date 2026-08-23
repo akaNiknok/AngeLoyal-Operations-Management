@@ -3,8 +3,8 @@
     {
       "version": "v1.3.0",
       "date": "2026-08-23",
-      "title": "A new address, and a faster app",
-      "body": "### What's new\n\n- **The OMS has a new link.** If you use the usual launcher link, nothing changes — it now brings you here automatically. If you had the old address bookmarked, please replace it with this one.\n- **No more \"unable to open the file.\"** When you were signed in to more than one Google account, the app sometimes refused to open and you had to sign out of the others first. That can't happen any more.\n- **The app opens faster**, especially the first time you open it each day.\n- **Signing in looks a little different** — a standard Google sign-in button. Use the same Google account you always have.\n- **This \"What's new?\" box.** It appears once after each update. You can reopen it any time from the account menu in the top right.\n\n### What stayed the same\n\nEverything else. The dispatch board, waybills, route file imports, exports and driver cards all work exactly as before, and none of your data has moved."
+      "title": "A new link, and a faster app",
+      "body": "### What is new\n\n- **The app has a new link.** The usual launcher link still works, and it opens the new link automatically. If you saved the old link in your browser, replace it with this link.\n- **You can stay signed in to more than one Google account.** Before, the app sometimes showed the message \"unable to open the file\", and you had to sign out of the other accounts. This does not happen any more.\n- **The app opens more quickly.** The first time you open it each day is much faster than before.\n- **The sign-in screen looks different.** It shows the standard Google sign-in button. Use the same Google account as before.\n- **This \"What's new?\" box is new.** It opens one time after each update. To open it again, click the account menu at the top right.\n\n### What is the same\n\nEverything else is the same. The dispatch board, the waybills, the route file import, the exports and the driver cards work as before. All your data is in the same place."
     }
   ]
 }

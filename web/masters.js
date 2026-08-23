@@ -741,3 +741,68 @@
                         lastSequenceNumber,
                     });
             }
+
+            // ── ADMIN: DANGER ZONE ────────────────────────────────────
+            // Wipes the transactional data of *this* environment — which one
+            // that is follows from the backend this page talks to (config.js),
+            // so the same panel serves dev and prod without a switch.
+            const CLEAR_DATA_PHRASE = "PERMANENTLY DELETE ALL DATA";
+
+            function renderAdminPanel() {
+                const env = (OMS_ENV && OMS_ENV.label) || "unknown";
+                document.getElementById("admin-env-label").textContent = env;
+                document.getElementById("admin-env-inline").textContent = env;
+                // Never leave a matching phrase sitting in the box between
+                // visits — the button must be re-armed deliberately each time.
+                document.getElementById("admin-clear-confirm").value = "";
+                onClearConfirmInput();
+            }
+
+            function onClearConfirmInput() {
+                const typed = document
+                    .getElementById("admin-clear-confirm")
+                    .value.trim();
+                document.getElementById("admin-clear-btn").disabled =
+                    typed !== CLEAR_DATA_PHRASE;
+            }
+
+            function runClearAllData() {
+                const phrase = document
+                    .getElementById("admin-clear-confirm")
+                    .value.trim();
+                if (phrase !== CLEAR_DATA_PHRASE) return;
+
+                const env = ((OMS_ENV && OMS_ENV.label) || "this").toUpperCase();
+                if (
+                    !confirm(
+                        `LAST CHANCE — ${env}\n\nEvery trip, waybill, outlet, route-frequency row and audit entry in ${env} will be deleted permanently. This cannot be undone and there is no backup.\n\nDelete everything?`,
+                    )
+                )
+                    return;
+
+                setLoading("Clearing all data…");
+                srv()
+                    .withSuccessHandler((r) => {
+                        hideLoading();
+                        if (!r || !r.success) {
+                            showToast(
+                                "Clear failed: " + ((r && r.error) || "unknown"),
+                                "error",
+                            );
+                            return;
+                        }
+                        showToast("All data cleared. Reloading…", "success");
+                        // Every cached global (trips, outlets, the board) is
+                        // stale now — a reload is cheaper than invalidating.
+                        setTimeout(() => location.reload(), 900);
+                    })
+                    .withFailureHandler((err) => {
+                        hideLoading();
+                        showToast(
+                            "Clear failed: " +
+                                ((err && err.message) || "unknown"),
+                            "error",
+                        );
+                    })
+                    .clearAllData(phrase);
+            }

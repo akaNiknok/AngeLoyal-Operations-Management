@@ -116,7 +116,7 @@
                     "ORIGINAL RDD", "REVISED RDD", "STATUS", "Sold-to party",
                     "AREA", "CUSTOMER", "OUTLET", "ADDRESS",
                     "UNLOADING LOCATION", "QTY in packs/ cartons", "CBM",
-                    "RESTRICTIONS", "Scheduled Last Week",
+                    "Scheduled Last Week",
                     "ACTUAL BO PICKED UP LAST WEEK", "Pick up BO",
                     "FREIGHT ORDER", ...EXPORT_TYPE_COLS, "TOTAL", "TIER",
                     "DRIVER", "HELPER", "WAYBILL", "PLATE",
@@ -145,7 +145,7 @@
                     const row = ws.addRow([
                         "", "", "", "",
                         r.area, r.customer, r.outletName, r.address, "",
-                        t.quantity || "", t.cbm || "", t.restrictions || "",
+                        t.quantity || "", t.cbm || "",
                         "", "", "",
                         t.foNumber || "", ...counts,
                         r.loadStart ? 1 : "", t.tier || "",
@@ -537,14 +537,13 @@
                                 ? `background:${tint(crewColor[currentCrewKey], 0.14)}`
                                 : "";
                         return `<tr>
-        <td>${esc(t.foNumber) || ""}</td>
+        <td>${esc(r.area)}</td>
         <td>${colorChip(r.customer)}</td>
         <td>${esc(r.outletName)}</td>
         <td>${esc(truncate(r.address, 48))}</td>
-        <td>${esc(r.area)}</td>
         <td style="text-align:right">${t.quantity || ""}</td>
         <td style="text-align:right">${t.cbm || ""}</td>
-        <td>${esc(t.restrictions || "")}</td>
+        <td>${esc(t.foNumber) || ""}</td>
         <td>${r.loadStart ? esc(r.typeCode) : ""}</td>
         <td>${esc(t.tier || "")}</td>
         <td style="${stripe}">${g ? "C" + esc(g) : ""}</td>
@@ -564,8 +563,8 @@
   <h1>FINAL ROUTE ${esc(dateVal)} (ANGELOYAL)</h1>
   <div class="sub">${rows.length} drops · generated from the AngeLoyal OMS dispatch board</div>
   <table><thead><tr>
-    <th>FO</th><th>Cust</th><th>Outlet</th><th>Address</th><th>Area</th><th>Qty</th><th>CBM</th>
-    <th>Restr</th><th>Type</th><th>Tier</th><th>Convoy</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Remarks</th>
+    <th>Area</th><th>Cust</th><th>Outlet</th><th>Address</th><th>Qty</th><th>CBM</th>
+    <th>FO</th><th>Type</th><th>Tier</th><th>Convoy</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Remarks</th>
   </tr></thead><tbody>${body}</tbody></table>
   </body></html>`;
                 if (mode === "jpg")

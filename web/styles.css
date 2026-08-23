@@ -2100,6 +2100,85 @@
                 flex: 1;
             }
 
+            /* ── ADMIN: DANGER ZONE ── */
+            .admin-scroll {
+                flex: 1;
+                overflow: auto;
+                padding: 18px;
+            }
+            .danger-zone {
+                max-width: 640px;
+                border: 2px solid var(--red);
+                border-radius: var(--radius);
+                overflow: hidden;
+                background: var(--surface);
+            }
+            .danger-zone-head {
+                background: var(--red);
+                color: #fff;
+                padding: 10px 14px;
+                font-family: "DM Mono", monospace;
+                font-size: 13px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+            .danger-zone-body {
+                padding: 14px;
+                font-size: 13px;
+                line-height: 1.55;
+            }
+            .danger-lede {
+                background: var(--red-bg);
+                color: var(--red);
+                border-radius: var(--radius-sm);
+                padding: 10px 12px;
+                margin: 0 0 12px;
+                font-size: 14px;
+            }
+            .danger-env {
+                text-transform: uppercase;
+            }
+            .danger-sub {
+                margin: 0 0 4px;
+                font-family: "DM Mono", monospace;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: var(--muted);
+            }
+            .danger-list {
+                margin: 0 0 12px;
+                padding-left: 18px;
+                color: var(--text);
+            }
+            .danger-list-keep {
+                color: var(--muted);
+            }
+            .danger-confirm {
+                border-top: 1px solid var(--border);
+                padding-top: 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .danger-confirm code {
+                font-family: "DM Mono", monospace;
+                text-transform: none;
+                letter-spacing: 0;
+                color: var(--red);
+            }
+            .danger-confirm input {
+                font-family: "DM Mono", monospace;
+            }
+            .danger-confirm .btn {
+                align-self: flex-start;
+                border-color: var(--red);
+            }
+            .danger-confirm .btn[disabled] {
+                opacity: 0.45;
+                cursor: not-allowed;
+            }
+
             /* ── LOADING OVERLAY ── */
             .loading-overlay {
                 position: fixed;

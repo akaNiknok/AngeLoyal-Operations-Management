@@ -116,6 +116,13 @@
                     >
                         Waybill Prefixes
                     </button>
+                    <button
+                        class="nav-btn admin-only"
+                        id="nav-admin"
+                        onclick="switchPanel('admin')"
+                    >
+                        Admin
+                    </button>
                 </nav>
 
                 <div class="header-right">
@@ -982,6 +989,105 @@
                             </thead>
                             <tbody id="waybill-prefixes-tbody"></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: ADMIN (admin only) — maintenance / danger zone
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-admin">
+                <div class="toolbar">
+                    <span class="tb-label">Maintenance</span>
+                    <div class="tb-spacer"></div>
+                    <span class="tb-label"
+                        >Environment:
+                        <strong id="admin-env-label">—</strong></span
+                    >
+                </div>
+                <div class="admin-scroll">
+                    <div class="danger-zone">
+                        <div class="danger-zone-head">
+                            ⚠️ Danger zone — clear all data
+                        </div>
+                        <div class="danger-zone-body">
+                            <p class="danger-lede">
+                                This permanently deletes every operational
+                                record in the
+                                <strong
+                                    class="danger-env"
+                                    id="admin-env-inline"
+                                    >current</strong
+                                >
+                                environment. It cannot be undone, there is no
+                                backup, and there is no way to get the data
+                                back.
+                            </p>
+
+                            <p class="danger-sub">Deleted for good:</p>
+                            <ul class="danger-list">
+                                <li>
+                                    <strong>Trips</strong> — every dispatch
+                                    record, every day, all history
+                                </li>
+                                <li>
+                                    <strong>Waybills</strong> — suggested and
+                                    confirmed alike
+                                </li>
+                                <li>
+                                    <strong>Outlets</strong> — the destination
+                                    list built up from imports
+                                </li>
+                                <li>
+                                    <strong>Route Frequency Log</strong> — the
+                                    delivery-frequency history
+                                </li>
+                                <li>
+                                    <strong>Audit Log</strong> — the record of
+                                    who changed what
+                                </li>
+                            </ul>
+
+                            <p class="danger-sub">Kept:</p>
+                            <ul class="danger-list danger-list-keep">
+                                <li>
+                                    Employees, Trucks, Users, Billing
+                                    Categories, Route Type Map, Default
+                                    Assignments
+                                </li>
+                                <li>
+                                    Waybill Prefixes — including their
+                                    sequence counters, so numbering carries on
+                                    where it left off
+                                </li>
+                            </ul>
+
+                            <div class="danger-confirm">
+                                <label
+                                    class="form-label"
+                                    for="admin-clear-confirm"
+                                    >Type
+                                    <code>PERMANENTLY DELETE ALL DATA</code> to
+                                    enable the button</label
+                                >
+                                <input
+                                    type="text"
+                                    id="admin-clear-confirm"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    placeholder="PERMANENTLY DELETE ALL DATA"
+                                    oninput="onClearConfirmInput()"
+                                />
+                                <button
+                                    class="btn btn-danger"
+                                    id="admin-clear-btn"
+                                    onclick="runClearAllData()"
+                                    disabled
+                                >
+                                    Delete everything
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

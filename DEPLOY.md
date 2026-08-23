@@ -178,6 +178,19 @@ Every deploy to the live web app gets a tag and a GitHub Release, so the deploye
 
 **Writing the release notes.** The Release body is shown verbatim to dispatchers inside the app, so write it for them: what they can now do, what looks different, what to stop worrying about. No commit messages, no file names, no internal jargon (`doPost`, `RBAC`, `CSP` mean nothing to them). Lead with anything that changes their routine; say plainly when nothing else moved. Keep it to a handful of bullets — the dialog is read once, standing at a desk, before the day's dispatch.
 
+**Write them in ASD-STE100 Simplified Technical English.** The readers are Filipino dispatchers reading English as a second language on a phone; STE is what keeps the notes unambiguous. Apply the core rules:
+
+- **One word, one meaning.** Pick a plain word and reuse it everywhere — the trip is always a *trip*, the button is always the *button*. Don't vary wording for style.
+- **Active voice, present tense.** "The board shows the new trip", not "the new trip will be displayed".
+- **Short sentences.** Max ~20 words for an instruction, ~25 for a description. One idea per sentence, one instruction per bullet.
+- **Keep the articles and short words** — "the", "a", "you". Don't write telegram-style ("Fixed bug carryover date").
+- **No noun stacks over three words.** "waybill sequence number reset problem" → "the app no longer resets the waybill number".
+- **Name the thing the way the screen names it.** Use the on-screen label, not the internal name.
+- **No jargon, idioms, slang, or humour.** Not "under the hood", not "squashed a bug".
+- **Say what changed for them, not what we changed.** "You can now print the final route" beats "added the export module".
+
+Approved technical names (the app's own nouns — *trip*, *waybill*, *outlet*, *truck*, *dispatch board*, *route file*, *POD*) are allowed even where STE would restrict them; that is what STE's technical-name provision is for. STE governs the *wording*, not the vocabulary of the business.
+
 Supported formatting: `###` headings, `-` bullets, `**bold**`, `` `code` ``, and plain paragraphs. Anything else renders as literal text (see `renderNotes` in [`web/whatsnew.js`](web/whatsnew.js)). The dialog opens by itself once per release and on demand from the account menu; the in-app changelog starts at **v1.3.0** and older tags are ignored.
 
 Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Payroll, v3 = Visibility & Alerts), **minor** = feature release, **patch** = hotfix. The latest tag on `main` is what's live; if it isn't, run `npm run release` from that tag's commit.
