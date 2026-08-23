@@ -30,8 +30,7 @@ const OMS_ENV = OMS_ENVIRONMENTS[location.hostname] || OMS_ENVIRONMENTS.localhos
 
 const EXEC_URL = OMS_ENV.execUrl;
 
-// TODO: paste the OAuth Web client ID here (Script Properties → OAUTH_CLIENT_ID,
-// or GCP → APIs & Services → Credentials). Sign-in cannot work until this is set.
-// It must be the same client whose Authorized JavaScript origins list the hosts
+// The OAuth Web client ID (Script Properties → OAUTH_CLIENT_ID, or GCP → APIs &
+// Services → Credentials). It must be the same client whose Authorized JavaScript origins list the hosts
 // above, since GIS checks the calling origin against that list.
 const OAUTH_CLIENT_ID = "118714839189-3h6n4p3bgjrp6ue2vfq4sk3c3a1q9sq8.apps.googleusercontent.com";
