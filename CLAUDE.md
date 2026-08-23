@@ -51,6 +51,7 @@ dependency order and that is the whole "build".
 - `web/import.js` — Rebisco `.xlsx` route-file parsing + import.
 - `web/roster.js` — truck roster (driver/helper ↔ truck assignment; edits Default Assignments) + Outlets admin.
 - `web/masters.js` — admin master-detail panels (outlets, trucks, employees, billing categories, route type map, default assignments) plus the Waybill Prefixes panel (Admin **and** Dispatcher — gated by `EDIT_WAYBILL_PREFIXES` / the `dispatcher-only` nav class).
+- `web/whatsnew.js` + `web/changelog.json` — the "What's new?" dialog and its content. The JSON is generated from the GitHub Releases by `npm run changelog:sync -- --apply` at release time (the repo is private, so the browser can't read the API itself). Release notes are written for dispatchers, not developers — see [DEPLOY.md](DEPLOY.md#releases-tags--github-releases).
 - `web/vendor/` — SheetJS, ExcelJS, html2canvas, pinned and served from our own origin so the CSP can refuse every third-party script.
 - `web/_headers` — Cloudflare Pages response headers: CSP, `X-Frame-Options: DENY`, nosniff.
 
@@ -93,7 +94,7 @@ without re-teaching anyone. See [DEPLOY.md](DEPLOY.md) before touching it.
 
 ## Deploy & local workflow
 
-Full details in [`DEPLOY.md`](DEPLOY.md). The repo is wired to Apps Script via [`clasp`](https://github.com/google/clasp); `.gs`/`.html`/`appsscript.json` are the source of truth.
+Full details in [`DEPLOY.md`](DEPLOY.md). Two halves: the `.gs` backend goes to Apps Script via [`clasp`](https://github.com/google/clasp), and `web/` goes to Cloudflare Pages via [`wrangler`](https://developers.cloudflare.com/workers/wrangler/). Both are pushed by `deploy:dev` / `release`.
 
 There are **two environments** — two Sheets, each with its own bound Apps Script project (see [Environments in DEPLOY.md](DEPLOY.md#environments-prod-vs-dev)). Day-to-day commands target **DEV**; only `npm run release` touches **PROD**.
 
@@ -121,6 +122,7 @@ npm run clear-data:prod     # PROD: same, but requires typing "PRODUCTION" to co
 - Only commit/push when asked.
 - PR descriptions must not include a "🤖 Generated with Claude Code" line or Claude Code attribution.
 - **Gitflow**: one feature branch per task (`feat/<task>`, `fix/<task>`) off updated `develop`, **merge commit** PRs back into `develop` (Conventional Commits on branch commits). `main` is production-only: release merges from `develop` and `hotfix/*` branches, each tagged `vX.Y.Z` + GitHub Release, then `npm run release`. Versioning: major = phase, minor = feature release, patch = hotfix. Full steps in [`DEPLOY.md`](DEPLOY.md#git-workflow-gitflow).
+- **Release notes are user-facing.** The GitHub Release body is pulled into `web/changelog.json` (`npm run changelog:sync -- --apply`) and shown verbatim to dispatchers in the app's "What's new?" dialog. Write it for them — what changed in their day, no commit lists, no file names, no jargon — then commit the regenerated JSON before `npm run release`.
 - Money, payroll, and billing logic are contractually sensitive and Phase 2's hardest part — favor correctness, date-locking, and an audit trail over cleverness.
 
 ## Session handoff (HANDOFF.md)

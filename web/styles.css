@@ -2324,3 +2324,64 @@
                     transition-duration: 0.01ms !important;
                 }
             }
+
+            /* ── WHAT'S NEW ─────────────────────────────────────── */
+            .whatsnew-release + .whatsnew-release {
+                margin-top: 22px;
+                padding-top: 18px;
+                border-top: 1px solid var(--border);
+            }
+            .whatsnew-head {
+                display: flex;
+                align-items: baseline;
+                gap: 8px;
+            }
+            .whatsnew-version {
+                font-family: "DM Mono", monospace;
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--blue);
+            }
+            .whatsnew-date {
+                font-size: 12px;
+                color: var(--hint);
+            }
+            .whatsnew-title {
+                margin-top: 2px;
+                font-size: 16px;
+                font-weight: 600;
+            }
+            .whatsnew-notes {
+                font-size: 13.5px;
+                line-height: 1.6;
+                color: var(--text);
+            }
+            .whatsnew-notes h4 {
+                margin: 16px 0 6px;
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                color: var(--muted);
+            }
+            .whatsnew-notes p {
+                margin: 8px 0;
+            }
+            .whatsnew-notes ul {
+                margin: 8px 0;
+                padding-left: 20px;
+            }
+            .whatsnew-notes li {
+                margin: 5px 0;
+            }
+            .whatsnew-notes code {
+                font-family: "DM Mono", monospace;
+                font-size: 12.5px;
+                background: var(--bg);
+                border-radius: 4px;
+                padding: 1px 5px;
+            }
+            .whatsnew-empty {
+                color: var(--muted);
+                font-size: 13px;
+            }
