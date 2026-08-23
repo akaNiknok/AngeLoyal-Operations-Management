@@ -149,10 +149,9 @@ function getUserSession() {
 // ============================================================
 
 /**
- * Serves the web app HTML page. Also handles the Google OAuth redirect: when
- * Google sends the user back with ?code=&state=, we exchange it for a session
- * here and inject the session token into the page so the client can adopt it.
- * Deploy as: Execute as ME, access Anyone (with a Google account).
+ * GET on /exec. The UI now lives on Cloudflare Pages (see web/), so this only
+ * keeps the token-gated dev endpoints alive and bounces everyone else to the
+ * real frontend — old bookmarks of this URL still land somewhere useful.
  */
 function doGet(e) {
   const params = (e && e.parameter) || {};
@@ -163,26 +162,75 @@ function doGet(e) {
     return _devClear(params);
   }
 
-  // OAuth callback → mint a session and hand its token to the client. On any
-  // failure (e.g. a reused code on refresh) bootToken stays '' and the client
-  // falls back to its stored session or the sign-in screen.
-  const bootToken = params.code ? (_handleOAuthCallback(params.code, params.state) || '') : '';
-
-  const template = HtmlService.createTemplateFromFile('Index');
-  template.bootToken = bootToken;
-  return template
-    .evaluate()
-    .setTitle('AngeLoyal OMS')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  // This page is served inside Apps Script's sandbox iframe, so it has to
+  // break out explicitly: a meta refresh would navigate the frame, and the
+  // frontend refuses to be framed (X-Frame-Options: DENY). The link is the
+  // fallback for when the script doesn't run.
+  const url = _frontendUrl();
+  return HtmlService.createHtmlOutput(
+    '<!doctype html><meta charset="utf-8">' +
+    '<title>AngeLoyal OMS</title>' +
+    '<p style="font:15px/1.5 sans-serif;padding:24px">' +
+    'AngeLoyal OMS has moved. <a href="' + url + '" target="_top">Open the app</a>.</p>' +
+    '<script>try{(window.top||window).location.href=' + JSON.stringify(url) + '}catch(e){}<\/script>'
+  ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
- * Includes another HTML file's content inline. Used by Index.html to
- * assemble the page from Styles.html + script partials via
- * `<?!= include('Name'); ?>` template tags.
- * @param {string} filename
+ * Where the frontend for *this* script lives. The DEV script points at the DEV
+ * Pages project via Script Properties; prod is the default.
  * @returns {string}
  */
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+function _frontendUrl() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('FRONTEND_URL') ||
+      'https://angeloyal-oms.pages.dev';
+  } catch (_) {
+    return 'https://angeloyal-oms.pages.dev';
+  }
+}
+
+/**
+ * JSON API for the Cloudflare Pages frontend. Every authenticated call from
+ * the browser is a POST of `{ token, fn, args }`; `fn: 'login'` is the sole
+ * pre-session action and carries a Google ID token instead of a session token.
+ *
+ * Two constraints shape this, both from Apps Script:
+ *  - **Never throw.** A thrown error becomes an HTML error page, not a status
+ *    code, so failures are reported in the body as `{ ok: false, error }`.
+ *  - **No response headers.** CORS works only because /exec 302-redirects to
+ *    googleusercontent.com, which serves `Access-Control-Allow-Origin: *`.
+ *    That also means the request must stay a *simple* request — the client
+ *    sends a plain string body with no Content-Type, since any preflight
+ *    would hit a doOptions that Apps Script cannot provide.
+ *
+ * @param {Object} e  Apps Script POST event; the JSON body is e.postData.contents.
+ * @returns {TextOutput} `{ ok: true, data }` or `{ ok: false, error }`
+ */
+function doPost(e) {
+  var body;
+  try {
+    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  } catch (_) {
+    return _jsonOut({ ok: false, error: 'BAD_REQUEST' });
+  }
+
+  try {
+    // Sign-in: no session yet, so it can't go through rpc()'s allow-list.
+    if (body.fn === 'login') {
+      return _jsonOut({ ok: true, data: login(body.idToken) });
+    }
+    return _jsonOut({ ok: true, data: rpc(body.token, body.fn, body.args) });
+  } catch (err) {
+    // rpc() throws AUTH_REQUIRED on an expired session — the client re-prompts
+    // sign-in on that exact string, so pass the message through unchanged.
+    return _jsonOut({ ok: false, error: (err && err.message) || String(err) });
+  }
+}
+
+/** Serializes a response object as a JSON TextOutput. */
+function _jsonOut(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }

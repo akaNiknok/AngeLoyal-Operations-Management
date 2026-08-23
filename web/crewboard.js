@@ -1,4 +1,3 @@
-<script>
             // ── CREW RAIL (drag-and-drop crew assignment) ─────────────
             // A toggled rail of draggable crew cards (one per active truck,
             // showing its default driver/helpers) beside the dispatch table.
@@ -146,4 +145,3 @@
                     assignCrew(tripId, truckId);
                 }
             }
-        </script>

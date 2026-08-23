@@ -1,6 +1,11 @@
-# Deploying to Apps Script
+# Deploying
 
-This repo is wired up with [`clasp`](https://github.com/google/clasp) (Google's Command Line Apps Script Projects tool) so that `Code.gs` and `Index.html` here are the source of truth, and changes get pushed to the Apps Script project bound to the AngeLoyal Google Sheet.
+The app ships in **two halves**, and a full deploy pushes both:
+
+- **Backend** — the `.gs` files, pushed to the Apps Script project bound to the AngeLoyal Google Sheet with [`clasp`](https://github.com/google/clasp). Serves the JSON API (`doPost`) and owns the Sheet.
+- **Frontend** — `web/`, a static site deployed to **Cloudflare Pages** with [`wrangler`](https://developers.cloudflare.com/workers/wrangler/). No build step: the files in `web/` are the files served.
+
+The files in this repo are the source of truth for both. `npm run deploy:dev` and `npm run release` each push both halves in one command.
 
 ## Environments (PROD vs DEV)
 
@@ -10,9 +15,12 @@ There are **two Google Sheets, each with its own container-bound Apps Script pro
 | :--- | :--- | :--- |
 | Sheet | AngeLoyal OMS (live data) | "AngeLoyal OMS (DEV)" — a File → Make a copy of prod |
 | Script ID | in [`.clasp.prod.json`](.clasp.prod.json) | in [`.clasp.dev.json`](.clasp.dev.json) |
-| Deployment | `AKfycby8...NYV0` (the live web app) | its own deployment (`deploy:dev`) |
+| Deployment | `AKfycby8...NYV0` (the live API) | its own deployment (`deploy:dev`) |
+| Frontend | [angeloyal-oms.pages.dev](https://angeloyal-oms.pages.dev) | [angeloyal-oms-dev.pages.dev](https://angeloyal-oms-dev.pages.dev) |
 | Updated by | `npm run release` (from `main` only) | `npm run push` / `watch` / `deploy:dev` |
 | Data scripts | `npm run fetch-data` | `npm run fetch-data -- --dev`, `npm run clear-data` (dev-only) |
+
+Both Pages projects currently live in the **developer's** Cloudflare account and move to AngeLoyal's at handover — see [Transferring ownership](#transferring-ownership-to-angeloyal). Which backend a page talks to is decided by its own hostname, in [`web/config.js`](web/config.js); an unrecognised host falls back to DEV, never prod.
 
 `.clasp.json` is **gitignored and generated**: every env-touching npm script first copies the right source file over it (`use:dev` / `use:prod`), so nothing depends on which env was used last. The committed sources are `.clasp.prod.json` and `.clasp.dev.json`.
 
@@ -20,11 +28,11 @@ There are **two Google Sheets, each with its own container-bound Apps Script pro
 
 1. **Copy the Sheet**: open the prod Sheet → File → Make a copy → name it "AngeLoyal OMS (DEV)". This copies the data *and* the bound script code — but **not** Script Properties or deployments.
 2. **Wire up clasp**: open the copy → Extensions → Apps Script → Project Settings → copy the Script ID into `.clasp.dev.json`.
-3. **Script Properties on the DEV script** (Project Settings → Script Properties): set `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` (same OAuth client as prod). Then run `setupDevDumpToken()` once from the DEV editor and put the logged token in `.env` as `DEV_DUMP_TOKEN_DEV`.
+3. **Script Properties on the DEV script** (Project Settings → Script Properties): set `OAUTH_CLIENT_ID` (same OAuth client as prod) and `FRONTEND_URL` = `https://angeloyal-oms-dev.pages.dev` (so a stray GET on the DEV `/exec` redirects to the DEV frontend, not prod). Then run `setupDevDumpToken()` once from the DEV editor and put the logged token in `.env` as `DEV_DUMP_TOKEN_DEV`.
 4. **Create the DEV deployment**: `npm run push`, then `npx clasp deploy` (first time). Put the deployment ID into the `deploy:dev` script in [`package.json`](package.json) and its `/exec` URL into `scripts/clear-sheet-data.js` + the `DEV_URL` in `scripts/fetch-sheet-data.js`.
-5. **OAuth redirect URIs**: in Google Cloud Console, add the DEV `/exec` URL (and optionally the DEV script's `/dev` URL) to the OAuth client's Authorized redirect URIs — sign-in on DEV fails without this.
+5. **OAuth JavaScript origins**: in Google Cloud Console, add `https://angeloyal-oms-dev.pages.dev` to the OAuth client's **Authorized JavaScript origins** — sign-in on DEV fails without this. See [Google Sign-In setup](#google-sign-in-gis-setup).
 
-> The DEV `/exec` serves a **versioned** deployment: after changing `DevTools.gs` (or anything the local data scripts hit), rerun `npm run deploy:dev`. Browser testing of HEAD uses the DEV script's `/dev` URL as before. The copied Users sheet means the same accounts can sign in to DEV immediately; sessions/cache are per-script, so prod sessions won't carry over.
+> The DEV `/exec` serves a **versioned** deployment, so backend changes are only visible to the frontend after `npm run deploy:dev` — the DEV script's `/dev` URL is no longer a shortcut, because the browser talks to `/exec`. The copied Users sheet means the same accounts can sign in to DEV immediately; sessions/cache are per-script, so prod sessions won't carry over.
 
 ## One-time setup
 1. **Enable the Apps Script API** for your Google account:
@@ -65,62 +73,49 @@ There are **two Google Sheets, each with its own container-bound Apps Script pro
 
    Compare `.clasp-tmp/appsscript.json` with `appsscript.json`, merge any differences (scopes, sheet bindings, etc.) into the repo's copy, then delete `.clasp-tmp`.
 
-## Google Sign-In (OAuth) setup
-The web app runs `executeAs: USER_DEPLOYING` + `access: ANYONE_ANONYMOUS`, so the Google Sheet stays private (the script runs as the owner) but the platform can't tell the backend who a visitor is. Identity instead comes from a **server-side OAuth 2.0 sign-in** (see `Auth.gs` + the data-flow section in [`CLAUDE.md`](CLAUDE.md)). This is required because `Session.getActiveUser()` returns blank for anyone outside the owner's Workspace domain, and the in-iframe "Sign in with Google" (GIS) button is blocked by the sandbox's per-session `*.googleusercontent.com` origin.
+## Google Sign-In (GIS) setup
+The web app runs `executeAs: USER_DEPLOYING` + `access: ANYONE_ANONYMOUS`, so the Google Sheet stays private (the script runs as the owner) but the platform can't tell the backend who a visitor is — `Session.getActiveUser()` is blank for anyone outside the owner's Workspace domain. Identity comes from **Google Identity Services**: the frontend renders the Google button, and its ID token is POSTed to `login()`, which verifies it with Google before opening a session (see `Auth.gs` + the data-flow section in [`CLAUDE.md`](CLAUDE.md)).
 
 One-time configuration (in the **GCP project** linked to the Apps Script project — Apps Script editor → Project Settings → Google Cloud Platform):
 
-1. **APIs & Services → Credentials → Create OAuth client ID → Web application.** (Don't reuse the auto-created "Apps Script" client — it usually won't accept custom redirect URIs.)
-2. **Authorized redirect URIs** — add the web app URLs the flow redirects back to. Use the live `/exec` URL; add `/dev` only for owner/editor testing:
-   - `https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec`
-   - `https://script.google.com/macros/s/<SCRIPT_ID>/dev`
-   (JavaScript origins are **not** used by this flow — leave them empty.)
-3. **OAuth consent screen** — scopes `openid email profile`. While in "Testing", every sign-in account must be listed under **Audience → Test users** (including non-owner / external-domain accounts) — anyone else is blocked by Google itself, and this has been a **confirmed cause** of accounts being unable to sign in (see the multi-account troubleshooting section below). Switch **Publishing status to Production** once you have real (non-test) users; or, if AngeLoyal uses Google Workspace, set **User type** to **Internal** so all domain users are allowed without test-user listing. Scopes here are non-sensitive, so Production doesn't require Google's app-verification review — but until you optionally complete that review, each account sees a one-time "Google hasn't verified this app" interstitial (**Advanced → Go to [app name] (unsafe)**) on first sign-in.
-4. **Script Properties** (Apps Script editor → Project Settings → Script Properties) — these are read by `Auth.gs`; never put them in source:
-   - `OAUTH_CLIENT_ID` = the Web client's ID
-   - `OAUTH_CLIENT_SECRET` = the Web client's secret (used only server-side to exchange the auth code)
-5. **Users sheet** — RBAC matches the signed-in email against the `Users` sheet (`Email` + `Active` true → `Role`). A verified Google account not listed there can sign in but sees the "Account not authorized" gate.
+1. **APIs & Services → Credentials → Create OAuth client ID → Web application.** (Don't reuse the auto-created "Apps Script" client.)
+2. **Authorized JavaScript origins** — every origin the frontend is served from. Not redirect URIs: this flow has no redirect, and putting them in the wrong box gives `Error 401: invalid_client — no registered origin`.
+   - `https://angeloyal-oms.pages.dev`
+   - `https://angeloyal-oms-dev.pages.dev`
+   - `http://localhost:8788` (for `npm run dev:web`)
 
-> Workspace accounts get redirected through a domain-scoped URL (`…/a/macros/<domain>/…/exec`). The code handles this by caching the exact `redirect_uri` with the CSRF `state` and reusing it in the token exchange — so the rewrite doesn't cause a `redirect_uri` mismatch. The **`/dev` URL only works for script editors**; test non-owner accounts on the **`/exec`** URL.
+   Origins are scheme + host + port, no path and no trailing slash. `localhost` and `127.0.0.1` are **different origins**. Changes can take a few minutes to propagate — a first-load 403 on the button that clears on reload is propagation, not misconfiguration. Per-deployment preview URLs (`<hash>.angeloyal-oms-dev.pages.dev`) can't be registered — Google allows no wildcards — so QA on the project's production URL.
+3. **OAuth consent screen** — scopes `openid email profile`. While in "Testing", every sign-in account must be listed under **Audience → Test users**; anyone else is blocked by Google itself. Switch **Publishing status to Production** once you have real users; or, if AngeLoyal uses Google Workspace, set **User type** to **Internal**. Scopes here are non-sensitive, so Production doesn't require Google's app-verification review — but until you optionally complete that review, each account sees a one-time "Google hasn't verified this app" interstitial on first sign-in.
+4. **Client ID in two places** — it is public, so it lives in source as well as on the script:
+   - Script Property `OAUTH_CLIENT_ID` (Apps Script → Project Settings), read by `_verifyIdToken` to check the token's `aud`.
+   - `OAUTH_CLIENT_ID` in [`web/config.js`](web/config.js), used by the GIS button.
 
-## Troubleshooting: multiple Google accounts
+   **They must match**, on both PROD and DEV. A mismatch fails every sign-in with "or ask an administrator". There is no client *secret* any more — the old code flow needed one; GIS does not.
+5. **Users sheet** — RBAC matches the signed-in email against the `Users` sheet (`Email` + `Active` true → `Role`). A verified Google account not listed there signs in but sees the "Account not authorized" gate.
 
-First, tell the two failures apart — they look similar but have different causes:
+## Troubleshooting sign-in
 
-| What the user sees | Where it comes from | Meaning |
+The old `/u/N/` account-routing bug is **gone** — it was a Google Drive quirk in serving the Apps Script page, and the page is no longer served by Apps Script. What's left is a short list, and the symptom names the cause:
+
+| What you see | Cause | Fix |
 | :--- | :--- | :--- |
-| Google page: *"Sorry, unable to open the file at this time"* (`Paumanhin, hindi mabuksan ang file sa oras na ito`), **before** any sign-in screen | Google Drive, *before* `doGet` runs | The `/u/N/` account-routing bug (below). |
-| Google's own *"Access blocked"* / *"Error 403: access_denied"* page, **before** any app content | Google's OAuth consent screen, *before* `doGet` runs | The consent screen is still in **Testing** and this account isn't listed under **Audience → Test users**. Fix: publish the consent screen to **Production** (see *Google Sign-In (OAuth) setup* above). |
-| The app's own *"Account not authorized"* card, signed in as some email | `getUserSession()` returned `role: null` | The page loaded fine; that account just has **no usable row** in the `Users` sheet — see the note after the fixes. |
+| Google: *"Access blocked… no registered origin"* (`Error 401: invalid_client`) | The client has **no** JavaScript origins registered — usually they went into the redirect-URIs box, or onto a different client | Step 2 above; confirm the client ID matches the one in `web/config.js` |
+| Google: *`origin_mismatch` (400)* | Origins exist but this one isn't among them (wrong port, `127.0.0.1` vs `localhost`, trailing slash) | Add the exact origin |
+| Google: *"Access blocked" / `403: access_denied`* | Consent screen still in **Testing** and this account isn't a test user | Publish to Production, or add the account |
+| App: *"Sign-in failed. Please try again."* (short) | The request itself failed — check the browser console | Usually the backend isn't deployed (a missing `doPost` surfaces as a **CORS** error, not a 404) — run `npm run deploy:dev` |
+| App: *"…or ask an administrator."* (long) | `login()` rejected the token — almost always an `aud` mismatch | Make the Script Property and `web/config.js` client IDs match |
+| App: *"Account not authorized"* card | Sign-in worked; the email has no usable `Users` row | Give the row a non-blank **Role** and **Active** = TRUE. Watch for a zero-width space in the email cell — it survives `trim()`. Read live on each sign-in, no redeploy needed |
 
-**The routing bug is a Google problem, not an app bug.** The "unable to open the file" page is served by Google Drive *before* the script runs, so `doGet` / `Auth.gs` / the `Users` sheet are not involved — there's nothing to fix in `doGet`. The `/exec` link carries no account index, so when a browser has several accounts signed in, Google rewrites the URL to `…/u/N/macros/s/<id>/exec` and sometimes picks an `N` whose session can't resolve the deployment. It correlates with the number of signed-in accounts and is intermittent.
-
-**Fixes, in order:**
-
-1. **Give everyone the launcher link (`https://akaniknok.github.io/angeloyal-oms-launcher/`), not the raw `/exec` URL.** The launcher (see [The account launcher page](#the-account-launcher-page) below) remembers each person's OMS account and always opens the app as `…/exec?authuser=<their-email>`. The `authuser` parameter selects the account **by email**, so Google routes straight to it instead of guessing a `/u/N/` index — which is the whole cause of the bug. This is the fix to distribute; the manual steps in (4) become unnecessary once people bookmark it.
-2. **Verify the live deployment's access is "Anyone" (anonymous).** `appsscript.json` declares `ANYONE_ANONYMOUS`, but the *active deployment's* actual setting can drift if it was edited in the UI. Apps Script editor → **Deploy → Manage deployments → (active) → Edit → Who has access** → set to **"Anyone"** (not "Anyone with a Google account", which forces account resolution and makes the bad `/u/N/` pick far more likely) → redeploy. Highest-leverage server-side fix.
-3. **Make sure everyone has the `/exec` URL (or the launcher), never `/dev`.** The `/dev` URL only opens for script editors and shows the same page for everyone else.
-4. **Manual per-user fallback** (only if someone hits the raw `/exec` link and it fails — any one forces a single, unambiguous account):
-   - Append **`?authuser=<your-email>`** to the `/exec` URL, or
-   - Open the link in an **Incognito / private window**, or
-   - **Sign out** of the other Google accounts (keep only the OMS account), or
-   - Make the OMS account the **default** (sign into it *first*), or
-   - When it fails, change the `/u/1/` (or `/u/2/`) segment in the address bar to **`/u/0/`** and reload.
-
-> **If instead the app's own "Account not authorized" card appears**, the routing worked and the problem is data, not accounts. That account reached the app but `getUserSession()` found no usable `Users` row. Check the `Users` sheet for that exact email: the row must have a non-blank **`Role`** *and* **`Active` = TRUE** (`_getCurrentUserRecord` in [`Code.gs`](Code.gs) requires both). Watch for a trailing/invisible character in the email cell (a zero-width space survives `trim()`), a blank `Role`, or `Active` left empty. Fix the row — no redeploy needed, it's read live on each sign-in.
->
-> If the `Users` row looks correct and the account still can't get past sign-in, also check: (a) the consent screen's **Publishing status** — see the *Access blocked* row above; and (b) whether the script owner has an outstanding Apps Script authorization prompt. Apps Script re-asks the **owner** to review permissions whenever the project starts using a scope it hadn't consented to yet (e.g. after code changes touching `UrlFetchApp` in the OAuth token exchange); until that one-time consent is granted, the deployed app runs with a stale authorization for *every* visitor, since it always executes as the owner (`executeAs: USER_DEPLOYING`). Clear it by opening the Apps Script editor, running any function once, and clicking through the permissions dialog.
-
-> Long term, moving AngeLoyal to a Workspace domain with the consent screen set to **Internal** and the script owned in-domain makes account routing predictable (see *Transferring ownership* below). Confirmed and closed via the launcher page + publishing the consent screen to Production; tracked in [#53](https://github.com/akaNiknok/AngeLoyal-Operations-Management/issues/53).
+> If the `Users` row looks right and sign-in still fails, check whether the script owner has an outstanding Apps Script authorization prompt. Apps Script re-asks the **owner** to review permissions whenever the project starts using a scope it hadn't consented to yet; until that one-time consent is granted the deployed app runs with a stale authorization for *every* visitor, since it always executes as the owner. Clear it by opening the editor, running any function once, and clicking through the dialog.
 
 ### The account launcher page
-[`pages/index.html`](pages/index.html) is a tiny static page that sidesteps the `/u/N/` routing bug. On first visit it asks for the person's OMS Google account, remembers it in `localStorage`, and thereafter redirects straight to `…/exec?authuser=<that-email>`. Because the account is named by email, Google never mis-picks a `/u/N/` index, so multi-account browsers stop getting "unable to open the file." A **"Use a different account"** link (or visiting the launcher with `?switch=1`) clears the stored email.
+[`pages/index.html`](pages/index.html) is a tiny static page that was built to sidestep the `/u/N/` routing bug. **That bug no longer exists** — but the page is deliberately kept as the link handed to operators, because it is one redirect they never have to re-bookmark: the pages.dev URL underneath it changes when the Cloudflare projects move to AngeLoyal's account, and a Pages project cannot be transferred between accounts. Retire it only after that handover has settled.
 
-It is **not** an Apps Script partial — `.claspignore` excludes `pages/**` so `npm run push` never uploads it. GitHub Pages requires a *public* repo on the free plan, and this repo stays private, so the page is published from a separate, standalone public repo: **[akaNiknok/angeloyal-oms-launcher](https://github.com/akaNiknok/angeloyal-oms-launcher)**. That repo contains nothing but this page — the `EXEC_URL` it points to is meant to be public (identity is still gated server-side by Google sign-in), so there's nothing confidential in it.
+It is **not** an Apps Script partial — `.claspignore` excludes `pages/**` so `npm run push` never uploads it. GitHub Pages requires a *public* repo on the free plan, and this repo stays private, so the page is published from a separate, standalone public repo: **[akaNiknok/angeloyal-oms-launcher](https://github.com/akaNiknok/angeloyal-oms-launcher)**. That repo contains nothing but this page — the frontend URL it points to is meant to be public (identity is still gated server-side by Google sign-in), so there's nothing confidential in it.
 
 GitHub Pages is enabled there (Settings → Pages, Source: `master` / root), served at **`https://akaniknok.github.io/angeloyal-oms-launcher/`** — that's the link to hand out.
 
-[`pages/index.html`](pages/index.html) in *this* repo is the source of truth. If the deployment ID ever changes, update `EXEC_URL` here first, then copy the file into a local checkout of `angeloyal-oms-launcher` and commit/push it there — there's no automated sync between the two repos:
+[`pages/index.html`](pages/index.html) in *this* repo is the source of truth. If the frontend URL ever changes, update it here first, then copy the file into a local checkout of `angeloyal-oms-launcher` and commit/push it there — there's no automated sync between the two repos:
 
 ```sh
 cp pages/index.html ../angeloyal-oms-launcher/index.html
@@ -131,9 +126,10 @@ git add index.html && git commit -m "sync EXEC_URL" && git push
 ## Transferring ownership to AngeLoyal
 When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google account, the OAuth sign-in needs attention — most breakage on handoff is here:
 
-- **The OAuth client lives in the original owner's GCP project, not the script.** Transferring the script does **not** transfer the OAuth client. Either move the GCP project to AngeLoyal, or create a **new** OAuth Web client under AngeLoyal's GCP and update the `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` Script Properties.
+- **The OAuth client lives in the original owner's GCP project, not the script.** Transferring the script does **not** transfer the OAuth client. Either move the GCP project to AngeLoyal, or create a **new** OAuth Web client under AngeLoyal's GCP and update the `OAUTH_CLIENT_ID` Script Property **and** [`web/config.js`](web/config.js) — both, or every sign-in fails on the `aud` check.
 - **Script Properties travel with the script** (they're stored on it), so the existing values persist through an ownership transfer — but they point at the old GCP project's client. Decide per the bullet above whether to keep or replace them.
-- **Redirect URIs** — if the script keeps the same Script/Deployment ID, the `/exec` URL is unchanged and the registered redirect URI still works. If you create a fresh deployment (new ID), register its new `/exec` URL on the OAuth client and update the `deploy -i <id>` in [`package.json`](package.json) and the URL in this doc.
+- **JavaScript origins** — carry the three origins over to whichever client ends up in use. If a fresh Apps Script deployment is created (new ID), update the `/exec` URLs in [`web/config.js`](web/config.js), the `deploy -i <id>` in [`package.json`](package.json), and this doc.
+- **The Cloudflare Pages projects cannot be transferred between accounts.** Handover is: AngeLoyal creates a Cloudflare account → delete the developer-owned `angeloyal-oms` project to free the name → `wrangler login` as them → `npm run deploy:web` recreates it under their account. Keep the launcher page pointed at whatever URL results, so nobody has to re-bookmark. Do the DEV project the same way, or simply leave it with the developer.
 - **Consent screen** — if AngeLoyal has a Workspace domain, set the consent screen to **Internal** so any `@angeloyal` account is allowed automatically (no test-user list, no Google verification). Otherwise publish to Production or keep the operators' accounts as test users.
 - **Re-point the tooling** — update `.clasp.prod.json` (Script ID) and re-run `npm run login` as the AngeLoyal owner; confirm the deployment ID in `package.json`.
 - **Users sheet** — populate it with AngeLoyal staff emails + roles so they get access instead of the unauthorized gate.
@@ -147,14 +143,17 @@ git checkout -b feat/<task>
 # ... make changes ...
 git add -A && git commit -m "feat: ..."
 git push -u origin feat/<task>     # open a PR into develop
-npm run push                       # test in the Apps Script editor / dev URL
+npm run push                       # backend -> DEV script
+npm run dev:web                    # frontend -> http://localhost:8788
 ```
 
 Going live is a separate step — see [Git workflow (gitflow)](#git-workflow-gitflow) below. Only `main` gets `npm run release`.
 
-- `npm run push` — pushes local files to the **DEV** Apps Script project (its editor/HEAD, served at the DEV `/dev` URL). Never touches prod.
-- `npm run deploy:dev` — pushes to DEV and updates the **DEV deployment** (`/exec` URL used by `clear-data` / `fetch-data -- --dev`). Only needed when those endpoints must pick up new code — don't run it on every push (Apps Script has a ~200-version cap).
-- `npm run release` — pushes to **PROD** (`clasp push --force`) and updates the **live web app deployment** (`AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0`, `https://script.google.com/macros/s/AKfycby8.../exec`). **This is the only command that touches production. Only run it from `main`.**
+- `npm run dev:web` — serves `web/` at `http://localhost:8788` with `_headers` (CSP) applied, talking to the **DEV** backend. This is the main development loop; only backend changes need a push.
+- `npm run push` — pushes the `.gs` files to the **DEV** Apps Script project's HEAD. Never touches prod. Note the browser talks to `/exec`, so a bare push isn't visible to the frontend — use `deploy:dev` for that.
+- `npm run deploy:dev` — pushes the backend to DEV, updates the **DEV deployment**, *and* deploys `web/` to `angeloyal-oms-dev.pages.dev`. Don't run it on every push (Apps Script has a ~200-version cap).
+- `npm run deploy:web` / `deploy:web:dev` — deploys the frontend alone. A CSS or markup fix doesn't need a backend push.
+- `npm run release` — pushes the backend to **PROD** (`clasp push --force`), updates the live deployment, and deploys `web/` to `angeloyal-oms.pages.dev`. **This is the only command that touches production. Only run it from `main`.**
 - `npm run open` / `npm run open:prod` — opens the DEV / PROD project in the Apps Script editor.
 - `npm run watch` — watches for local file changes and auto-pushes to DEV.
 
@@ -173,8 +172,13 @@ Every deploy to the live web app gets a tag and a GitHub Release, so the deploye
 
 1. PR `develop` → `main` (merge commit), titled `release: vX.Y.Z`.
 2. On `main`: `git tag vX.Y.Z && git push --tags`
-3. `gh release create vX.Y.Z --generate-notes` (edit notes if the auto-generated ones are noisy).
-4. `npm run release` — the live app now matches the tag.
+3. `gh release create vX.Y.Z` — **write the notes for dispatchers** (see below). `--generate-notes` produces a commit list, which is the wrong thing to show them; use it as raw material at most.
+4. `npm run changelog:sync -- --apply`, then commit `web/changelog.json`. This is what the in-app **"What's new?"** dialog reads.
+5. `npm run release` — the live app now matches the tag.
+
+**Writing the release notes.** The Release body is shown verbatim to dispatchers inside the app, so write it for them: what they can now do, what looks different, what to stop worrying about. No commit messages, no file names, no internal jargon (`doPost`, `RBAC`, `CSP` mean nothing to them). Lead with anything that changes their routine; say plainly when nothing else moved. Keep it to a handful of bullets — the dialog is read once, standing at a desk, before the day's dispatch.
+
+Supported formatting: `###` headings, `-` bullets, `**bold**`, `` `code` ``, and plain paragraphs. Anything else renders as literal text (see `renderNotes` in [`web/whatsnew.js`](web/whatsnew.js)). The dialog opens by itself once per release and on demand from the account menu; the in-app changelog starts at **v1.3.0** and older tags are ignored.
 
 Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Payroll, v3 = Visibility & Alerts), **minor** = feature release, **patch** = hotfix. The latest tag on `main` is what's live; if it isn't, run `npm run release` from that tag's commit.
 
@@ -184,7 +188,7 @@ Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Pa
 - Always start a new task from a fresh branch off the updated `develop`.
 
 ## Notes
-- `.claspignore` restricts what gets pushed to `Code.gs`, `Index.html`, and `appsscript.json` — the `Docs/` and `Sample Files/` folders stay local/Git only and are never sent to Apps Script.
+- `.claspignore` restricts what gets pushed to the `.gs` files and `appsscript.json` — `web/`, `pages/`, `Docs/` and `Sample Files/` stay local/Git only and are never sent to Apps Script.
 - `.clasp.prod.json` / `.clasp.dev.json` contain the Script IDs (not secret, just identifiers) and are committed; `.clasp.json` is the gitignored, generated pointer (see [Environments](#environments-prod-vs-dev)).
 - Auth tokens (`~/.clasprc.json`) are per-user and never committed.
 

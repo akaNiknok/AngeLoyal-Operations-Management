@@ -1,0 +1,10 @@
+{
+  "releases": [
+    {
+      "version": "v1.3.0",
+      "date": "2026-08-23",
+      "title": "A new address, and a faster app",
+      "body": "### What's new\n\n- **The OMS has a new link.** If you use the usual launcher link, nothing changes — it now brings you here automatically. If you had the old address bookmarked, please replace it with this one.\n- **No more \"unable to open the file.\"** When you were signed in to more than one Google account, the app sometimes refused to open and you had to sign out of the others first. That can't happen any more.\n- **The app opens faster**, especially the first time you open it each day.\n- **Signing in looks a little different** — a standard Google sign-in button. Use the same Google account you always have.\n- **This \"What's new?\" box.** It appears once after each update. You can reopen it any time from the account menu in the top right.\n\n### What stayed the same\n\nEverything else. The dispatch board, waybills, route file imports, exports and driver cards all work exactly as before, and none of your data has moved."
+    }
+  ]
+}

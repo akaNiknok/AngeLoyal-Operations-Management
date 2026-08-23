@@ -15,3 +15,6 @@ node_modules/
 .clasprc.json
 .env
 data/
+
+# Wrangler local dev state (miniflare caches, bundle temp files)
+.wrangler/

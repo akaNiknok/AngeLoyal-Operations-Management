@@ -1,4 +1,3 @@
-<script>
             // ── EXPORT (dispatch day → FINAL-ROUTE print / xlsx) ──────
             // Client-only: everything needed is already in dispatchData +
             // the master-data caches. The exported layout mirrors the
@@ -573,4 +572,3 @@
                     exportHtmlAsJpg(html, `FINAL ROUTE ${dateVal} (ANGELOYAL).jpg`, 1400);
                 else printHtmlDocument(html);
             }
-        </script>

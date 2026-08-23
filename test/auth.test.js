@@ -1,10 +1,11 @@
 // ============================================================
-//  Auth.gs — Google sign-in (OAuth redirect), sessions, RPC gateway
+//  Auth.gs — sessions and the RPC gateway.
 //  The web app can't identify cross-domain visitors via Session, so
-//  identity comes from a server-side OAuth code exchange, is held in
-//  a server session, and is threaded through rpc(). These tests lock
-//  that flow: login-URL construction, the callback/token exchange,
-//  the identity-scoping that makes RBAC work, and the gateway allowlist.
+//  identity comes from a verified Google ID token, is held in a
+//  server session, and is threaded through rpc(). These tests lock
+//  the session lifecycle, the identity-scoping that makes RBAC work,
+//  and the gateway allowlist. Sign-in itself (token verification,
+//  forged tokens, the doPost envelope) lives in api.test.js.
 // ============================================================
 
 const { test } = require('node:test');
@@ -14,28 +15,22 @@ const { usersSheet, emptySheet } = require('./fixtures');
 
 const CLIENT_ID = 'test-client.apps.googleusercontent.com';
 
-// Builds a JWT-shaped ID token (header.payload.sig) with base64url claims —
-// the shape Google's token endpoint returns and _identityFromIdToken decodes.
-function makeIdToken(claims) {
-  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  return b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64(claims) + '.' + 'sig';
-}
-
-// Fakes Google's token endpoint: maps an auth code -> identity claims.
-function codeFetch(codes) {
-  return (url, params) => {
-    if (String(url).indexOf('oauth2.googleapis.com/token') === -1) {
-      return { code: 404, body: '' };
-    }
-    const code = params && params.payload && params.payload.code;
-    const claims = codes[code];
-    if (!claims) return { code: 400, body: JSON.stringify({ error: 'invalid_grant' }) };
-    const full = Object.assign({ aud: CLIENT_ID, email_verified: true }, claims);
-    return { code: 200, body: JSON.stringify({ id_token: makeIdToken(full) }) };
+// Fakes Google's tokeninfo endpoint: maps an ID token -> identity claims.
+// Anything not in the map is a token Google won't vouch for.
+function tokeninfoFetch(tokens) {
+  return (url) => {
+    const m = /tokeninfo\?id_token=([^&]*)/.exec(String(url));
+    if (!m) return { code: 404, body: '' };
+    const claims = tokens[decodeURIComponent(m[1])];
+    if (!claims) return { code: 400, body: JSON.stringify({ error: 'invalid_token' }) };
+    return {
+      code: 200,
+      body: JSON.stringify(Object.assign({ aud: CLIENT_ID, email_verified: true }, claims)),
+    };
   };
 }
 
-function authEnv(codes, extra = {}) {
+function authEnv(tokens, extra = {}) {
   return makeEnv({
     // All master sheets getBootData reads, so an authorized boot succeeds.
     sheets: {
@@ -48,40 +43,23 @@ function authEnv(codes, extra = {}) {
       'Billing Categories': emptySheet('Billing Categories'),
       'Audit Log': emptySheet('Audit Log'),
     },
-    scriptProperties: { OAUTH_CLIENT_ID: CLIENT_ID, OAUTH_CLIENT_SECRET: 'shh-secret' },
-    fetch: codeFetch(codes),
+    scriptProperties: { OAUTH_CLIENT_ID: CLIENT_ID },
+    fetch: tokeninfoFetch(tokens),
     // Deliberately NOT in the Users domain — proves identity comes from the
-    // OAuth sign-in, not Session.getActiveUser().
+    // signed-in token, not Session.getActiveUser().
     userEmail: 'unknown',
     ...extra,
   });
 }
 
-// Drives a full sign-in: build the login URL (which caches the CSRF state),
-// then run the callback with that state + a chosen auth code.
-function signIn(api, authCode) {
-  const url = api.getLoginUrl().url;
-  const state = decodeURIComponent(/[?&]state=([^&]+)/.exec(url)[1]);
-  return api._handleOAuthCallback(authCode, state);
+// Signs in and returns the app session token.
+function signIn(api, idToken) {
+  return api.login(idToken).sessionToken;
 }
 
-test('getLoginUrl builds a Google consent URL with our client and a CSRF state', () => {
-  const { api } = authEnv({});
-  const url = api.getLoginUrl().url;
-  assert.ok(url.startsWith('https://accounts.google.com/o/oauth2/v2/auth'));
-  assert.ok(url.includes('client_id=' + encodeURIComponent(CLIENT_ID)));
-  assert.ok(url.includes('response_type=code'));
-  assert.ok(/[?&]state=/.test(url));
-});
-
-test('getLoginUrl returns an empty url when sign-in is not configured', () => {
-  const { api } = makeEnv({ scriptProperties: {} });
-  assert.equal(api.getLoginUrl().url, '');
-});
-
-test('the OAuth callback exchanges the code and opens a session for an OMS user', () => {
-  const { api } = authEnv({ 'code-admin': { email: 'admin@angeloyal.com', name: 'Ada Admin' } });
-  const token = signIn(api, 'code-admin');
+test('a signed-in OMS user gets a session that carries their identity into rpc', () => {
+  const { api } = authEnv({ 'tok-admin': { email: 'admin@angeloyal.com', name: 'Ada Admin' } });
+  const token = signIn(api, 'tok-admin');
   assert.ok(token, 'a session token is issued');
 
   const boot = api.rpc(token, 'getBootData', []);
@@ -91,35 +69,12 @@ test('the OAuth callback exchanges the code and opens a session for an OMS user'
 });
 
 test('a verified account not in Users gets a session but no role/data', () => {
-  const { api } = authEnv({ 'code-stranger': { email: 'stranger@gmail.com' } });
-  const token = signIn(api, 'code-stranger');
+  const { api } = authEnv({ 'tok-stranger': { email: 'stranger@gmail.com' } });
+  const token = signIn(api, 'tok-stranger');
   assert.ok(token);
   const boot = api.rpc(token, 'getBootData', []);
   assert.equal(boot.session.role, null);
   assert.equal(boot.employees, undefined, 'no master data leaks to an unauthorized account');
-});
-
-test('the callback rejects an unknown / replayed state', () => {
-  const { api } = authEnv({ 'code-admin': { email: 'admin@angeloyal.com' } });
-  // No getLoginUrl() call → the state was never cached.
-  assert.equal(api._handleOAuthCallback('code-admin', 'never-issued'), null);
-
-  // A state is single-use: the second callback with the same state fails.
-  const url = api.getLoginUrl().url;
-  const state = decodeURIComponent(/[?&]state=([^&]+)/.exec(url)[1]);
-  assert.ok(api._handleOAuthCallback('code-admin', state));
-  assert.equal(api._handleOAuthCallback('code-admin', state), null);
-});
-
-test('the callback rejects a token minted for a different client (aud mismatch)', () => {
-  const { api } = authEnv({ 'code-evil': { email: 'admin@angeloyal.com', aud: 'someone-else.apps.googleusercontent.com' } });
-  assert.equal(signIn(api, 'code-evil'), null);
-});
-
-test('the callback rejects an unverified email and a failed code exchange', () => {
-  const { api } = authEnv({ 'code-unverified': { email: 'admin@angeloyal.com', email_verified: false } });
-  assert.equal(signIn(api, 'code-unverified'), null);
-  assert.equal(signIn(api, 'never-issued-code'), null);
 });
 
 test('rpc requires a valid session', () => {
@@ -128,23 +83,25 @@ test('rpc requires a valid session', () => {
 });
 
 test('rpc only dispatches allow-listed functions', () => {
-  const { api } = authEnv({ 'code-admin': { email: 'admin@angeloyal.com' } });
-  const token = signIn(api, 'code-admin');
+  const { api } = authEnv({ 'tok-admin': { email: 'admin@angeloyal.com' } });
+  const token = signIn(api, 'tok-admin');
   // Private helpers and unexposed readers must be unreachable from the client.
   assert.throws(() => api.rpc(token, '_devDump', [{}]), /Unknown action/);
   assert.throws(() => api.rpc(token, 'getEmployees', []), /Unknown action/);
+  assert.throws(() => api.rpc(token, '_createSession', ['x', 'y']), /Unknown action/);
 });
 
 test('logout invalidates the session', () => {
-  const { api } = authEnv({ 'code-admin': { email: 'admin@angeloyal.com' } });
-  const token = signIn(api, 'code-admin');
-  assert.equal(api.logout(token).success, true);
+  const { api } = authEnv({ 'tok-admin': { email: 'admin@angeloyal.com' } });
+  const token = signIn(api, 'tok-admin');
+  // The client reaches logout through the same gateway as everything else.
+  assert.equal(api.rpc(token, 'logout', [token]).success, true);
   assert.throws(() => api.rpc(token, 'getBootData', []), /AUTH_REQUIRED/);
 });
 
 test('rpc clears the request identity after dispatch (no leakage between calls)', () => {
-  const { api } = authEnv({ 'code-admin': { email: 'admin@angeloyal.com' } });
-  const token = signIn(api, 'code-admin');
+  const { api } = authEnv({ 'tok-admin': { email: 'admin@angeloyal.com' } });
+  const token = signIn(api, 'tok-admin');
   api.rpc(token, 'getBootData', []);
   // With no rpc in flight, identity falls back to Session (here: 'unknown').
   assert.equal(api._getCurrentUserEmail(), 'unknown');

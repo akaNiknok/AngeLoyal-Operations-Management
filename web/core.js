@@ -1,9 +1,12 @@
-<script>
-            // ── XLSX PARSER (SheetJS CDN) ──────────────────────────────
-            // Loaded async; import won't work until it's ready.
+            // ── XLSX PARSER (SheetJS, vendored) ───────────────────────
+            // These three live in web/vendor/ rather than on a CDN: served
+            // from our own origin they can't be swapped under us, and the CSP
+            // in web/_headers can then refuse every third-party script origin.
+            // Still loaded async (2 MB combined), so the ready flags stay.
+            // Update = re-download the pinned version, re-check the diff.
             const xlsxScript = document.createElement("script");
             xlsxScript.src =
-                "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+                "vendor/xlsx.full.min.js";
             xlsxScript.onload = () => {
                 xlsxReady = true;
             };
@@ -15,7 +18,7 @@
             // fails to load, imports still work, just without convoy detection.
             const excelJsScript = document.createElement("script");
             excelJsScript.src =
-                "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+                "vendor/exceljs.min.js";
             excelJsScript.onload = () => {
                 excelJsReady = true;
             };
@@ -27,7 +30,7 @@
             // if it fails to load, the JPG buttons just toast.
             const html2canvasScript = document.createElement("script");
             html2canvasScript.src =
-                "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+                "vendor/html2canvas.min.js";
             html2canvasScript.onload = () => {
                 html2canvasReady = true;
             };
@@ -87,9 +90,10 @@
             let sessionToken = storeGet("oms_session") || null;
 
             // ── SERVER GATEWAY ────────────────────────────────────────
-            // All authenticated backend calls go through rpc(sessionToken, fn,
-            // args). srv() mimics the google.script.run builder so call sites
-            // only swap the prefix: google.script.run.foo(a) → srv().foo(a).
+            // All authenticated backend calls POST to the Apps Script /exec
+            // endpoint, which dispatches through rpc(sessionToken, fn, args).
+            // srv() keeps the google.script.run builder shape it had when this
+            // ran inside Apps Script, so no call site anywhere else changed.
             function srv() {
                 let success = () => {};
                 let failure = (err) => {
@@ -116,9 +120,13 @@
                         if (typeof prop !== "string") return undefined;
                         // Any other property is treated as the backend fn name.
                         return (...args) => {
-                            google.script.run
-                                .withSuccessHandler((res) => success(res))
-                                .withFailureHandler((err) => {
+                            callBackend({
+                                token: sessionToken,
+                                fn: prop,
+                                args: args,
+                            }).then(
+                                (res) => success(res),
+                                (err) => {
                                     if (
                                         err &&
                                         /AUTH_REQUIRED/.test(err.message || "")
@@ -127,12 +135,39 @@
                                         return;
                                     }
                                     failure(err);
-                                })
-                                .rpc(sessionToken, prop, args);
+                                },
+                            );
                         };
                     },
                 });
                 return proxy;
+            }
+
+            // One POST per call, to the /exec URL for this environment.
+            //
+            // Deliberately header-free: any header beyond a CORS-safelisted
+            // Content-Type makes this a preflighted request, and Apps Script
+            // cannot serve OPTIONS — the call would die before it was sent. A
+            // bare string body defaults to text/plain, which is safelisted.
+            // CORS then works because /exec 302s to googleusercontent.com,
+            // which answers with Access-Control-Allow-Origin: *.
+            //
+            // doPost never throws, so a non-ok payload is a real app error;
+            // a rejected fetch is the network being down.
+            function callBackend(body) {
+                return fetch(EXEC_URL, {
+                    method: "POST",
+                    body: JSON.stringify(body),
+                })
+                    .then((res) => res.json())
+                    .then((payload) => {
+                        if (!payload || payload.ok !== true) {
+                            throw new Error(
+                                (payload && payload.error) || "Request failed",
+                            );
+                        }
+                        return payload.data;
+                    });
             }
 
             // ── OPTIMISTIC SAVE ───────────────────────────────────────
@@ -173,14 +208,6 @@
                 document.getElementById("import-date").value = today;
                 document.getElementById("at-date").value = today;
 
-                // A just-completed OAuth sign-in injects a fresh session token
-                // into the page (see doGet). Adopt it, then load the app.
-                const injected = (window.__OMS_BOOT_TOKEN || "").trim();
-                if (injected) {
-                    sessionToken = injected;
-                    storeSet("oms_session", sessionToken);
-                }
-
                 if (sessionToken) {
                     loadAppData(); // resumes; AUTH_REQUIRED falls back to sign-in
                 } else {
@@ -188,31 +215,72 @@
                 }
             }
 
-            // ── GOOGLE SIGN-IN (server-side redirect / OAuth code flow) ──
-            // The "Sign in with Google" link navigates the top window to Google
-            // (target="_top"); Google redirects back to the web app URL with a
-            // code, which doGet exchanges for a session. We fetch that link URL
-            // from the backend (it carries the OAuth client + a CSRF state).
-            function refreshSignInLink() {
-                google.script.run
-                    .withSuccessHandler((res) => {
-                        const link = document.getElementById("signin-link");
-                        if (!link) return;
-                        if (res && res.url) {
-                            link.href = res.url;
-                            link.classList.remove("disabled");
-                        } else {
-                            link.href = "#";
-                            link.classList.add("disabled");
-                            document.getElementById("auth-msg").textContent =
-                                "Sign-in isn't configured yet (missing OAuth client ID / secret in Script Properties).";
+            // ── GOOGLE SIGN-IN (GIS) ─────────────────────────
+            // The page is served from our own origin now, so the sandbox that
+            // forced the old server-side redirect flow is gone: Google Identity
+            // Services can render its button inline and hand us an ID token,
+            // which we POST to login() to trade for an app session.
+            //
+            // Set right after a sign-in so the next loadAppData() skips the
+            // cached paint (see loadAppData).
+            let justSignedIn = false;
+
+            // Called by the GIS script's onload (see index.html).
+            function initGis() {
+                if (!window.google || !google.accounts || !google.accounts.id) {
+                    return;
+                }
+                if (!OAUTH_CLIENT_ID) return; // showSignIn explains why
+                google.accounts.id.initialize({
+                    client_id: OAUTH_CLIENT_ID,
+                    callback: handleCredentialResponse,
+                    auto_select: false,
+                    cancel_on_tap_outside: true,
+                });
+                renderSignInButton();
+            }
+
+            // Safe to call before the GIS script has loaded — its onload
+            // renders the button then.
+            function renderSignInButton() {
+                const el = document.getElementById("gsi-button");
+                if (!el || !OAUTH_CLIENT_ID) return;
+                if (!window.google || !google.accounts || !google.accounts.id) {
+                    return;
+                }
+                el.innerHTML = "";
+                google.accounts.id.renderButton(el, {
+                    theme: "outline",
+                    size: "large",
+                    text: "signin_with",
+                    shape: "pill",
+                });
+            }
+
+            // GIS hands back a Google ID token; trade it for an app session.
+            function handleCredentialResponse(res) {
+                if (!res || !res.credential) return;
+                setLoading("Signing in…");
+                callBackend({ fn: "login", idToken: res.credential }).then(
+                    (r) => {
+                        if (!r || !r.success) {
+                            showSignIn(
+                                "Sign-in failed. Please try again, or ask an administrator.",
+                            );
+                            return;
                         }
-                    })
-                    .withFailureHandler(() => {
-                        const link = document.getElementById("signin-link");
-                        if (link) link.classList.add("disabled");
-                    })
-                    .getLoginUrl();
+                        sessionToken = r.sessionToken;
+                        storeSet("oms_session", sessionToken);
+                        // Another account's cached boot data must never flash
+                        // on screen for this one.
+                        justSignedIn = true;
+                        storeDel("oms_boot");
+                        document.getElementById("auth-overlay").style.display =
+                            "none";
+                        loadAppData();
+                    },
+                    () => showSignIn("Sign-in failed. Please try again."),
+                );
             }
 
             function handleSessionExpired() {
@@ -227,12 +295,11 @@
             // ── DATA LOAD (after sign-in) ─────────────────────────────
             // SWR boot: paint instantly from the last visit's boot data in
             // localStorage, then getBootData() revalidates in the background.
-            // Skipped right after a fresh OAuth sign-in (token just injected),
-            // so one account's cached UI never flashes for another account.
+            // Skipped right after a fresh sign-in, so one account's cached UI
+            // never flashes for another account.
             function loadAppData() {
-                const cachedRaw = (window.__OMS_BOOT_TOKEN || "").trim()
-                    ? null
-                    : storeGet("oms_boot");
+                const cachedRaw = justSignedIn ? null : storeGet("oms_boot");
+                justSignedIn = false;
                 let painted = false;
                 if (cachedRaw) {
                     try {
@@ -343,6 +410,7 @@
                     showSignIn();
                 } else {
                     overlay.style.display = "none";
+                    maybeShowWhatsNew();
                 }
             }
 
@@ -355,8 +423,9 @@
                 document.getElementById("auth-title").textContent = email
                     ? "Account not authorized"
                     : "Sign in";
-                document.getElementById("auth-msg").textContent =
-                    msg ||
+                document.getElementById("auth-msg").textContent = !OAUTH_CLIENT_ID
+                    ? "Sign-in isn't configured yet (missing OAUTH_CLIENT_ID in web/config.js)."
+                    : msg ||
                     (email
                         ? `You're signed in as ${email}, but this account isn't authorized for AngeLoyal OMS. Sign out and use an authorized Google account, or ask an administrator for access.`
                         : "Sign in with your Google account to use AngeLoyal OMS.");
@@ -365,13 +434,13 @@
                     : "none";
                 overlay.style.display = "";
                 hideLoading();
-                refreshSignInLink();
+                renderSignInButton();
             }
 
             // ── ACCOUNT MENU (switch / sign out) ──────────────────────
-            // Sign-in is a top-level redirect to Google; sign-out drops our app
-            // session and shows the gate. The sign-in link uses
-            // prompt=select_account, so signing in again lets them switch.
+            // Sign-out drops our app session and clears the GIS auto-select
+            // hint, so signing in again offers the account chooser rather than
+            // jumping straight back into the same account.
             function switchAccount() {
                 closeAccountMenu();
                 signOut(true);
@@ -383,7 +452,16 @@
                 storeDel("oms_session");
                 storeDel("oms_boot");
                 currentUser = { email: "", displayName: "", role: null };
-                if (t) google.script.run.logout(t); // best-effort server cleanup
+                // Best-effort server cleanup; a dead session is already gone.
+                if (t) {
+                    callBackend({ token: t, fn: "logout", args: [t] }).catch(
+                        () => {},
+                    );
+                }
+                // Stops GIS from silently re-signing them into the same account.
+                if (window.google && google.accounts && google.accounts.id) {
+                    google.accounts.id.disableAutoSelect();
+                }
                 closeAccountMenu();
                 showSignIn(
                     thenPrompt
@@ -669,4 +747,3 @@
                 clearTimeout(toastTimer);
                 toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
             }
-        </script>

@@ -14,15 +14,19 @@
     "watch": "npm run use:dev && clasp push --watch",
     "open": "npm run use:dev && clasp open",
     "open:prod": "npm run use:prod && clasp open",
-    "deploy:dev": "npm run use:dev && clasp push && clasp deploy -i AKfycbziNYgamxGPl7B8OVB1YYb1bZ2VZEdb9RC59pTEtUzSOeVNxAZCVtMc-6jJrqmdk26XgQ",
-    "release": "npm run use:prod && clasp push --force && clasp deploy -i AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0",
+    "deploy:dev": "npm run use:dev && clasp push && clasp deploy -i AKfycbziNYgamxGPl7B8OVB1YYb1bZ2VZEdb9RC59pTEtUzSOeVNxAZCVtMc-6jJrqmdk26XgQ && npm run deploy:web:dev",
+    "release": "npm run use:prod && clasp push --force && clasp deploy -i AKfycby8gSa29N58Ny3mJjkDgdbnaIWUfQocPQwJ0QochAh_mLDsmYslJaO0ANDCbuXYNYV0 && npm run deploy:web",
     "deployments": "clasp deployments",
     "logs": "clasp logs",
     "fetch-data": "node scripts/fetch-sheet-data.js",
     "clear-data": "node scripts/clear-sheet-data.js",
     "clear-data:prod": "node scripts/clear-sheet-data.js --prod",
     "backlog:seed": "node scripts/seed-github-issues.mjs",
-    "backlog:sync": "node scripts/sync-backlog.mjs"
+    "backlog:sync": "node scripts/sync-backlog.mjs",
+    "deploy:web": "wrangler pages deploy web --project-name angeloyal-oms --branch main --commit-dirty=true",
+    "deploy:web:dev": "wrangler pages deploy web --project-name angeloyal-oms-dev --branch main --commit-dirty=true",
+    "dev:web": "wrangler pages dev web",
+    "changelog:sync": "node scripts/sync-changelog.mjs"
   },
   "scriptsHelp": {
     "help": "show this command list",
@@ -32,18 +36,22 @@
     "pull": "pull source from the PROD script editor (overwrites local files!)",
     "push": "push source to the DEV script editor/HEAD (never touches prod)",
     "watch": "like push, but re-pushes on every file save",
+    "dev:web": "serve web/ locally on :8788 with _headers applied, against the DEV backend",
     "open | open:prod": "open the DEV/PROD script in the Apps Script editor",
-    "deploy:dev": "push + update the DEV /exec deployment (needed by clear-data / fetch-data --dev)",
-    "release": "push --force + redeploy the LIVE (PROD) web app — only from main, after tagging",
+    "deploy:dev": "push backend to DEV + deploy web/ to angeloyal-oms-dev.pages.dev",
+    "deploy:web | deploy:web:dev": "deploy web/ alone to the PROD/DEV Pages project (no backend push)",
+    "release": "push backend to PROD + deploy web/ to angeloyal-oms.pages.dev \u2014 only from main, after tagging",
     "deployments": "list deployments of the currently selected script",
     "logs": "tail Apps Script logs of the currently selected script",
     "fetch-data": "snapshot PROD sheets to data/ (gitignored); add -- --dev for the DEV sheet",
     "clear-data": "DEV: wipe transactional sheets (Trips, Outlets, waybills, logs)",
-    "clear-data:prod": "PROD: same wipe, asks you to type PRODUCTION — post-release only",
+    "clear-data:prod": "PROD: same wipe, asks you to type PRODUCTION \u2014 post-release only",
+    "changelog:sync": "regenerate web/changelog.json from GitHub Releases (add -- --apply to write)",
     "backlog:seed": "seed GitHub issues from the backlog doc",
     "backlog:sync": "regenerate BACKLOG.md from the GitHub Project board"
   },
   "devDependencies": {
-    "@google/clasp": "^2.4.2"
+    "@google/clasp": "^2.4.2",
+    "wrangler": "^4.125.0"
   }
 }

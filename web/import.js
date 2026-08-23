@@ -1,4 +1,3 @@
-<script>
             // ── IMPORT ────────────────────────────────────────────────
             let parsedXlsxData = null;
             // { headerIdx, typeCols } from the last parseRebiscoFile run —
@@ -535,4 +534,3 @@
                 document.getElementById("import-preview-table").innerHTML =
                     `<div class="empty-import"><div style="font-size:32px">📤</div><div style="font-size:13px;font-weight:500;color:var(--muted)">No file loaded</div><div style="font-size:12px;text-align:center;max-width:260px;color:var(--hint)">Upload the Rebisco route Excel file to preview and review rows before importing.</div></div>`;
             }
-        </script>

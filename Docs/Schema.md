@@ -316,6 +316,7 @@ The global ledger recording all administrative, operational, and data state modi
 * ROUTE\_TYPE\_MAP\_EDIT — Administrative updates to a route type mapping (code, category, Active/Inactive toggling)  
 * WAYBILL\_PREFIX\_CREATE — New prefix added to the Waybill Prefixes list  
 * WAYBILL\_PREFIX\_EDIT — Updates to a waybill prefix (prefix code, company name, re-basing the Last Sequence Number, Active/Inactive toggling)
+* LOGIN — A verified Google sign-in opened a session (Table = Users, New Value = the account's email)
 
 ## **Structural Implementation Conventions**
 
