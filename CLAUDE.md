@@ -94,7 +94,7 @@ without re-teaching anyone. See [DEPLOY.md](DEPLOY.md) before touching it.
 
 ## Deploy & local workflow
 
-Full details in [`DEPLOY.md`](DEPLOY.md). The repo is wired to Apps Script via [`clasp`](https://github.com/google/clasp); `.gs`/`.html`/`appsscript.json` are the source of truth.
+Full details in [`DEPLOY.md`](DEPLOY.md). Two halves: the `.gs` backend goes to Apps Script via [`clasp`](https://github.com/google/clasp), and `web/` goes to Cloudflare Pages via [`wrangler`](https://developers.cloudflare.com/workers/wrangler/). Both are pushed by `deploy:dev` / `release`.
 
 There are **two environments** — two Sheets, each with its own bound Apps Script project (see [Environments in DEPLOY.md](DEPLOY.md#environments-prod-vs-dev)). Day-to-day commands target **DEV**; only `npm run release` touches **PROD**.
 
@@ -122,6 +122,7 @@ npm run clear-data:prod     # PROD: same, but requires typing "PRODUCTION" to co
 - Only commit/push when asked.
 - PR descriptions must not include a "🤖 Generated with Claude Code" line or Claude Code attribution.
 - **Gitflow**: one feature branch per task (`feat/<task>`, `fix/<task>`) off updated `develop`, **merge commit** PRs back into `develop` (Conventional Commits on branch commits). `main` is production-only: release merges from `develop` and `hotfix/*` branches, each tagged `vX.Y.Z` + GitHub Release, then `npm run release`. Versioning: major = phase, minor = feature release, patch = hotfix. Full steps in [`DEPLOY.md`](DEPLOY.md#git-workflow-gitflow).
+- **Release notes are user-facing.** The GitHub Release body is pulled into `web/changelog.json` (`npm run changelog:sync -- --apply`) and shown verbatim to dispatchers in the app's "What's new?" dialog. Write it for them — what changed in their day, no commit lists, no file names, no jargon — then commit the regenerated JSON before `npm run release`.
 - Money, payroll, and billing logic are contractually sensitive and Phase 2's hardest part — favor correctness, date-locking, and an audit trail over cleverness.
 
 ## Session handoff (HANDOFF.md)
