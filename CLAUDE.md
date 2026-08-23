@@ -26,8 +26,8 @@ The project is contractually delivered in 3 phases. See [`BACKLOG.md`](BACKLOG.m
 
 | File | Responsibility |
 | :--- | :--- |
-| `Code.gs` | Entry point. Sheet-name constants, RBAC (`ROLES`, `PERMISSIONS`, `_requirePermission`), request-scoped identity (`_REQUEST_EMAIL`, `_getCurrentUserEmail`), `doGet` web-app router, `include()` template helper. |
-| `Auth.gs` | Google sign-in + session layer. `getLoginUrl()` builds the OAuth consent URL; `_handleOAuthCallback()` (driven by `doGet`) exchanges the code and reads the identity from the ID token (`_identityFromIdToken`); session tokens are minted/looked up in `CacheService` (`_createSession`/`logout`); and the **`rpc(sessionToken, fnName, args)` gateway** (allow-list `RPC_ALLOWED`) that every authenticated client call funnels through. `OAUTH_CLIENT_ID` + `OAUTH_CLIENT_SECRET` live in Script Properties. |
+| `Code.gs` | Entry point. Sheet-name constants, RBAC (`ROLES`, `PERMISSIONS`, `_requirePermission`), request-scoped identity (`_REQUEST_EMAIL`, `_getCurrentUserEmail`), the **`doPost` JSON API** the frontend calls (`_jsonOut`), and `doGet`, which now only keeps the dev endpoints and redirects to the frontend (`_frontendUrl`). |
+| `Auth.gs` | Google sign-in + session layer. `login(idToken)` is the one pre-session action: `_verifyIdToken` checks the browser-supplied GIS token against Google's tokeninfo endpoint (**never a local decode**) before `_createSession` mints a token in `CacheService`; and the **`rpc(sessionToken, fnName, args)` gateway** (allow-list `RPC_ALLOWED`) that every other client call funnels through. `OAUTH_CLIENT_ID` lives in Script Properties — there is no client secret. |
 | `Utils.gs` | Generic sheet/row helpers: `_getSheet`, `_val`, `_numOrNull`, date parsing/formatting, `_nextRowId`, `_findRowById`, `_writeRowFields`, `_indexById`. **Reuse these — don't hand-roll sheet access.** |
 | `DataReaders.gs` | Read-only accessors. `getBootData()` returns all master data in one round trip. `getDispatchBoardData()`, `getTrips()`, `getWaybillsForTrip()`, etc. |
 | `DataWriters.gs` | All sheet-mutating endpoints (`createTrip`, `saveTripChanges`, `confirmWaybill`, `importRouteFile`, `createOutlet/Truck/Employee/BillingCategory`, roster `updateDefaultAssignment`, …). Largest file. |
@@ -116,7 +116,7 @@ npm run clear-data:prod     # PROD: same, but requires typing "PRODUCTION" to co
 
 ## Working agreements
 
-- Keep the schema doc and code in lockstep. A new feature usually means: a new sheet/columns in `Docs/Schema.md` → constants in `Code.gs` → reader in `DataReaders.gs` → writer (+ `_requirePermission` + `_auditLog`) in `DataWriters.gs` → UI partial + `Core.html` state/boot wiring.
+- Keep the schema doc and code in lockstep. A new feature usually means: a new sheet/columns in `Docs/Schema.md` → constants in `Code.gs` → reader in `DataReaders.gs` → writer (+ `_requirePermission` + `_auditLog`) in `DataWriters.gs` → the relevant `web/*.js` panel + `web/core.js` state/boot wiring.
 - Match the surrounding style: the `_`-prefixed helpers are private; reader functions return plain objects with camelCase keys; writers return `{ success, ... } | { success:false, error }`.
 - Only commit/push when asked.
 - PR descriptions must not include a "🤖 Generated with Claude Code" line or Claude Code attribution.
