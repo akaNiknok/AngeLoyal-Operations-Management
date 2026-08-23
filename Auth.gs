@@ -101,19 +101,85 @@ function _identityFromIdToken(idToken) {
     const parts = String(idToken).split('.');
     if (parts.length < 2) return null;
     const json = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[1])).getDataAsString();
-    const claims = JSON.parse(json);
-
-    if (claims.aud !== _getOAuthClientId()) return null;
-    if (!(claims.email_verified === true || claims.email_verified === 'true')) return null;
-    if (!claims.email) return null;
-
-    return {
-      email:       String(claims.email).trim().toLowerCase(),
-      displayName: claims.name || claims.email,
-    };
+    return _identityFromClaims(JSON.parse(json));
   } catch (_) {
     return null;
   }
+}
+
+/**
+ * Applies the identity checks shared by both sign-in paths to a decoded set of
+ * ID-token claims: the token must be for *our* client and carry a verified
+ * email. Neither caller may skip these — `aud` is what stops a token minted
+ * for some other app from being replayed at us.
+ * @param {Object} claims  Decoded ID token payload.
+ * @returns {{ email: string, displayName: string } | null}
+ */
+function _identityFromClaims(claims) {
+  if (!claims) return null;
+  if (claims.aud !== _getOAuthClientId()) return null;
+  if (!(claims.email_verified === true || claims.email_verified === 'true')) return null;
+  if (!claims.email) return null;
+
+  return {
+    email:       String(claims.email).trim().toLowerCase(),
+    displayName: claims.name || claims.email,
+  };
+}
+
+/**
+ * Verifies an ID token that arrived **from the browser** (GIS sign-in on the
+ * Cloudflare Pages frontend) and returns its identity, or null.
+ *
+ * Unlike _identityFromIdToken — whose token came straight from Google's token
+ * endpoint over TLS and is therefore trusted on arrival — this token is fully
+ * attacker-controlled, so its signature must be checked before any claim in it
+ * is believed. Decoding it locally would be an auth bypass: anyone could mint
+ * `{email: <an admin>}` and sign in as them.
+ *
+ * ponytail: Google's tokeninfo endpoint does the signature + expiry check for
+ * us (one UrlFetch, no key handling). Swap in local RS256 verification against
+ * Google's JWKs only if the extra round trip per sign-in ever shows up.
+ * @param {string} idToken
+ * @returns {{ email: string, displayName: string } | null}
+ */
+function _verifyIdToken(idToken) {
+  if (!idToken) return null;
+  try {
+    const res = UrlFetchApp.fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken),
+      { muteHttpExceptions: true }
+    );
+    // Non-200 = bad signature, expired, or malformed. Google already rejected it.
+    if (res.getResponseCode() !== 200) return null;
+    return _identityFromClaims(JSON.parse(res.getContentText()));
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Client-callable sign-in — the one action doPost accepts without a session.
+ * Takes the ID token from the GIS button, verifies it, and opens a session.
+ * @param {string} idToken
+ * @returns {{ success: true, sessionToken: string } | { success: false, error: string }}
+ */
+function login(idToken) {
+  const identity = _verifyIdToken(idToken);
+  if (!identity) return { success: false, error: 'AUTH_FAILED' };
+
+  const token = _createSession(identity.email, identity.displayName);
+
+  // Scope the request to the new identity so the audit row is attributed to
+  // them rather than 'unknown'. Payroll (Phase 2) needs a sign-in trail.
+  _REQUEST_EMAIL = identity.email;
+  try {
+    _auditLog('LOGIN', SHEET_USERS, '', '', identity.email);
+  } finally {
+    _REQUEST_EMAIL = null;
+  }
+
+  return { success: true, sessionToken: token };
 }
 
 /**

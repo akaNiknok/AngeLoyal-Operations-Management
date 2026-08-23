@@ -177,6 +177,51 @@ function doGet(e) {
 }
 
 /**
+ * JSON API for the Cloudflare Pages frontend. Every authenticated call from
+ * the browser is a POST of `{ token, fn, args }`; `fn: 'login'` is the sole
+ * pre-session action and carries a Google ID token instead of a session token.
+ *
+ * Two constraints shape this, both from Apps Script:
+ *  - **Never throw.** A thrown error becomes an HTML error page, not a status
+ *    code, so failures are reported in the body as `{ ok: false, error }`.
+ *  - **No response headers.** CORS works only because /exec 302-redirects to
+ *    googleusercontent.com, which serves `Access-Control-Allow-Origin: *`.
+ *    That also means the request must stay a *simple* request — the client
+ *    sends a plain string body with no Content-Type, since any preflight
+ *    would hit a doOptions that Apps Script cannot provide.
+ *
+ * @param {Object} e  Apps Script POST event; the JSON body is e.postData.contents.
+ * @returns {TextOutput} `{ ok: true, data }` or `{ ok: false, error }`
+ */
+function doPost(e) {
+  var body;
+  try {
+    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  } catch (_) {
+    return _jsonOut({ ok: false, error: 'BAD_REQUEST' });
+  }
+
+  try {
+    // Sign-in: no session yet, so it can't go through rpc()'s allow-list.
+    if (body.fn === 'login') {
+      return _jsonOut({ ok: true, data: login(body.idToken) });
+    }
+    return _jsonOut({ ok: true, data: rpc(body.token, body.fn, body.args) });
+  } catch (err) {
+    // rpc() throws AUTH_REQUIRED on an expired session — the client re-prompts
+    // sign-in on that exact string, so pass the message through unchanged.
+    return _jsonOut({ ok: false, error: (err && err.message) || String(err) });
+  }
+}
+
+/** Serializes a response object as a JSON TextOutput. */
+function _jsonOut(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
  * Includes another HTML file's content inline. Used by Index.html to
  * assemble the page from Styles.html + script partials via
  * `<?!= include('Name'); ?>` template tags.
