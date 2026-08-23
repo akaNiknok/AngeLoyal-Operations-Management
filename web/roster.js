@@ -1,4 +1,3 @@
-<script>
             // ── TRUCK ROSTER ──────────────────────────────────────────
             // The roster is the Default Assignments sheet: one row per truck
             // holding its default driver + helpers. This panel edits it via
@@ -491,4 +490,3 @@
                         notes,
                     });
             }
-        </script>

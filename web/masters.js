@@ -1,4 +1,3 @@
-<script>
             // ── SHARED HELPERS ──────────────────────────────────────────
             function statusChip(active) {
                 return active === false
@@ -742,4 +741,3 @@
                         lastSequenceNumber,
                     });
             }
-        </script>
