@@ -10,14 +10,15 @@
 #                bindings — that is the one change that makes this CSP strict.
 #   connect-src  the /exec endpoint plus googleusercontent.com, which /exec
 #                302s to (CSP re-checks the redirect target), and GIS.
-#   style-src    fonts.googleapis.com for the @import in styles.css;
-#                'unsafe-inline' for the style="" attributes in the markup.
+#   style-src    fonts.googleapis.com for the @import in styles.css, and
+#                accounts.google.com/gsi/style because the GIS button ships its
+#                own stylesheet; 'unsafe-inline' for the style="" attributes.
 #   img-src      data:/blob: for the html2canvas .jpg export, googleusercontent
 #                for the signed-in account's avatar.
 #   frame-src    GIS renders its account chooser in an iframe.
 #   frame-ancestors / X-Frame-Options: nothing may embed the OMS.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleusercontent.com; frame-src https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleusercontent.com; frame-src https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
