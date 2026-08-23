@@ -59,8 +59,8 @@ The client calls the backend with `srv().withSuccessHandler(...).fnName(args)`.
 There is **no router/framework** — `switchPanel()` toggles `.panel` visibility,
 state lives in module-level `let` globals in `web/core.js`.
 
-`pages/index.html` is the standalone public launcher page (remembers the
-operator's account and redirects on), published from the separate
+`pages/index.html` is the standalone public launcher page (a redirect to the
+frontend, nothing else), published from the separate
 `angeloyal-oms-launcher` repo. It stays the link handed to operators through
 the Cloudflare account handover, so the pages.dev URL underneath can change
 without re-teaching anyone. See [DEPLOY.md](DEPLOY.md) before touching it.
