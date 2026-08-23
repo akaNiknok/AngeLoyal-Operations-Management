@@ -56,11 +56,47 @@ test('carry-over preserves the original Billing Date', () => {
   assert.equal(newTrip['Billing Date'], '6/10/2026'); // NOT the dispatch date, NOT today
 });
 
-test('carry-over Trip Date is the next business day from today', () => {
-  const { api, newTrip } = setup('Redeliver');
-  const expected = api._formatDate(api._nextBusinessDay(new Date()));
-  assert.equal(newTrip['Trip Date'], expected);
-  assert.notEqual(newTrip['Trip Date'], '6/15/2026');
+test('carry-over Trip Date is the next business day from the TRIP date, not today', () => {
+  const { newTrip } = setup('Redeliver');
+  assert.equal(newTrip['Trip Date'], '6/16/2026'); // 6/15 + 1, not today + 1
+});
+
+test('carry-over Trip Date skips Sunday', () => {
+  const sheets = buildSheets();
+  sheets.Trips[1][1] = '6/20/2026'; // a Saturday
+  const { api, ss } = makeEnv({ sheets, userEmail: 'dispatch@angeloyal.com' });
+  const { headers, rows } = dump(ss, 'Trips');
+  const newId = api._createCarryoverTrip(rows[0], headers, ORIGINAL_TRIP_ID, 'Redeliver');
+  const after = dump(ss, 'Trips');
+  const newTrip = rowObject(after.headers, after.rows.find((r) => Number(r[0]) === Number(newId)));
+  assert.equal(newTrip['Trip Date'], '6/22/2026'); // Monday
+});
+
+// A merged load = several stops of one FO on one truck sharing one waybill.
+// Each stop spawns its own carry-over trip, but the carried-over stops are
+// still one load, so they must share ONE -R number or the next day's board
+// renders them unmerged.
+test('carry-over stops of one merged load share a single -R waybill', () => {
+  const sheets = buildSheets();
+  const second = sheets.Trips[1].slice();
+  second[0] = ORIGINAL_TRIP_ID + 1;
+  second[5] = 13; // a different outlet — same FO, same truck, same day
+  sheets.Trips.push(second);
+  // the load's waybill is one number spread over one row per stop
+  sheets.Waybills.push([71, 'AL-40', 1, 40, ORIGINAL_TRIP_ID + 1, 'FO-777',
+    'Regular', '', 'Confirmed', true, 'd', 'd']);
+
+  const { api, ss } = makeEnv({ sheets, userEmail: 'dispatch@angeloyal.com' });
+  const { headers, rows } = dump(ss, 'Trips');
+  const idA = api._createCarryoverTrip(rows[0], headers, ORIGINAL_TRIP_ID, 'Redeliver');
+  const idB = api._createCarryoverTrip(rows[1], headers, ORIGINAL_TRIP_ID + 1, 'Redeliver');
+
+  const wb = dump(ss, 'Waybills');
+  const forTrip = (id) => wb.rows.map((r) => rowObject(wb.headers, r))
+    .find((w) => Number(w['Trip ID']) === Number(id));
+  assert.equal(forTrip(idA)['Waybill Number'], 'AL-41-R');
+  assert.equal(forTrip(idB)['Waybill Number'], 'AL-41-R'); // joined, not AL-42-R
+  assert.equal(forTrip(idB)['Waybill Type'], 'Redeliver');
 });
 
 test('carry-over copies crew and links the parent trip', () => {

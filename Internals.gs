@@ -281,14 +281,21 @@ function _suggestWaybillsForGroups(prefixId, groups) {
  *   (no new number reserved);
  * - otherwise, if a prefixId is given → reserve the next number.
  *
+ * Carry-overs reuse this with type 'Redeliver'/'Foul Trip': the stops of one
+ * merged load each spawn their own carry-over trip, and they must land on one
+ * shared -R/-FT number or the next day's board shows the load unmerged.
+ *
  * @param {Array[]} tripRows     Full Trips sheet rows (incl. header row)
  * @param {Array}   tripHeaders
  * @param {Array}   tripRow      The promoted trip's row
  * @param {number}  tripId
  * @param {number|null} prefixId
+ * @param {string}  [waybillType='Regular']
+ * @param {number|null} [parentWaybillId]
  * @returns {{ id: number, waybillNumber: string } | null}
  */
-function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId, prefixId) {
+function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId, prefixId, waybillType, parentWaybillId) {
+  const wbType = waybillType || 'Regular';
   const wbSheet   = _getSheet(SHEET_WAYBILLS);
   const wbRows    = wbSheet.getDataRange().getValues();
   const wbHeaders = wbRows[0].map(h => h.toString().trim());
@@ -313,7 +320,7 @@ function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId,
     const shared = wbRows.slice(1).find(r =>
       siblings[_numOrNull(_val(r, wbHeaders, 'Trip ID'))] &&
       _val(r, wbHeaders, 'Status') === 'Suggested' &&
-      _val(r, wbHeaders, 'Waybill Type') === 'Regular');
+      _val(r, wbHeaders, 'Waybill Type') === wbType);
     if (shared) {
       const nextId = _nextRowId(wbSheet);
       const number = _val(shared, wbHeaders, 'Waybill Number');
@@ -324,8 +331,8 @@ function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId,
         _val(shared, wbHeaders, 'Sequence Number'),
         tripId,
         fo,
-        'Regular',
-        '',
+        wbType,
+        parentWaybillId || '',
         'Suggested',
         false,
         '',
@@ -337,7 +344,7 @@ function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId,
   }
 
   return prefixId
-    ? _createSuggestedWaybill(tripId, prefixId, fo, 'Regular', null)
+    ? _createSuggestedWaybill(tripId, prefixId, fo, wbType, parentWaybillId || null)
     : null;
 }
 
@@ -409,7 +416,10 @@ function _deleteSuggestedWaybillsForTrip(tripId) {
  * @returns {number} The new trip ID
  */
 function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason) {
-  const nextDay = _nextBusinessDay(new Date());
+  // Next day relative to the TRIP's date, not today — a status keyed in late
+  // (or the morning after) must still carry over to the day after the trip.
+  const nextDay = _nextBusinessDay(
+    _readDateCell(_val(originalRow, headers, 'Trip Date')) || new Date());
   const nextDayStr = _formatDate(nextDay);
   const isBacklog = statusReason === 'Backlog';
 
@@ -466,9 +476,15 @@ function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason
     '',              // Convoy Group — a next-day carry-over leaves its convoy
   ]);
 
-  // Suggest waybill with correct suffix
-  if (prefixId) {
-    _createSuggestedWaybill(nextId, prefixId, foNumber, waybillType, parentWbId);
+  // Suggest waybill with correct suffix. Re-read the Trips sheet so the row
+  // just appended is visible: the sibling stops of a merged load carry over
+  // one at a time, and each later one must join the first one's number.
+  const freshRows    = sheet.getDataRange().getValues();
+  const freshHeaders = freshRows[0].map(h => h.toString().trim());
+  const newRowIdx    = _findRowById(freshRows, freshHeaders, nextId);
+  if (newRowIdx !== -1) {
+    _suggestWaybillForScheduledTrip(
+      freshRows, freshHeaders, freshRows[newRowIdx], nextId, prefixId, waybillType, parentWbId);
   }
 
   // Update route frequency log
