@@ -172,8 +172,13 @@ Every deploy to the live web app gets a tag and a GitHub Release, so the deploye
 
 1. PR `develop` → `main` (merge commit), titled `release: vX.Y.Z`.
 2. On `main`: `git tag vX.Y.Z && git push --tags`
-3. `gh release create vX.Y.Z --generate-notes` (edit notes if the auto-generated ones are noisy).
-4. `npm run release` — the live app now matches the tag.
+3. `gh release create vX.Y.Z` — **write the notes for dispatchers** (see below). `--generate-notes` produces a commit list, which is the wrong thing to show them; use it as raw material at most.
+4. `npm run changelog:sync -- --apply`, then commit `web/changelog.json`. This is what the in-app **"What's new?"** dialog reads.
+5. `npm run release` — the live app now matches the tag.
+
+**Writing the release notes.** The Release body is shown verbatim to dispatchers inside the app, so write it for them: what they can now do, what looks different, what to stop worrying about. No commit messages, no file names, no internal jargon (`doPost`, `RBAC`, `CSP` mean nothing to them). Lead with anything that changes their routine; say plainly when nothing else moved. Keep it to a handful of bullets — the dialog is read once, standing at a desk, before the day's dispatch.
+
+Supported formatting: `###` headings, `-` bullets, `**bold**`, `` `code` ``, and plain paragraphs. Anything else renders as literal text (see `renderNotes` in [`web/whatsnew.js`](web/whatsnew.js)). The dialog opens by itself once per release and on demand from the account menu; the in-app changelog starts at **v1.3.0** and older tags are ignored.
 
 Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Payroll, v3 = Visibility & Alerts), **minor** = feature release, **patch** = hotfix. The latest tag on `main` is what's live; if it isn't, run `npm run release` from that tag's commit.
 

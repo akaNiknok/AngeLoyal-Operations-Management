@@ -155,6 +155,15 @@
                             <div class="account-dropdown-sep"></div>
                             <button
                                 class="account-action"
+                                id="acct-whatsnew"
+                                type="button"
+                                onclick="openWhatsNew()"
+                            >
+                                <span class="account-action-icon">✨</span>
+                                What's new?
+                            </button>
+                            <button
+                                class="account-action"
                                 id="acct-switch"
                                 type="button"
                                 onclick="switchAccount()"
@@ -1467,6 +1476,33 @@
             </div>
         </div>
 
+        <!-- Release notes, from web/changelog.json. Opens by itself once per
+             release and on demand from the account menu. -->
+        <div class="modal-backdrop" id="modal-whatsnew">
+            <div class="modal" style="width: 560px; max-width: 92vw">
+                <div class="modal-head">
+                    <span class="modal-head-title">What's new</span>
+                    <button
+                        class="modal-close"
+                        type="button"
+                        onclick="closeWhatsNew()"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body" id="whatsnew-body"></div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-primary"
+                        type="button"
+                        onclick="closeWhatsNew()"
+                    >
+                        Got it
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="toast" id="toast"></div>
 
         <!-- ══ JAVASCRIPT ══ -->
@@ -1480,6 +1516,7 @@
         <script src="import.js"></script>
         <script src="roster.js"></script>
         <script src="masters.js"></script>
+        <script src="whatsnew.js"></script>
 
         <!-- Google Identity Services. `async` still delays window.load, so
              bootApp() can count on google.accounts.id existing — initGis()

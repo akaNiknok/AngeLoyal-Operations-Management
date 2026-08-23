@@ -410,6 +410,7 @@
                     showSignIn();
                 } else {
                     overlay.style.display = "none";
+                    maybeShowWhatsNew();
                 }
             }
 
