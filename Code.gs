@@ -162,13 +162,17 @@ function doGet(e) {
     return _devClear(params);
   }
 
+  // This page is served inside Apps Script's sandbox iframe, so it has to
+  // break out explicitly: a meta refresh would navigate the frame, and the
+  // frontend refuses to be framed (X-Frame-Options: DENY). The link is the
+  // fallback for when the script doesn't run.
   const url = _frontendUrl();
   return HtmlService.createHtmlOutput(
     '<!doctype html><meta charset="utf-8">' +
-    '<meta http-equiv="refresh" content="0; url=' + url + '">' +
     '<title>AngeLoyal OMS</title>' +
     '<p style="font:15px/1.5 sans-serif;padding:24px">' +
-    'AngeLoyal OMS has moved. <a href="' + url + '" target="_top">Open the app</a>.</p>'
+    'AngeLoyal OMS has moved. <a href="' + url + '" target="_top">Open the app</a>.</p>' +
+    '<script>try{(window.top||window).location.href=' + JSON.stringify(url) + '}catch(e){}<\/script>'
   ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
