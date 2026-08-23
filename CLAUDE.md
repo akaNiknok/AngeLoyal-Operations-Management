@@ -50,7 +50,7 @@ dependency order and that is the whole "build".
 - `web/crewboard.js` — crew rail: toggled panel of draggable crew cards (truck + default driver/helpers) dropped onto dispatch rows to assign a whole crew at once.
 - `web/import.js` — Rebisco `.xlsx` route-file parsing + import.
 - `web/roster.js` — truck roster (driver/helper ↔ truck assignment; edits Default Assignments) + Outlets admin.
-- `web/masters.js` — admin master-detail panels (outlets, trucks, employees, billing categories, route type map, default assignments) plus the Waybill Prefixes panel (Admin **and** Dispatcher — gated by `EDIT_WAYBILL_PREFIXES` / the `dispatcher-only` nav class).
+- `web/masters.js` — admin master-detail panels (outlets, trucks, employees, billing categories, route type map, default assignments) plus the Waybill Prefixes panel (Admin **and** Dispatcher — gated by `EDIT_WAYBILL_PREFIXES` / the `dispatcher-only` nav class). Also holds the **Admin** panel's danger zone — an Admin-only "clear all data" that wipes *this environment's* transactional sheets via `clearAllData()` behind a typed confirmation phrase.
 - `web/whatsnew.js` + `web/changelog.json` — the "What's new?" dialog and its content. The JSON is generated from the GitHub Releases by `npm run changelog:sync -- --apply` at release time (the repo is private, so the browser can't read the API itself). Release notes are written for dispatchers, not developers — see [DEPLOY.md](DEPLOY.md#releases-tags--github-releases).
 - `web/vendor/` — SheetJS, ExcelJS, html2canvas, pinned and served from our own origin so the CSP can refuse every third-party script.
 - `web/_headers` — Cloudflare Pages response headers: CSP, `X-Frame-Options: DENY`, nosniff.

@@ -8,7 +8,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { makeEnv, dump } = require('./harness');
+const { makeEnv, dump, rowObject } = require('./harness');
+const { emptySheet, usersSheet, EMAIL } = require('./fixtures');
 
 const TOKEN = 'secret-token';
 
@@ -102,4 +103,66 @@ test('doGet: routes action=devDump and action=devClear before the OAuth/page pat
   const cleared = body(api.doGet({ parameter: { action: 'devClear', token: TOKEN } }));
   assert.equal(cleared.cleared.length, 5);
   assert.ok(dump(ss, 'Trips').rows.every((r) => r.every((c) => c === '')));
+});
+
+// ---- clearAllData (the in-app Admin panel path) ----
+// Same wipe as devClear, but reached over rpc() by a signed-in Admin, so the
+// gates are RBAC + the typed confirmation phrase instead of a shared token.
+const PHRASE = 'PERMANENTLY DELETE ALL DATA';
+
+function makeAdminEnv(email) {
+  const sheets = seedSheets();
+  sheets['Users'] = usersSheet();
+  sheets['Audit Log'] = emptySheet('Audit Log'); // real headers, so _auditLog can append
+  return makeEnv({ sheets, userEmail: email || EMAIL.Admin });
+}
+
+test('clearAllData: an Admin with the exact phrase clears the transactional sheets', () => {
+  const { api, ss } = makeAdminEnv();
+  const result = api.clearAllData(PHRASE);
+
+  assert.equal(result.success, true);
+  // Spread: the value crosses the vm boundary, so it isn't a host Array.
+  assert.deepEqual([...result.cleared], ['Trips', 'Outlets', 'Route Frequency Log', 'Waybills', 'Audit Log']);
+  for (const name of ['Trips', 'Outlets', 'Route Frequency Log', 'Waybills']) {
+    assert.ok(dump(ss, name).rows.every((r) => r.every((c) => c === '')), `${name} must be empty`);
+  }
+  // Master data survives, sequence counter included.
+  assert.deepEqual(dump(ss, 'Waybill Prefixes').rows, [[1, 'A', 42]]);
+});
+
+test('clearAllData: the audit row is written after the wipe, so it survives', () => {
+  const { api, ss } = makeAdminEnv();
+  api.clearAllData(PHRASE);
+
+  const { headers, rows } = dump(ss, 'Audit Log');
+  const entries = rows.filter((r) => r[0] !== '').map((r) => rowObject(headers, r));
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0]['Action'], 'DATA_CLEAR');
+  assert.equal(entries[0]['User'], EMAIL.Admin);
+  assert.match(String(entries[0]['New Value']), /Trips/);
+});
+
+test('clearAllData: a wrong, empty or missing phrase deletes nothing', () => {
+  for (const phrase of [undefined, null, '', 'permanently delete all data', 'DELETE ALL DATA']) {
+    const { api, ss } = makeAdminEnv();
+    const result = api.clearAllData(phrase);
+    assert.equal(result.success, false, `phrase ${JSON.stringify(phrase)} must be rejected`);
+    assert.match(result.error, /did not match/);
+    assert.equal(dump(ss, 'Trips').rows.length, 1); // untouched
+  }
+});
+
+test('clearAllData: surrounding whitespace in the phrase is tolerated', () => {
+  const { api, ss } = makeAdminEnv();
+  assert.equal(api.clearAllData(`  ${PHRASE}\n`).success, true);
+  assert.ok(dump(ss, 'Trips').rows.every((r) => r.every((c) => c === '')));
+});
+
+test('clearAllData: non-Admins are refused before the phrase is even looked at', () => {
+  for (const role of ['Dispatcher', 'Payroll', 'Viewer', 'Inactive', 'Unknown']) {
+    const { api, ss } = makeAdminEnv(EMAIL[role]);
+    assert.throws(() => api.clearAllData(PHRASE), /Access denied/, `${role} must be refused`);
+    assert.equal(dump(ss, 'Trips').rows.length, 1);
+  }
 });

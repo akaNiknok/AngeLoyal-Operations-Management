@@ -530,6 +530,7 @@
                     renderWaybillPrefixesAdmin();
                     refreshWaybillPrefixes();
                 }
+                if (name === "admin") renderAdminPanel();
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────

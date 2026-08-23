@@ -1615,3 +1615,43 @@ function updateEmployee(employeeId, changes) {
     return { success: false, error: e.message };
   }
 }
+
+
+// ============================================================
+//  DATA WRITERS — Maintenance
+// ============================================================
+
+// The exact phrase an Admin has to type to wipe the environment. Long and
+// unambiguous on purpose — nobody types this by reflex. The web/ Admin panel
+// shows the same string; this copy is the one that actually decides.
+const CLEAR_DATA_PHRASE = 'PERMANENTLY DELETE ALL DATA';
+
+/**
+ * Wipes every transactional row from this environment's spreadsheet (Trips,
+ * Outlets, Route Frequency Log, Waybills, Audit Log), keeping headers and all
+ * master data. Admin-only, and only with the confirmation phrase typed exactly.
+ *
+ * Which environment gets wiped is decided by which backend the caller reached:
+ * the DEV frontend talks to the DEV script/sheet, prod to prod. There is no
+ * cross-environment clear.
+ *
+ * @param {string} confirmPhrase  Must equal CLEAR_DATA_PHRASE.
+ * @returns {{ success: boolean, cleared: string[] } | { success: false, error: string }}
+ */
+function clearAllData(confirmPhrase) {
+  _requirePermission('CLEAR_ALL_DATA');
+  try {
+    if (String(confirmPhrase == null ? '' : confirmPhrase).trim() !== CLEAR_DATA_PHRASE) {
+      throw new Error('Confirmation phrase did not match. Nothing was deleted.');
+    }
+
+    const cleared = _clearTransactionalSheets();
+    // Logged *after* the wipe on purpose — the Audit Log is one of the sheets
+    // being cleared, so this row is the surviving record of who did it.
+    _auditLog('DATA_CLEAR', '', '', '', JSON.stringify(cleared));
+
+    return { success: true, cleared };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}

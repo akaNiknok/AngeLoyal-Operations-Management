@@ -33,6 +33,7 @@ const MATRIX = {
   CONFIRM_WAYBILL: ['Admin', 'Dispatcher'],
   EDIT_MASTER_RECORDS: ['Admin'],
   VIEW_AUDIT: ['Admin'],
+  CLEAR_ALL_DATA: ['Admin'],
 };
 
 const ROLES = ['Admin', 'Dispatcher', 'Payroll', 'Viewer'];

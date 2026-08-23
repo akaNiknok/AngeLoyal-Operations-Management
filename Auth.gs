@@ -181,6 +181,7 @@ const RPC_ALLOWED = {
   updateWaybillPrefix: true,
   createEmployee: true,
   updateEmployee: true,
+  clearAllData: true,
 };
 
 /**

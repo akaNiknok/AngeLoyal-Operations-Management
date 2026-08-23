@@ -44,6 +44,38 @@ function _auditLog(action, table, rowId, oldValue, newValue) {
 
 
 // ============================================================
+//  INTERNAL HELPERS — Data reset
+// ============================================================
+
+/**
+ * Deletes every data row (header row survives) from the transactional sheets.
+ * Master data — Employees, Trucks, Users, Billing Categories, Waybill Prefixes
+ * and their sequence counters, Default Assignments, Route Type Map — is left
+ * alone: this resets operations, it does not re-provision the company.
+ *
+ * Shared by the token-gated _devClear endpoint (scripts/clear-sheet-data.js)
+ * and the Admin panel's clearAllData() so there is exactly one definition of
+ * "clear the data" in the system.
+ *
+ * @returns {string[]} names of the sheets that were cleared (missing ones are skipped)
+ */
+function _clearTransactionalSheets() {
+  const sheetNames = [SHEET_TRIPS, SHEET_OUTLETS, SHEET_ROUTE_FREQ, SHEET_WAYBILLS, SHEET_AUDIT];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cleared = [];
+  sheetNames.forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+    }
+    cleared.push(name);
+  });
+  return cleared;
+}
+
+// ============================================================
 //  INTERNAL HELPERS — Waybill logic
 // ============================================================
 

@@ -44,6 +44,7 @@ const PERMISSIONS = {
   EDIT_MASTER_RECORDS:    [ROLES.ADMIN],
   EDIT_WAYBILL_PREFIXES:  [ROLES.ADMIN, ROLES.DISPATCHER],
   VIEW_AUDIT:             [ROLES.ADMIN],
+  CLEAR_ALL_DATA:         [ROLES.ADMIN],
 };
 
 // Identity for the current request, set by rpc()/login() (see Auth.gs) from a

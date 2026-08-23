@@ -37,10 +37,11 @@ function _devDump(params) {
 }
 
 /**
- * Deletes all data rows (keeps header row) from the transactional sheets:
- * Trips, Outlets, Route Frequency Log, Waybills, Audit Log. Gated by the same
- * DEV_DUMP_TOKEN as _devDump. Used by local tooling
- * (scripts/clear-sheet-data.js) to reset a dev/test spreadsheet.
+ * Token-gated wrapper around _clearTransactionalSheets() (Internals.gs) —
+ * deletes all data rows (keeps header row) from Trips, Outlets, Route
+ * Frequency Log, Waybills and Audit Log. Gated by the same DEV_DUMP_TOKEN as
+ * _devDump. Used by local tooling (scripts/clear-sheet-data.js) to reset a
+ * dev/test spreadsheet; the in-app equivalent is clearAllData().
  *
  * Usage: ?action=devClear&token=...
  *
@@ -56,20 +57,7 @@ function _devClear(params) {
     return out({ error: 'forbidden' });
   }
 
-  const sheetNames = [SHEET_TRIPS, SHEET_OUTLETS, SHEET_ROUTE_FREQ, SHEET_WAYBILLS, SHEET_AUDIT];
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const cleared = [];
-  sheetNames.forEach(name => {
-    const sheet = ss.getSheetByName(name);
-    if (!sheet) return;
-    const lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-      sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
-    }
-    cleared.push(name);
-  });
-
-  return out({ cleared });
+  return out({ cleared: _clearTransactionalSheets() });
 }
 
 /**
