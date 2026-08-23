@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.4.0",
+      "date": "2026-08-23",
+      "title": "Clearer route file, and correct redelivery dates",
+      "body": "### What is new\n\n- **The FINAL ROUTE file has different columns.** The Area column is now the first column. The FO column is next to the Type column. The Restrictions column is gone from the printout, from the driver cards and from the Excel file.\n- **A Redeliver now goes to the correct day.** Before, a Redeliver that you keyed in the next morning made a trip two days later. Now the app counts from the day of the original trip. This is also true for \"Foul Trip - For Redeliver\".\n- **A merged load keeps one waybill number.** Before, each stop of a merged load received a different Redeliver number. Now all the stops of the load share one number, in the same way as a Regular waybill.\n- **The Admin tab is new.** Only an administrator can see it. It holds a button that deletes all the trips, the waybills and the outlets. You must type a confirmation phrase before the app deletes anything.\n\n### What is the same\n\nEverything else is the same. The dispatch board, the route file import and the sign-in screen work as before."
+    },
+    {
       "version": "v1.3.0",
       "date": "2026-08-23",
       "title": "A new link, and a faster app",
