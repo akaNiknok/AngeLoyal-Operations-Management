@@ -46,6 +46,7 @@
             let defaultAssignments = [];
             let billingCategories = [];
             let routeTypeMap = [];
+            let customerGroupColors = [];
 
             // Dispatch state
             let dispatchData = null; // { trips, date }
@@ -349,6 +350,8 @@
                 defaultAssignments = boot.defaultAssignments || [];
                 billingCategories = boot.billingCategories || [];
                 routeTypeMap = boot.routeTypeMap || [];
+                customerGroupColors = boot.customerGroupColors || [];
+                applyCustomerGroupColors();
 
                 applyRoleToUI(currentUser.role);
                 hideLoading();
@@ -524,13 +527,16 @@
                 if (name === "outlets") renderOutlets();
                 if (name === "trucks") renderTrucksAdmin();
                 if (name === "employees") renderEmployeesAdmin();
-                if (name === "billing-categories") renderBillingCategoriesAdmin();
-                if (name === "route-type-map") renderRouteTypeMapAdmin();
                 if (name === "waybill-prefixes") {
                     renderWaybillPrefixesAdmin();
                     refreshWaybillPrefixes();
                 }
-                if (name === "admin") renderAdminPanel();
+                if (name === "settings") {
+                    renderBillingCategoriesAdmin();
+                    renderRouteTypeMapAdmin();
+                    renderCustomerGroupColors();
+                    renderAdminPanel();
+                }
             }
 
             // ── MODAL HELPERS ──────────────────────────────────────────
@@ -604,9 +610,12 @@
                     h = (h * 31 + s.charCodeAt(i)) % 360;
                 return h;
             }
-            // Chain codes the client already reads by color on the Rebisco
-            // route file (col G fills — see Docs/Schema.md). Fixed palette
-            // wins over the hash so the board matches the paper.
+            // Chain codes the client reads by color on the Rebisco route file
+            // (col G fills — see Docs/Schema.md). A fixed color wins over the
+            // hash so the board matches the paper. These are only the built-in
+            // fallbacks — the server seeds the same palette into the Customer
+            // Group Colors sheet, and applyCustomerGroupColors() merges any
+            // edits from there on top (keyed uppercase).
             const CG_COLORS = {
                 PG: "#92d050",
                 SM: "#00b0f0",
@@ -616,6 +625,19 @@
                 PS: "#ffc000",
                 ALFA: "#ffc000",
             };
+            // Fold saved customer-group colors into CG_COLORS. Active rows set
+            // the color; an inactive/blank row deletes the key so the group
+            // falls back to its hashed color.
+            function applyCustomerGroupColors() {
+                customerGroupColors.forEach((c) => {
+                    const key = String(c.customerGroup || "")
+                        .trim()
+                        .toUpperCase();
+                    if (!key) return;
+                    if (c.active !== false && c.color) CG_COLORS[key] = c.color;
+                    else delete CG_COLORS[key];
+                });
+            }
             function colorChip(label) {
                 if (!label) return `<span class="color-chip empty">—</span>`;
                 const fixed = CG_COLORS[String(label).trim().toUpperCase()];
@@ -623,6 +645,27 @@
                     return `<span class="color-chip" title="${esc(label)}" style="background:${fixed};color:#1f2328;border-color:rgba(0,0,0,.2)">${esc(label)}</span>`;
                 const h = labelHue(label);
                 return `<span class="color-chip" title="${esc(label)}" style="background:hsl(${h} 62% 91%);color:hsl(${h} 55% 30%);border-color:hsl(${h} 45% 78%)">${esc(label)}</span>`;
+            }
+            // The effective chip color for a group as a #rrggbb hex, so a
+            // <input type="color"> can default to what the board currently
+            // shows — a set/fixed color as-is, else the hashed light tint.
+            function cgEffectiveHex(label) {
+                const fixed = CG_COLORS[String(label).trim().toUpperCase()];
+                if (fixed && /^#[0-9a-f]{6}$/i.test(fixed)) return fixed;
+                return hslToHex(labelHue(label), 62, 91);
+            }
+            function hslToHex(h, s, l) {
+                s /= 100;
+                l /= 100;
+                const a = s * Math.min(l, 1 - l);
+                const f = (n) => {
+                    const k = (n + h / 30) % 12;
+                    const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+                    return Math.round(255 * c)
+                        .toString(16)
+                        .padStart(2, "0");
+                };
+                return `#${f(0)}${f(8)}${f(4)}`;
             }
             function catSwatch(name) {
                 if (!name) return "";

@@ -748,6 +748,80 @@
             // so the same panel serves dev and prod without a switch.
             const CLEAR_DATA_PHRASE = "PERMANENTLY DELETE ALL DATA";
 
+            // ── CUSTOMER GROUP COLORS ────────────────────────────────
+            // The color chip shown per customer group on the dispatch board.
+            // Groups are the free-text Customer Group values on outlets; this
+            // panel just assigns a color to each. Saved to a shared sheet so
+            // every user sees the same colors (see CG_COLORS in core.js).
+            // The group list for the current render, so row handlers pass an
+            // index instead of interpolating a free-text group into onclick
+            // (avoids breaking/injecting on quotes in the value).
+            let _cgColorGroups = [];
+            function renderCustomerGroupColors() {
+                // Every group we know about: those used by outlets, plus any
+                // that already carry a saved/seeded color.
+                const groups = new Set();
+                outlets.forEach((o) => {
+                    const g = String(o.customerGroup || "").trim();
+                    if (g) groups.add(g);
+                });
+                customerGroupColors.forEach((c) => {
+                    const g = String(c.customerGroup || "").trim();
+                    if (g) groups.add(g);
+                });
+                _cgColorGroups = [...groups].sort((a, b) =>
+                    a.toUpperCase().localeCompare(b.toUpperCase()),
+                );
+
+                document.getElementById("cg-colors-count").textContent =
+                    `${_cgColorGroups.length} groups`;
+
+                const isAdmin = currentUser.role === "Admin";
+                const tbody = document.getElementById("cg-colors-tbody");
+                tbody.innerHTML = _cgColorGroups
+                    .map((g, i) => {
+                        const hex = cgEffectiveHex(g);
+                        const picker = isAdmin
+                            ? `<div class="cg-color-cell">
+                                 <input type="color" class="cg-color-input" value="${hex}"
+                                   onchange="saveCgColor(${i}, this.value)">
+                                 <button class="btn btn-ghost btn-sm"
+                                   onclick="saveCgColor(${i}, '')" title="Revert to automatic color">Auto</button>
+                               </div>`
+                            : `<span class="color-chip" style="background:${hex};border-color:rgba(0,0,0,.2)"></span>`;
+                        return `<tr>
+    <td style="font-family:'DM Mono',monospace">${esc(g)}</td>
+    <td>${picker}</td>
+    <td>${colorChip(g)}</td>
+  </tr>`;
+                    })
+                    .join("");
+            }
+
+            function saveCgColor(index, color) {
+                const group = _cgColorGroups[index];
+                if (group == null) return;
+                bgSave("saveCustomerGroupColor", [group, color], {
+                    onOk: (r) => {
+                        // Mirror the sheet change into the local caches so the
+                        // board and this panel update without a reload.
+                        const key = String(group).trim().toUpperCase();
+                        const saved = r.customerGroupColor;
+                        const existing = customerGroupColors.find(
+                            (c) =>
+                                String(c.customerGroup).trim().toUpperCase() ===
+                                key,
+                        );
+                        if (existing) Object.assign(existing, saved);
+                        else customerGroupColors.push(saved);
+                        if (saved.active !== false && saved.color)
+                            CG_COLORS[key] = saved.color;
+                        else delete CG_COLORS[key];
+                        renderCustomerGroupColors();
+                    },
+                });
+            }
+
             function renderAdminPanel() {
                 const env = (OMS_ENV && OMS_ENV.label) || "unknown";
                 document.getElementById("admin-env-label").textContent = env;

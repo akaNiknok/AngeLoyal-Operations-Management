@@ -18,6 +18,7 @@ The AngeLoyal Order Management System (OMS) relies on a structured collection of
 | 10 | Waybills | Waybills | Append-Only Transaction Ledger |
 | 11 | Audit Log | Audit | System-Wide Activity Journal |
 | 12 | Route Type Map | Config | Administrative Setup (Self-Seeding) |
+| 13 | Customer Group Colors | Config | Administrative Setup (Self-Seeding) |
 
 ## **Group 1: Config Sheets**
 
@@ -93,6 +94,31 @@ Maps the truck-type column codes that appear in a Rebisco route file (e.g. 6WF, 
 | L300 | L300 | TRUE |
 
 **System Behavior:** Codes not found in the map fall back to using the code itself as the category name (so an unmapped code still attempts a match). A code that resolves to a category with no free truck leaves the trip's truck blank for the dispatcher, but the required category is still stamped onto the trip so the needed type stays visible.
+
+### **Sheet 13: Customer Group Colors**
+
+Stores the color chip shown per **customer group** on the dispatch board and exports. Customer groups are the free-text Customer Group values on Outlets (Sheet 7) — chain codes like PG, SM, WM — not a separate registry; this sheet only assigns a color to a code. This sheet **self-seeds** the first time it is read with the fixed chain-code palette the client previously hard-coded, so the board keeps matching the paper route file until an Admin edits a color in the Settings panel. Groups without a row (or with a blank/inactive one) fall back to a color hashed from the group name on the client.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Customer Group | String | Customer group code, e.g. PG, SM, WM (matched case-insensitively) |
+| Color | String | Hex color like #92d050; blank clears the color (row goes inactive → group falls back to its hashed color) |
+| Active | Boolean | FALSE (or blank Color) means the group uses its hashed fallback color instead |
+
+#### **Initial seed:**
+
+| Customer Group | Color | Active |
+| :---- | :---- | :---- |
+| PG | #92d050 | TRUE |
+| SM | #00b0f0 | TRUE |
+| WM | #ffe94d | TRUE |
+| RO | #e5b8b7 | TRUE |
+| SW | #e5b8b7 | TRUE |
+| PS | #ffc000 | TRUE |
+| ALFA | #ffc000 | TRUE |
+
+**System Behavior:** `saveCustomerGroupColor(group, color)` upserts by group code (case-insensitive) and is Admin-only (EDIT_MASTER_RECORDS). The color is validated as a `#rrggbb` hex; an empty color deactivates the row. The client folds active rows into its `CG_COLORS` lookup at boot, so a saved color wins over the hash everywhere `colorChip` is used.
 
 ### **Sheet 3: Waybill Prefixes**
 
@@ -315,6 +341,7 @@ The global ledger recording all administrative, operational, and data state modi
 * BILLING\_CATEGORY\_EDIT — Administrative updates to a billing category (rename, Active/Inactive toggling)  
 * ROUTE\_TYPE\_MAP\_CREATE — New route-file truck-type → billing-category mapping added  
 * ROUTE\_TYPE\_MAP\_EDIT — Administrative updates to a route type mapping (code, category, Active/Inactive toggling)  
+* CG\_COLOR\_EDIT — A customer group's dispatch-board color was set or cleared (New Value = "GROUP → #hex" or "GROUP → (cleared)")  
 * WAYBILL\_PREFIX\_CREATE — New prefix added to the Waybill Prefixes list  
 * WAYBILL\_PREFIX\_EDIT — Updates to a waybill prefix (prefix code, company name, re-basing the Last Sequence Number, Active/Inactive toggling)
 * LOGIN — A verified Google sign-in opened a session (Table = Users, New Value = the account's email)

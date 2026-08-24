@@ -1426,6 +1426,65 @@ function updateRouteTypeMapping(mappingId, changes) {
 
 
 // ============================================================
+//  DATA WRITERS — Customer Group Colors (Admin only)
+// ============================================================
+
+/**
+ * Sets the color for a customer group (upsert by group code, case-insensitive).
+ * Passing a blank color deactivates the row, so the group falls back to the
+ * client's hashed color. Groups are the free-text Customer Group values on
+ * outlets — no separate group registry, this only stores the color choice.
+ *
+ * @param {string} group  Customer group code (e.g. "PG")
+ * @param {string} color  Hex color like "#92d050", or "" to clear
+ * @returns {{ success: boolean, customerGroupColor: Object } | { success: false, error: string }}
+ */
+function saveCustomerGroupColor(group, color) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const code = String(group || '').trim();
+    if (!code) throw new Error('Customer group is required.');
+    const hex = String(color || '').trim();
+    if (hex && !/^#[0-9a-fA-F]{6}$/.test(hex)) {
+      throw new Error('Color must be a hex value like #92d050.');
+    }
+    const active = hex !== '';
+
+    getCustomerGroupColors(); // ensure the sheet exists (self-bootstraps)
+    const sheet   = _getSheet(SHEET_CG_COLORS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    let rowIdx = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if (String(_val(rows[i], headers, 'Customer Group')).trim().toUpperCase() === code.toUpperCase()) {
+        rowIdx = i;
+        break;
+      }
+    }
+
+    let id;
+    if (rowIdx === -1) {
+      id = _nextRowId(sheet);
+      sheet.appendRow([id, code, hex, active]);
+    } else {
+      id = _numOrNull(_val(rows[rowIdx], headers, 'ID'));
+      _writeRowFields(sheet, rows[rowIdx], rowIdx, headers, { 'Color': hex, 'Active': active });
+    }
+
+    _auditLog('CG_COLOR_EDIT', SHEET_CG_COLORS, id, '', `${code} → ${hex || '(cleared)'}`);
+
+    return {
+      success: true,
+      customerGroupColor: { id: id, customerGroup: code, color: hex, active: active },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ============================================================
 //  DATA WRITERS — Waybill Prefixes (Admin + Dispatcher)
 // ============================================================
 

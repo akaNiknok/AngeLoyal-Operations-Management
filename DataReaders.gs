@@ -35,6 +35,7 @@ function getBootData() {
     defaultAssignments: getDefaultAssignments(),
     billingCategories:  getBillingCategories(),
     routeTypeMap:       getRouteTypeMap(),
+    customerGroupColors: getCustomerGroupColors(),
   };
 }
 
@@ -131,6 +132,45 @@ function getRouteTypeMap() {
     fileTypeCode:    String(_val(row, headers, 'File Type Code')).trim(),
     billingCategory: String(_val(row, headers, 'Billing Category')).trim(),
     active:          _val(row, headers, 'Active') !== false,
+  })).filter(r => r.id !== null);
+}
+
+/**
+ * Default customer-group → color rows, seeded the first time the sheet is
+ * created. Mirrors the fixed chain-code palette the client used to hard-code
+ * (see colorChip in web/core.js), so the board stays matched to the paper
+ * route file until someone edits a color in Settings.
+ */
+const CG_COLOR_DEFAULTS = [
+  ['PG',   '#92d050'],
+  ['SM',   '#00b0f0'],
+  ['WM',   '#ffe94d'],
+  ['RO',   '#e5b8b7'],
+  ['SW',   '#e5b8b7'],
+  ['PS',   '#ffc000'],
+  ['ALFA', '#ffc000'],
+];
+
+/**
+ * Returns saved customer-group colors. Groups themselves are just the free-text
+ * Customer Group field on outlets — this sheet only stores a chosen color per
+ * code; groups without a row fall back to the client's hashed color.
+ * Self-bootstraps with the fixed palette defaults if the sheet is missing.
+ *
+ * @returns {Object[]} Array of { id, customerGroup, color, active }
+ */
+function getCustomerGroupColors() {
+  const seed   = CG_COLOR_DEFAULTS.map((r, i) => [i + 1, r[0], r[1], true]);
+  const sheet  = _getOrCreateSheet(SHEET_CG_COLORS,
+    ['ID', 'Customer Group', 'Color', 'Active'], seed);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+
+  return rows.slice(1).map(row => ({
+    id:            _numOrNull(_val(row, headers, 'ID')),
+    customerGroup: String(_val(row, headers, 'Customer Group')).trim(),
+    color:         String(_val(row, headers, 'Color')).trim(),
+    active:        _val(row, headers, 'Active') !== false,
   })).filter(r => r.id !== null);
 }
 

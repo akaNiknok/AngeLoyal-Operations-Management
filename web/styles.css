@@ -2112,11 +2112,87 @@
                 flex: 1;
             }
 
-            /* ── ADMIN: DANGER ZONE ── */
+            /* ── SETTINGS PANEL ── */
             .admin-scroll {
                 flex: 1;
                 overflow: auto;
                 padding: 18px;
+            }
+            /* Desktop: config sections flow into columns instead of one tall
+               stack, so a wide screen fills across rather than scrolling. */
+            /* Desktop: the whole block is centered (not pinned left), and the
+               config sections sit in two columns — Billing Categories + Route
+               Type Map stacked on the left, Customer Group Colors on the
+               right — so a wide screen fills evenly without cramping tables. */
+            .settings-inner {
+                max-width: 1120px;
+                margin: 0 auto;
+            }
+            .settings-grid {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 18px;
+                margin-bottom: 22px;
+            }
+            .settings-col {
+                flex: 1 1 460px;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+            .settings-section {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                padding: 14px;
+                min-width: 0;
+            }
+            .settings-section-head {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 8px 10px;
+                margin-bottom: 10px;
+            }
+            .settings-section-title {
+                font-family: "DM Mono", monospace;
+                font-size: 13px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: var(--text);
+            }
+            /* Section description: a normal-case sentence, not an uppercase
+               tb-label crammed into the header row. */
+            .settings-section-hint {
+                margin: -2px 0 12px;
+                font-size: 11px;
+                line-height: 1.5;
+                color: var(--hint);
+            }
+            /* Colors table only needs its own content width — a full-width
+               table left a big empty gap before the tiny preview chip — and
+               centers within its card so it isn't hugging the left edge. */
+            #cg-colors-table {
+                width: auto;
+                margin: 0 auto;
+            }
+            .cg-color-cell {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                white-space: nowrap;
+            }
+            .cg-color-input {
+                width: 44px;
+                height: 26px;
+                padding: 0;
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+                background: none;
+                cursor: pointer;
+                vertical-align: middle;
             }
             .danger-zone {
                 max-width: 640px;
