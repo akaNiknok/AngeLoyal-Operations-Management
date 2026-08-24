@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.5.0",
+      "date": "2026-08-24",
+      "title": "",
+      "body": "### What's new\n\n- The **Admin** menu is now called **Settings**. It has the same tools as before.\n- You can now set a color for each customer group in Settings. The dispatch board uses these colors to group trips.\n- You can now edit a waybill number before you confirm it. Before, you had to confirm it first to fix a mistake.\n- The dispatch board is easier to read. Rows and grid lines have more contrast.\n\nNothing else has changed. Your daily work stays the same."
+    },
+    {
       "version": "v1.4.0",
       "date": "2026-08-23",
       "title": "Clearer route file, and correct redelivery dates",
