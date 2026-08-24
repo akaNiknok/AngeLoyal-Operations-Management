@@ -164,6 +164,7 @@ const RPC_ALLOWED = {
   bulkSetTripStatus: true,
   reorderTrips: true,
   confirmWaybill: true,
+  updateSuggestedWaybill: true,
   importRouteFile: true,
   deleteImportedTrip: true,
   markDayScheduled: true,
