@@ -679,6 +679,18 @@
             table.dispatch-table tbody tr.fo-grp-1 {
                 background: #e4e0d2;
             }
+            /* The deeper shade is close to --border, which would swallow the
+               grid lines — give these rows a darker divider so they stay visible. */
+            table.dispatch-table tbody tr.fo-grp-1,
+            table.dispatch-table tbody tr.fo-grp-1 td:first-child {
+                border-bottom-color: #cdc6b2;
+            }
+            table.dispatch-table tbody tr.fo-grp-1 td:first-child::after {
+                background: #cdc6b2;
+            }
+            table.dispatch-table tbody tr.fo-grp-1 .col-divider {
+                border-left-color: #cdc6b2;
+            }
             /* Hover is applied to every row of a load by hoverLoad(), not by
                :hover — a merged cell is transparent, so tinting only the row
                under the cursor would light up part of it and not the rest. */
