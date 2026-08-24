@@ -660,7 +660,7 @@
                 border-bottom: 1px solid var(--border);
             }
             table.dispatch-table tbody tr.fo-grp-1 td:first-child {
-                background: #eceae1;
+                background: #e4e0d2;
             }
             table.dispatch-table tbody tr.load-hover td:first-child {
                 background: #eef1f5;
@@ -677,7 +677,7 @@
             /* Alternating shade groups consecutive trips of the same FO. A warm
                neutral, distinct from the white rows and the blue selected row. */
             table.dispatch-table tbody tr.fo-grp-1 {
-                background: #eceae1;
+                background: #e4e0d2;
             }
             /* Hover is applied to every row of a load by hoverLoad(), not by
                :hover — a merged cell is transparent, so tinting only the row
