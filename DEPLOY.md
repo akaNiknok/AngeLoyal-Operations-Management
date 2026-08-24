@@ -138,14 +138,15 @@ When the Apps Script project + bound Sheet move to an AngeLoyal-owned Google acc
 
 ## Day-to-day workflow
 ```sh
-git checkout develop && git pull   # branch off updated develop
-git checkout -b feat/<task>
+git checkout develop && git pull   # stay current on develop
 # ... make changes ...
-git add -A && git commit -m "feat: ..."
-git push -u origin feat/<task>     # open a PR into develop
+git add -A && git commit -m "feat: ..."   # Conventional Commit, straight to develop
+git push origin develop
 npm run push                       # backend -> DEV script
 npm run dev:web                    # frontend -> http://localhost:8788
 ```
+
+For a big or risky change you'd rather isolate, use a branch instead: `git checkout -b feat/<task>`, then PR it back into `develop`.
 
 Going live is a separate step — see [Git workflow (gitflow)](#git-workflow-gitflow) below. Only `main` gets `npm run release`.
 
@@ -163,14 +164,14 @@ Going live is a separate step — see [Git workflow (gitflow)](#git-workflow-git
 This is a solo project developed mostly through Claude Code, on a simplified gitflow:
 
 - **`main` = production.** It mirrors what the live web app deployment serves. Nothing lands here except release merges from `develop` and hotfixes. **`npm run release` is only ever run from `main`** — never from `develop` or a feature branch.
-- **`develop` = integration.** All day-to-day work targets it. Use `npm run push` from here to test in the Apps Script editor/`/dev` URL; never `npm run release`.
-- **Feature branches** (`feat/<task>`, `fix/<task>`, one per task) branch off the updated `develop` and merge back via PR.
-- **Hotfix branches** (`hotfix/<task>`) branch off `main` for urgent production fixes: PR into `main`, tag + release (below), then merge `main` back into `develop`.
+- **`develop` = integration.** All day-to-day work commits straight here with Conventional Commit messages — no feature branch or PR needed for routine changes. Use `npm run push` from here to test in the Apps Script editor/`/dev` URL; never `npm run release`.
+- **Feature branches** (`feat/<task>`, `fix/<task>`) are optional — reach for one only when a change is big or risky enough to isolate, then merge it back into `develop`.
+- **Hotfix branches** (`hotfix/<task>`) branch off `main` for urgent production fixes: merge into `main`, tag + release (below), then merge `main` back into `develop`.
 
 ### Releases (tags + GitHub Releases)
 Every deploy to the live web app gets a tag and a GitHub Release, so the deployed state is always identifiable:
 
-1. PR `develop` → `main` (merge commit), titled `release: vX.Y.Z`.
+1. Merge `develop` → `main` (a merge commit, titled `release: vX.Y.Z`; a PR is optional).
 2. On `main`: `git tag vX.Y.Z && git push --tags`
 3. `gh release create vX.Y.Z` — **write the notes for dispatchers** (see below). `--generate-notes` produces a commit list, which is the wrong thing to show them; use it as raw material at most.
 4. `npm run changelog:sync -- --apply`, then commit `web/changelog.json`. This is what the in-app **"What's new?"** dialog reads.
@@ -195,10 +196,10 @@ Supported formatting: `###` headings, `-` bullets, `**bold**`, `` `code` ``, and
 
 Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Payroll, v3 = Visibility & Alerts), **minor** = feature release, **patch** = hotfix. The latest tag on `main` is what's live; if it isn't, run `npm run release` from that tag's commit.
 
-### PR conventions
-- **Merge commit** every PR (preserves the branch as a named grouping in history). Repo settings: allow **only** merge commits, enable "Automatically delete head branches".
+### Commit / PR conventions
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `test:`, …) so `--generate-notes` stays changelog-friendly.
-- Always start a new task from a fresh branch off the updated `develop`.
+- When you *do* use a branch + PR, **merge-commit** it (preserves the branch as a named grouping in history). Repo settings: allow merge commits, enable "Automatically delete head branches".
+- Pull `develop` before starting so you commit on top of the latest.
 
 ## Notes
 - `.claspignore` restricts what gets pushed to the `.gs` files and `appsscript.json` — `web/`, `pages/`, `Docs/` and `Sample Files/` stay local/Git only and are never sent to Apps Script.

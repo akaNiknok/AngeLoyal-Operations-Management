@@ -96,20 +96,6 @@
                         Employees
                     </button>
                     <button
-                        class="nav-btn admin-only"
-                        id="nav-billing-categories"
-                        onclick="switchPanel('billing-categories')"
-                    >
-                        Billing Categories
-                    </button>
-                    <button
-                        class="nav-btn admin-only"
-                        id="nav-route-type-map"
-                        onclick="switchPanel('route-type-map')"
-                    >
-                        Route Type Map
-                    </button>
-                    <button
                         class="nav-btn dispatcher-only"
                         id="nav-waybill-prefixes"
                         onclick="switchPanel('waybill-prefixes')"
@@ -118,10 +104,10 @@
                     </button>
                     <button
                         class="nav-btn admin-only"
-                        id="nav-admin"
-                        onclick="switchPanel('admin')"
+                        id="nav-settings"
+                        onclick="switchPanel('settings')"
                     >
-                        Admin
+                        Settings
                     </button>
                 </nav>
 
@@ -861,93 +847,6 @@
             </div>
 
             <!-- ══════════════════════════════════════
-       PANEL: BILLING CATEGORIES (admin)
-  ══════════════════════════════════════ -->
-            <div class="panel" id="panel-billing-categories">
-                <div class="toolbar">
-                    <span class="tb-label" id="billing-categories-count"></span>
-                    <label
-                        class="tb-label"
-                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
-                    >
-                        <input
-                            type="checkbox"
-                            id="billing-categories-show-inactive"
-                            checked
-                            onchange="renderBillingCategoriesAdmin()"
-                        />
-                        Show inactive
-                    </label>
-                    <div class="tb-spacer"></div>
-                    <button
-                        class="btn btn-primary btn-sm"
-                        onclick="openAddBillingCategoryModal()"
-                    >
-                        + Add category
-                    </button>
-                </div>
-                <div class="admin-split">
-                    <div class="admin-list-wrap">
-                        <table class="data-table" id="billing-categories-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 40px">ID</th>
-                                    <th>Name</th>
-                                    <th style="width: 90px">Status</th>
-                                    <th style="width: 90px"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="billing-categories-tbody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ══════════════════════════════════════
-       PANEL: ROUTE TYPE MAP (admin)
-  ══════════════════════════════════════ -->
-            <div class="panel" id="panel-route-type-map">
-                <div class="toolbar">
-                    <span class="tb-label" id="route-type-map-count"></span>
-                    <label
-                        class="tb-label"
-                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
-                    >
-                        <input
-                            type="checkbox"
-                            id="route-type-map-show-inactive"
-                            checked
-                            onchange="renderRouteTypeMapAdmin()"
-                        />
-                        Show inactive
-                    </label>
-                    <div class="tb-spacer"></div>
-                    <button
-                        class="btn btn-primary btn-sm"
-                        onclick="openAddRouteTypeMapModal()"
-                    >
-                        + Add mapping
-                    </button>
-                </div>
-                <div class="admin-split">
-                    <div class="admin-list-wrap">
-                        <table class="data-table" id="route-type-map-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 40px">ID</th>
-                                    <th>File Type</th>
-                                    <th>Billing Category</th>
-                                    <th style="width: 90px">Status</th>
-                                    <th style="width: 90px"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="route-type-map-tbody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ══════════════════════════════════════
        PANEL: WAYBILL PREFIXES (admin + dispatcher)
   ══════════════════════════════════════ -->
             <div class="panel" id="panel-waybill-prefixes">
@@ -994,11 +893,12 @@
             </div>
 
             <!-- ══════════════════════════════════════
-       PANEL: ADMIN (admin only) — maintenance / danger zone
+       PANEL: SETTINGS (admin only) — master config, colors,
+       maintenance / danger zone
   ══════════════════════════════════════ -->
-            <div class="panel" id="panel-admin">
+            <div class="panel" id="panel-settings">
                 <div class="toolbar">
-                    <span class="tb-label">Maintenance</span>
+                    <span class="tb-label">Settings</span>
                     <div class="tb-spacer"></div>
                     <span class="tb-label"
                         >Environment:
@@ -1006,6 +906,126 @@
                     >
                 </div>
                 <div class="admin-scroll">
+                    <div class="settings-inner">
+                    <div class="settings-grid">
+                    <div class="settings-col">
+                    <!-- Billing Categories -->
+                    <div class="settings-section">
+                        <div class="settings-section-head">
+                            <span class="settings-section-title"
+                                >Billing Categories</span
+                            >
+                            <span
+                                class="tb-label"
+                                id="billing-categories-count"
+                            ></span>
+                            <label
+                                class="tb-label"
+                                style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    id="billing-categories-show-inactive"
+                                    checked
+                                    onchange="renderBillingCategoriesAdmin()"
+                                />
+                                Show inactive
+                            </label>
+                            <div class="tb-spacer"></div>
+                            <button
+                                class="btn btn-primary btn-sm"
+                                onclick="openAddBillingCategoryModal()"
+                            >
+                                + Add category
+                            </button>
+                        </div>
+                        <table class="data-table" id="billing-categories-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th>Name</th>
+                                    <th style="width: 90px">Status</th>
+                                    <th style="width: 90px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="billing-categories-tbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Route Type Map -->
+                    <div class="settings-section">
+                        <div class="settings-section-head">
+                            <span class="settings-section-title"
+                                >Route Type Map</span
+                            >
+                            <span
+                                class="tb-label"
+                                id="route-type-map-count"
+                            ></span>
+                            <label
+                                class="tb-label"
+                                style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    id="route-type-map-show-inactive"
+                                    checked
+                                    onchange="renderRouteTypeMapAdmin()"
+                                />
+                                Show inactive
+                            </label>
+                            <div class="tb-spacer"></div>
+                            <button
+                                class="btn btn-primary btn-sm"
+                                onclick="openAddRouteTypeMapModal()"
+                            >
+                                + Add mapping
+                            </button>
+                        </div>
+                        <table class="data-table" id="route-type-map-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th>File Type</th>
+                                    <th>Billing Category</th>
+                                    <th style="width: 90px">Status</th>
+                                    <th style="width: 90px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="route-type-map-tbody"></tbody>
+                        </table>
+                    </div>
+                    </div>
+                    <!-- /.settings-col (left) -->
+
+                    <div class="settings-col">
+                    <!-- Customer Group Colors -->
+                    <div class="settings-section">
+                        <div class="settings-section-head">
+                            <span class="settings-section-title"
+                                >Customer Group Colors</span
+                            >
+                            <span
+                                class="tb-label"
+                                id="cg-colors-count"
+                            ></span>
+                        </div>
+                        <p class="settings-section-hint">
+                            The color chip shown per customer group on the
+                            dispatch board. Applies to every user.
+                        </p>
+                        <table class="data-table" id="cg-colors-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 160px">Customer Group</th>
+                                    <th style="width: 120px">Color</th>
+                                    <th>Preview</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cg-colors-tbody"></tbody>
+                        </table>
+                    </div>
+
                     <div class="danger-zone">
                         <div class="danger-zone-head">
                             ⚠️ Danger zone — clear all data
@@ -1089,6 +1109,12 @@
                             </div>
                         </div>
                     </div>
+                    </div>
+                    <!-- /.settings-col (right) -->
+                    </div>
+                    <!-- /.settings-grid -->
+                    </div>
+                    <!-- /.settings-inner -->
                 </div>
             </div>
         </div>

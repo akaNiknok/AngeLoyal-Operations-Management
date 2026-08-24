@@ -20,6 +20,7 @@ const SHEET_TRIPS           = 'Trips';
 const SHEET_ROUTE_FREQ      = 'Route Frequency Log';
 const SHEET_WAYBILLS        = 'Waybills';
 const SHEET_ROUTE_TYPE_MAP  = 'Route Type Map';
+const SHEET_CG_COLORS       = 'Customer Group Colors';
 
 
 // ============================================================

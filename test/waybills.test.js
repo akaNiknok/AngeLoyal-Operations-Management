@@ -308,6 +308,71 @@ test('confirmWaybill is gated by CONFIRM_WAYBILL permission', () => {
   assert.throws(() => env.api.confirmWaybill(1, null), /Access denied/);
 });
 
+// ---- updateSuggestedWaybill: edit before confirmation, stays Suggested ----
+test('updateSuggestedWaybill renames the number but leaves it unlocked/Suggested', () => {
+  const { api, ss } = asAdmin(baseSheets({ lastSeq: 5 }));
+  const { id } = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null); // AL-6
+
+  const res = api.updateSuggestedWaybill(id, 'GL-200');
+  assert.equal(res.success, true);
+  assert.equal(res.waybillNumber, 'GL-200');
+
+  const wb = rowObject(HEADERS.Waybills, dump(ss, 'Waybills').rows[0]);
+  assert.equal(wb['Waybill Number'], 'GL-200');
+  assert.equal(Number(wb['Sequence Number']), 200); // parsed from the custom number
+  assert.equal(wb.Status, 'Suggested');
+  assert.equal(wb.Locked, false); // still editable, not confirmed
+  assert.equal(wb['Confirmed By'], '');
+});
+
+test('updateSuggestedWaybill renames every stop of a multi-stop load', () => {
+  const { api, ss } = asAdmin(baseSheets({ lastSeq: 5 }));
+  loadOf(api, [101, 102, 103]); // one load, three stops, all AL-6
+  const rows = () => dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+
+  const res = api.updateSuggestedWaybill(rows()[1].ID, 'AL-9'); // via the middle stop
+  assert.equal(res.updated, 3);
+  const after = rows();
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['AL-9', 'AL-9', 'AL-9']);
+  assert.deepEqual(after.map((w) => w.Locked), [false, false, false]);
+});
+
+test('updateSuggestedWaybill refuses a number already confirmed elsewhere', () => {
+  const { api } = asAdmin(baseSheets({ lastSeq: 5 }));
+  const { id } = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+  const other = api._createSuggestedWaybill(202, 1, 'FO-2', 'Regular', null);
+  api.confirmWaybill(other.id, 'AL-99'); // lock AL-99
+
+  const res = api.updateSuggestedWaybill(id, 'AL-99');
+  assert.equal(res.success, false);
+  assert.match(res.error, /already confirmed/);
+});
+
+test('updateSuggestedWaybill refuses to edit a locked waybill', () => {
+  const { api } = asAdmin(baseSheets({ lastSeq: 5 }));
+  const { id } = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+  api.confirmWaybill(id, null); // lock it
+
+  const res = api.updateSuggestedWaybill(id, 'AL-123');
+  assert.equal(res.success, false);
+  assert.match(res.error, /locked/);
+});
+
+test('updateSuggestedWaybill rejects a blank number', () => {
+  const { api } = asAdmin(baseSheets({ lastSeq: 5 }));
+  const { id } = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+  const res = api.updateSuggestedWaybill(id, '   ');
+  assert.equal(res.success, false);
+  assert.match(res.error, /blank/);
+});
+
+test('updateSuggestedWaybill is gated by CONFIRM_WAYBILL permission', () => {
+  const sheets = baseSheets();
+  const env = makeEnv({ sheets, userEmail: 'viewer@angeloyal.com' });
+  sheets.Waybills.push([1, 'AL-6', 1, 6, 101, 'FO-1', 'Regular', '', 'Suggested', false, '', '']);
+  assert.throws(() => env.api.updateSuggestedWaybill(1, 'AL-7'), /Access denied/);
+});
+
 // --- helper: find a waybill row by id and return [headers, row] for rowObject ---
 function rowFor(ss, sheetName, id) {
   const { headers, rows } = dump(ss, sheetName);

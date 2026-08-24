@@ -845,7 +845,7 @@
                 }
                 const suggested = t.waybillSuggested || "";
                 if (canE && t.suggestedWaybillId) {
-                    return `<span class="wb-inline"><input id="wb-in-${t.id}" type="text" class="cell-input wb-in" value="${esc(suggested)}" placeholder="AY-…"><button class="row-confirm" onclick="confirmWaybillInline(${t.id})">✓</button></span>`;
+                    return `<span class="wb-inline"><input id="wb-in-${t.id}" type="text" class="cell-input wb-in" value="${esc(suggested)}" placeholder="AY-…" onchange="saveSuggestedWaybill(${t.id}, this.value)"><button class="row-confirm" onclick="confirmWaybillInline(${t.id})">✓</button></span>`;
                 }
                 return suggested
                     ? `<span class="wb-suggested">${esc(suggested)}</span>`
@@ -997,6 +997,45 @@
                     },
                     revert: () => {
                         trip.remarks = old;
+                        renderDispatch();
+                    },
+                });
+            }
+
+            // Edit the suggested waybill number and keep it Suggested (not
+            // locked) — the pre-confirmation correction dispatchers need when a
+            // load's booklet series differs from the auto-suggested one. Saved
+            // server-side so it survives reload and other users see it; ✓ still
+            // confirms/locks. Mirrors changeRemarks: no re-render, keep focus.
+            function saveSuggestedWaybill(tripId, val) {
+                if (!canEdit()) return;
+                const trips = dispatchData.trips || [];
+                const trip = trips.find((t) => t.id === tripId);
+                if (!trip || !trip.suggestedWaybillId) return;
+                const newNumber = (val || "").trim();
+                if (!newNumber || newNumber === trip.waybillSuggested) return;
+                // One number covers the whole load — move every stop together,
+                // same as confirmWaybillInline.
+                const key = foKey(trip);
+                const targets = key
+                    ? trips.filter((t) => foKey(t) === key)
+                    : [trip];
+                const olds = targets.map((t) => ({
+                    trip: t,
+                    waybillSuggested: t.waybillSuggested,
+                }));
+                const waybillId = trip.suggestedWaybillId;
+                targets.forEach((t) => (t.waybillSuggested = newNumber));
+                bgSave("updateSuggestedWaybill", [waybillId, newNumber], {
+                    onOk: (r) => {
+                        targets.forEach(
+                            (t) => (t.waybillSuggested = r.waybillNumber),
+                        );
+                    },
+                    revert: () => {
+                        olds.forEach(({ trip: t, ...prev }) =>
+                            Object.assign(t, prev),
+                        );
                         renderDispatch();
                     },
                 });

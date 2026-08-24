@@ -197,3 +197,47 @@ test('updateRouteTypeMapping edits the category and feeds the import lookup', ()
   const lookup = api.getRouteTypeCategoryLookup();
   assert.equal(lookup['4WC'], 'L300'); // change is reflected in the lookup
 });
+
+// ---------------- Customer Group Colors ----------------
+
+test('getCustomerGroupColors self-seeds the fixed palette', () => {
+  const { api } = asAdmin(base());
+  const rows = api.getCustomerGroupColors();
+  const pg = rows.find((r) => r.customerGroup === 'PG');
+  assert.equal(pg.color, '#92d050');
+  assert.equal(pg.active, true);
+});
+
+test('saveCustomerGroupColor upserts case-insensitively, validates hex, and clears on blank', () => {
+  const { api } = asAdmin(base());
+  api.getCustomerGroupColors(); // seed
+
+  // bad hex is rejected
+  assert.match(api.saveCustomerGroupColor('PG', 'green').error, /hex/);
+  // blank group is rejected
+  assert.equal(api.saveCustomerGroupColor('', '#111111').success, false);
+
+  // edits the existing PG row (matched case-insensitively), doesn't add one
+  const before = api.getCustomerGroupColors().length;
+  const edit = api.saveCustomerGroupColor('pg', '#123456');
+  assert.equal(edit.success, true);
+  const after = api.getCustomerGroupColors();
+  assert.equal(after.length, before);
+  assert.equal(after.find((r) => r.customerGroup === 'PG').color, '#123456');
+
+  // a new group is appended
+  const add = api.saveCustomerGroupColor('XYZ', '#abcdef');
+  assert.equal(add.success, true);
+  assert.equal(api.getCustomerGroupColors().find((r) => r.customerGroup === 'XYZ').color, '#abcdef');
+
+  // blank color clears → row goes inactive
+  const clear = api.saveCustomerGroupColor('XYZ', '');
+  assert.equal(clear.success, true);
+  const xyz = api.getCustomerGroupColors().find((r) => r.customerGroup === 'XYZ');
+  assert.equal(xyz.active, false);
+});
+
+test('saveCustomerGroupColor is admin-gated', () => {
+  const viewer = makeEnv({ sheets: base(), userEmail: EMAIL.Viewer });
+  assert.throws(() => viewer.api.saveCustomerGroupColor('PG', '#111111'), /Access denied/);
+});

@@ -387,6 +387,89 @@ function confirmWaybill(waybillId, customNumber) {
 }
 
 
+/**
+ * Renames a still-Suggested waybill (and every unlocked stop that shares its
+ * number) WITHOUT confirming it — the pre-confirmation edit a dispatcher needs
+ * when a load's booklet series differs from the auto-suggested one. Locked
+ * (confirmed) waybills are immutable and rejected here; use confirmWaybill to
+ * lock. Mirrors confirmWaybill's number parsing + duplicate guard, minus the
+ * lock and Confirmed By/At stamps, so the row stays editable.
+ *
+ * @param {number} waybillId
+ * @param {string} newNumber
+ * @returns {{ success: boolean, waybillNumber: string, updated: number } | { success: false, error: string }}
+ */
+function updateSuggestedWaybill(waybillId, newNumber) {
+  _requirePermission('CONFIRM_WAYBILL');
+  try {
+    const sheet   = _getSheet(SHEET_WAYBILLS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    const rowIdx = _findRowById(rows, headers, waybillId);
+    if (rowIdx === -1) throw new Error(`Waybill ID ${waybillId} not found.`);
+
+    const row = rows[rowIdx];
+    if (_isTrue(_val(row, headers, 'Locked'))) {
+      throw new Error(`Waybill ${_val(row, headers, 'Waybill Number')} is already confirmed and locked.`);
+    }
+
+    const finalNumber = (newNumber == null ? '' : newNumber).toString().trim();
+    if (!finalNumber) throw new Error('Waybill number cannot be blank.');
+
+    const origNumber = _val(row, headers, 'Waybill Number');
+    const prefixId   = _numOrNull(_val(row, headers, 'Prefix ID'));
+    const origSeq    = _numOrNull(_val(row, headers, 'Sequence Number'));
+
+    // Every unlocked row of THIS waybill (same number + prefix + sequence) —
+    // one load's stops share the number and must be renamed together.
+    const groupIdxs = [];
+    for (let i = 1; i < rows.length; i++) {
+      if (_val(rows[i], headers, 'Waybill Number') === origNumber
+          && _numOrNull(_val(rows[i], headers, 'Prefix ID')) === prefixId
+          && _numOrNull(_val(rows[i], headers, 'Sequence Number')) === origSeq
+          && !_isTrue(_val(rows[i], headers, 'Locked'))) {
+        groupIdxs.push(i);
+      }
+    }
+    if (groupIdxs.indexOf(rowIdx) === -1) groupIdxs.push(rowIdx);
+
+    if (finalNumber === origNumber) {
+      return { success: true, waybillNumber: origNumber, updated: 0 };
+    }
+
+    // A confirmed waybill already owns this number → refuse (matches confirm).
+    // Suggested siblings sharing a number are legitimate and not duplicates.
+    const clash = rows.slice(1).some((r, i) => {
+      if (groupIdxs.indexOf(i + 1) !== -1) return false;
+      return _val(r, headers, 'Waybill Number') === finalNumber
+          && _isTrue(_val(r, headers, 'Locked'));
+    });
+    if (clash) throw new Error(`Waybill number "${finalNumber}" is already confirmed and in use.`);
+
+    // Parse the sequence from the custom number (numeric tail), like confirm.
+    const match  = finalNumber.match(/(\d+)(?:-[A-Z]+)?$/);
+    const seqNum = match ? Number(match[1]) : origSeq;
+
+    groupIdxs.forEach(i => {
+      _writeRowFields(sheet, rows[i], i, headers, {
+        'Waybill Number':  finalNumber,
+        'Sequence Number': seqNum,
+      });
+    });
+    _auditLog('WAYBILL_OVERRIDE', SHEET_WAYBILLS, waybillId, origNumber, finalNumber);
+
+    // Keep the booklet counter ahead of an edit that raises the number, so a
+    // later suggestion can't re-issue it. Only advances (see the helper).
+    if (prefixId && seqNum) _updateWaybillPrefixSequence(prefixId, seqNum);
+
+    return { success: true, waybillNumber: finalNumber, updated: groupIdxs.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
 // ============================================================
 //  DATA WRITERS — Rebisco Route File Import
 // ============================================================
@@ -1335,6 +1418,65 @@ function updateRouteTypeMapping(mappingId, changes) {
         billingCategory: _val(row, headers, 'Billing Category'),
         active:          _val(row, headers, 'Active') !== false,
       },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ============================================================
+//  DATA WRITERS — Customer Group Colors (Admin only)
+// ============================================================
+
+/**
+ * Sets the color for a customer group (upsert by group code, case-insensitive).
+ * Passing a blank color deactivates the row, so the group falls back to the
+ * client's hashed color. Groups are the free-text Customer Group values on
+ * outlets — no separate group registry, this only stores the color choice.
+ *
+ * @param {string} group  Customer group code (e.g. "PG")
+ * @param {string} color  Hex color like "#92d050", or "" to clear
+ * @returns {{ success: boolean, customerGroupColor: Object } | { success: false, error: string }}
+ */
+function saveCustomerGroupColor(group, color) {
+  _requirePermission('EDIT_MASTER_RECORDS');
+  try {
+    const code = String(group || '').trim();
+    if (!code) throw new Error('Customer group is required.');
+    const hex = String(color || '').trim();
+    if (hex && !/^#[0-9a-fA-F]{6}$/.test(hex)) {
+      throw new Error('Color must be a hex value like #92d050.');
+    }
+    const active = hex !== '';
+
+    getCustomerGroupColors(); // ensure the sheet exists (self-bootstraps)
+    const sheet   = _getSheet(SHEET_CG_COLORS);
+    const rows    = sheet.getDataRange().getValues();
+    const headers = rows[0].map(h => h.toString().trim());
+
+    let rowIdx = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if (String(_val(rows[i], headers, 'Customer Group')).trim().toUpperCase() === code.toUpperCase()) {
+        rowIdx = i;
+        break;
+      }
+    }
+
+    let id;
+    if (rowIdx === -1) {
+      id = _nextRowId(sheet);
+      sheet.appendRow([id, code, hex, active]);
+    } else {
+      id = _numOrNull(_val(rows[rowIdx], headers, 'ID'));
+      _writeRowFields(sheet, rows[rowIdx], rowIdx, headers, { 'Color': hex, 'Active': active });
+    }
+
+    _auditLog('CG_COLOR_EDIT', SHEET_CG_COLORS, id, '', `${code} → ${hex || '(cleared)'}`);
+
+    return {
+      success: true,
+      customerGroupColor: { id: id, customerGroup: code, color: hex, active: active },
     };
   } catch (e) {
     return { success: false, error: e.message };
