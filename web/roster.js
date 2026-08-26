@@ -223,8 +223,7 @@
             }
 
             function doAssign(type) {
-                if (saving || !selectedRosterTruckId || !selectedRosterEmpId)
-                    return;
+                if (!selectedRosterTruckId || !selectedRosterEmpId) return;
                 if (!canEdit()) return;
                 const em = employees.find(
                     (e) => Number(e.id) === Number(selectedRosterEmpId),
@@ -466,8 +465,14 @@
                     return;
                 }
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("createOutlet", {
+                        outletName,
+                        area,
+                        address,
+                        customerGroup,
+                        notes,
+                    }).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast("Add failed: " + r.error, "error");
@@ -477,16 +482,10 @@
                         closeModal("modal-add-outlet");
                         showToast(`${r.outlet.outletName} added.`, "success");
                         renderOutlets();
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
-                    })
-                    .createOutlet({
-                        outletName,
-                        area,
-                        address,
-                        customerGroup,
-                        notes,
-                    });
+                    },
+                );
             }

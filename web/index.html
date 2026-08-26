@@ -148,7 +148,6 @@
                             <div class="account-dropdown-sep"></div>
                             <button
                                 class="account-action"
-                                id="acct-whatsnew"
                                 type="button"
                                 onclick="openWhatsNew()"
                             >
@@ -157,7 +156,6 @@
                             </button>
                             <button
                                 class="account-action"
-                                id="acct-switch"
                                 type="button"
                                 onclick="switchAccount()"
                             >
@@ -166,7 +164,6 @@
                             </button>
                             <button
                                 class="account-action"
-                                id="acct-signout"
                                 type="button"
                                 onclick="signOut(false)"
                             >
@@ -305,7 +302,6 @@
                     </button>
                     <button
                         class="btn btn-ghost btn-sm"
-                        id="btn-refresh-dispatch"
                         onclick="loadDispatch()"
                     >
                         ↺ Refresh
@@ -412,7 +408,7 @@
                             <div class="spinner"></div>
                             <div class="loading-text">Loading trips…</div>
                         </div>
-                        <div class="table-wrap" id="dispatch-table-wrap">
+                        <div class="table-wrap">
                             <div class="empty-board" id="dispatch-empty">
                                 <div class="icon">📋</div>
                                 <div class="msg">No trips loaded</div>
@@ -707,7 +703,7 @@
                 </div>
                 <div class="admin-split">
                     <div class="admin-list-wrap">
-                        <table class="data-table" id="outlets-table">
+                        <table class="data-table">
                             <thead>
                                 <tr>
                                     <th style="width: 40px">ID</th>
@@ -765,7 +761,7 @@
                 </div>
                 <div class="admin-split">
                     <div class="admin-list-wrap">
-                        <table class="data-table" id="trucks-table">
+                        <table class="data-table">
                             <thead>
                                 <tr>
                                     <th style="width: 40px">ID</th>
@@ -827,7 +823,7 @@
                 </div>
                 <div class="admin-split">
                     <div class="admin-list-wrap">
-                        <table class="data-table" id="employees-table">
+                        <table class="data-table">
                             <thead>
                                 <tr>
                                     <th style="width: 40px">ID</th>
@@ -874,7 +870,7 @@
                 </div>
                 <div class="admin-split">
                     <div class="admin-list-wrap">
-                        <table class="data-table" id="waybill-prefixes-table">
+                        <table class="data-table">
                             <thead>
                                 <tr>
                                     <th style="width: 40px">ID</th>
@@ -939,7 +935,7 @@
                                 + Add category
                             </button>
                         </div>
-                        <table class="data-table" id="billing-categories-table">
+                        <table class="data-table">
                             <thead>
                                 <tr>
                                     <th style="width: 40px">ID</th>
@@ -982,7 +978,7 @@
                                 + Add mapping
                             </button>
                         </div>
-                        <table class="data-table" id="route-type-map-table">
+                        <table class="data-table">
                             <thead>
                                 <tr>
                                     <th style="width: 40px">ID</th>

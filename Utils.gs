@@ -199,8 +199,10 @@ function _nextBusinessDay(from) {
 function _nextRowId(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return 1;
+  // A blank ID cell reads as 0, not NaN — falling through to `+ 1` would
+  // restart the sequence at 1 and hand out IDs that are already in use.
   const lastId = Number(sheet.getRange(lastRow, 1).getValue());
-  return isNaN(lastId) ? lastRow : lastId + 1;
+  return lastId ? lastId + 1 : lastRow;
 }
 
 /**
@@ -212,8 +214,8 @@ function _nextRowId(sheet) {
  */
 function _nextRowIdFromRows(rows) {
   if (!rows || rows.length < 2) return 1;
-  const lastId = Number(rows[rows.length - 1][0]);
-  return isNaN(lastId) ? rows.length : lastId + 1;
+  const lastId = Number(rows[rows.length - 1][0]);   // blank reads as 0 — see _nextRowId
+  return lastId ? lastId + 1 : rows.length;
 }
 
 /**
@@ -301,4 +303,91 @@ function _indexById(arr) {
   const map = {};
   (arr || []).forEach(item => { if (item.id !== null) map[item.id] = item; });
   return map;
+}
+
+/**
+ * Opens a sheet and reads it in one go: the sheet handle, all its rows
+ * (header included) and the trimmed header row. `ensureCols` names columns
+ * that must exist, self-migrating a Sheet that predates them (_ensureColumn).
+ *
+ * @param {string}   name
+ * @param {string[]} [ensureCols]
+ * @returns {{ sheet: Sheet, rows: Array[], headers: string[] }}
+ */
+function _openSheet(name, ensureCols) {
+  const sheet   = _getSheet(name);
+  const rows    = sheet.getDataRange().getValues();
+  let   headers = rows[0].map(h => h.toString().trim());
+  (ensureCols || []).forEach(col => { headers = _ensureColumn(sheet, headers, col); });
+  return { sheet: sheet, rows: rows, headers: headers };
+}
+
+/**
+ * `_openSheet` plus the row lookup every record editor starts with. Throws the
+ * same "<Label> ID <id> not found." the hand-written versions did.
+ *
+ * @param {string}   name
+ * @param {number}   id
+ * @param {string}   label       Human name for the error message, e.g. 'Truck'.
+ * @param {string[]} [ensureCols]
+ * @returns {{ sheet, rows, headers, row: Array, rowIdx: number }}
+ */
+function _openRow(name, id, label, ensureCols) {
+  const ctx = _openSheet(name, ensureCols);
+  ctx.rowIdx = _findRowById(ctx.rows, ctx.headers, id);
+  if (ctx.rowIdx === -1) throw new Error(`${label} ID ${id} not found.`);
+  ctx.row = ctx.rows[ctx.rowIdx];
+  return ctx;
+}
+
+/**
+ * Reads a row into a plain object using a { jsKey: 'Column Name' } map — the
+ * audit snapshot and the read-back both need this and always needed the same
+ * shape. Values are raw `_val` reads; callers normalize (e.g. `active`).
+ *
+ * @param {Array}  row
+ * @param {string[]} headers
+ * @param {Object} fieldMap  { jsKey: 'Column Name' }
+ * @returns {Object}
+ */
+function _readFields(row, headers, fieldMap) {
+  const out = {};
+  Object.keys(fieldMap).forEach(key => { out[key] = _val(row, headers, fieldMap[key]); });
+  return out;
+}
+
+/**
+ * Runs a writer body inside the result envelope every client-callable writer
+ * shares: whatever the body returns is merged onto `{ success: true }`, and a
+ * throw anywhere inside becomes `{ success: false, error }` — the client never
+ * sees an exception, only a flag (see the writers' contract in CLAUDE.md).
+ *
+ * @param {Function} fn
+ * @returns {{ success: true }|{ success: false, error: string }}
+ */
+function _writerResult(fn) {
+  try {
+    return Object.assign({ success: true }, fn() || {});
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Throws `message` if another row already holds `value` in `colName`
+ * (case-insensitive, trimmed). `skipRowIdx` is the row being edited — pass it
+ * from an update so a record doesn't collide with itself.
+ *
+ * @param {Array[]}  rows
+ * @param {string[]} headers
+ * @param {string}   colName
+ * @param {string}   value
+ * @param {string}   message
+ * @param {number}   [skipRowIdx]  Index into `rows` (not into rows.slice(1)).
+ */
+function _requireUnique(rows, headers, colName, value, message, skipRowIdx) {
+  const want = String(value).trim().toUpperCase();
+  const dup  = rows.slice(1).some((r, i) => (i + 1) !== skipRowIdx
+    && String(_val(r, headers, colName)).trim().toUpperCase() === want);
+  if (dup) throw new Error(message);
 }

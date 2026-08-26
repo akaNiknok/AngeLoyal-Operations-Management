@@ -258,7 +258,7 @@ test('minting a waybill number gives up rather than duplicating when the lock is
     sheets, userEmail: EMAIL.Dispatcher, lockUnavailable: true,
   });
 
-  assert.throws(() => api._createSuggestedWaybill(70, 1, '6100063927', 'Regular', null), /being issued/);
+  assert.throws(() => api._createSuggestedWaybill(70, 1, '6100063927', 'Regular', null), /busy with another change/);
   assert.equal(dump(ss, 'Waybills').rows.length, 0);   // nothing minted
   assert.equal(prefixRows(ss).find((r) => r.ID === 1)['Last Sequence Number'], '039');
 });

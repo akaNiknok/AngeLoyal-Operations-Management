@@ -114,3 +114,25 @@ test('rpc clears the request identity after dispatch (no leakage between calls)'
   // With no rpc in flight, identity falls back to Session (here: 'unknown').
   assert.equal(api._getCurrentUserEmail(), 'unknown');
 });
+
+test('rpc serializes writers under the script lock and flushes before releasing', () => {
+  const { api, lockLog } = authEnv({ 'tok-admin': { email: 'admin@angeloyal.com' } });
+  const token = signIn(api, 'tok-admin');
+  lockLog.length = 0;
+
+  // A reader must not queue behind anything — no lock at all.
+  api.rpc(token, 'getBootData', []);
+  assert.deepEqual(lockLog, []);
+
+  // A writer holds the lock for its whole read → decide → append run, and the
+  // flush has to land inside it: released early, the next execution reads a
+  // half-written row (which is how prod grew two trips with ID 91).
+  api.rpc(token, 'clearAllData', ['nope']);
+  assert.deepEqual(lockLog, ['lock', 'flush', 'release']);
+
+  // Nested _withLock (rpc's lock, then the one _createSuggestedWaybill takes)
+  // must not re-acquire — getScriptLock() twice in one execution deadlocks.
+  lockLog.length = 0;
+  api._withLock(() => api._withLock(() => 'ok'));
+  assert.deepEqual(lockLog, ['lock', 'flush', 'release']);
+});

@@ -9,6 +9,121 @@
                 return `<button class="row-del" style="border-color:var(--border)" onclick="${fn}(${id})">${active === false ? "Restore" : "Remove"}</button>`;
             }
 
+            // Everything the five admin tables do identically, declared once. `list` is a
+            // getter because applyBootData() reassigns these arrays on every boot — a
+            // direct reference would go stale. `echo` is the key the create/update writer
+            // returns the saved record under; `name` labels it in confirms and toasts.
+            const ADMIN_RECORDS = {
+                truck: {
+                    list: () => trucks,
+                    create: "createTruck",
+                    update: "updateTruck",
+                    echo: "truck",
+                    modal: "modal-add-truck",
+                    name: (t) => t.plate,
+                    after: (r) => {
+                        if (r && r.defaultAssignment)
+                            defaultAssignments.push(r.defaultAssignment);
+                        renderTrucksAdmin();
+                        renderTruckList();
+                    },
+                },
+                employee: {
+                    list: () => employees,
+                    create: "createEmployee",
+                    update: "updateEmployee",
+                    echo: "employee",
+                    modal: "modal-add-employee",
+                    name: (e) => e.nick,
+                    after: () => {
+                        renderEmployeesAdmin();
+                        renderEmpList();
+                    },
+                },
+                billingCategory: {
+                    list: () => billingCategories,
+                    create: "createBillingCategory",
+                    update: "updateBillingCategory",
+                    echo: "billingCategory",
+                    modal: "modal-add-billing-category",
+                    name: (c) => c.name,
+                    after: renderBillingCategoriesAdmin,
+                },
+                routeTypeMap: {
+                    list: () => routeTypeMap,
+                    create: "createRouteTypeMapping",
+                    update: "updateRouteTypeMapping",
+                    echo: "mapping",
+                    modal: "modal-add-route-type-map",
+                    name: (m) => m.fileTypeCode,
+                    noun: "mapping", // "…remove the 4WC mapping?"
+                    addedName: (m) => `${m.fileTypeCode} → ${m.billingCategory}`,
+                    after: renderRouteTypeMapAdmin,
+                },
+                waybillPrefix: {
+                    list: () => waybillPrefixes,
+                    create: "createWaybillPrefix",
+                    update: "updateWaybillPrefix",
+                    echo: "waybillPrefix",
+                    modal: "modal-add-waybill-prefix",
+                    name: (p) => p.prefix || "(blank prefix)",
+                    after: () => {
+                        renderWaybillPrefixesAdmin();
+                        populatePrefixSelects();
+                    },
+                },
+            };
+
+            // Remove / Restore for an admin row: confirm, flip Active through bgSave,
+            // merge whatever the server echoed back, re-render.
+            function toggleRecordActive(key, id) {
+                const spec = ADMIN_RECORDS[key];
+                const rec = spec.list().find((x) => x.id === id);
+                if (!rec) return;
+                const name = spec.name(rec);
+                const subject = spec.noun ? `the ${name} ${spec.noun}` : name;
+                const makeActive = rec.active === false;
+                const verb = makeActive ? "restore" : "remove";
+                if (!confirm(`Are you sure you want to ${verb} ${subject}?`)) return;
+
+                bgSave(spec.update, [id, { active: makeActive }], {
+                    onOk: (r) => {
+                        // Writers that echo the saved row win; updateEmployee returns only
+                        // { success }, so fall back to the flag we just asked for.
+                        if (r && r[spec.echo]) Object.assign(rec, r[spec.echo]);
+                        else rec.active = makeActive;
+                        showToast(
+                            `${name} ${makeActive ? "restored" : "removed"}.`,
+                            "success",
+                        );
+                        spec.after(r);
+                    },
+                });
+            }
+
+            // Add-modal submit: post the payload, adopt the created record locally, close,
+            // toast, re-render. Per-form validation stays with the form.
+            function submitAddRecord(key, payload) {
+                const spec = ADMIN_RECORDS[key];
+                setSyncing(true);
+                call(spec.create, payload).then((r) => {
+                    setSyncing(false);
+                    if (!r.success) {
+                        showToast("Add failed: " + r.error, "error");
+                        return;
+                    }
+                    const rec = r[spec.echo];
+                    spec.list().push(rec);
+                    closeModal(spec.modal);
+                    showToast(
+                        `${(spec.addedName || spec.name)(rec)} added.`,
+                        "success",
+                    );
+                    spec.after(r);
+                }, toastError);
+            }
+
+
             // ── TRUCKS ADMIN ──────────────────────────────────────────
             function renderTrucksAdmin() {
                 const q = (
@@ -95,23 +210,7 @@
             }
 
             function toggleTruckActive(id) {
-                const t = trucks.find((t) => t.id === id);
-                if (!t) return;
-                const makeActive = t.active === false;
-                const verb = makeActive ? "restore" : "remove";
-                if (!confirm(`Are you sure you want to ${verb} ${t.plate}?`))
-                    return;
-                bgSave("updateTruck", [id, { active: makeActive }], {
-                    onOk: (r) => {
-                        Object.assign(t, r.truck);
-                        showToast(
-                            `${t.plate} ${makeActive ? "restored" : "removed"}.`,
-                            "success",
-                        );
-                        renderTrucksAdmin();
-                        renderTruckList();
-                    },
-                });
+                toggleRecordActive("truck", id);
             }
 
             function openAddTruckModal() {
@@ -125,36 +224,16 @@
 
             function submitAddTruck() {
                 const plate = document.getElementById("nt-plate").value.trim();
-                const brand = document.getElementById("nt-brand").value.trim();
-                const type = document.getElementById("nt-type").value.trim();
-                const billingCategory = document.getElementById(
-                    "nt-billing-category",
-                ).value;
                 if (!plate) {
                     showToast("Plate number is required.", "error");
                     return;
                 }
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Add failed: " + r.error, "error");
-                            return;
-                        }
-                        trucks.push(r.truck);
-                        if (r.defaultAssignment)
-                            defaultAssignments.push(r.defaultAssignment);
-                        closeModal("modal-add-truck");
-                        showToast(`${r.truck.plate} added.`, "success");
-                        renderTrucksAdmin();
-                        renderTruckList();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .createTruck({ plate, brand, type, billingCategory });
+                submitAddRecord("truck", {
+                    plate,
+                    brand: document.getElementById("nt-brand").value.trim(),
+                    type: document.getElementById("nt-type").value.trim(),
+                    billingCategory: document.getElementById("nt-billing-category").value,
+                });
             }
 
             // ── EMPLOYEES ADMIN ───────────────────────────────────────
@@ -233,23 +312,7 @@
             }
 
             function toggleEmployeeActive(id) {
-                const em = employees.find((e) => e.id === id);
-                if (!em) return;
-                const makeActive = em.active === false;
-                const verb = makeActive ? "restore" : "remove";
-                if (!confirm(`Are you sure you want to ${verb} ${em.nick}?`))
-                    return;
-                bgSave("updateEmployee", [id, { active: makeActive }], {
-                    onOk: () => {
-                        em.active = makeActive;
-                        showToast(
-                            `${em.nick} ${makeActive ? "restored" : "removed"}.`,
-                            "success",
-                        );
-                        renderEmployeesAdmin();
-                        renderEmpList();
-                    },
-                });
+                toggleRecordActive("employee", id);
             }
 
             function openAddEmployeeModal() {
@@ -263,45 +326,17 @@
 
             function submitAddEmployee() {
                 const nick = document.getElementById("ne-nick").value.trim();
-                const firstName = document
-                    .getElementById("ne-first")
-                    .value.trim();
-                const middleName = document
-                    .getElementById("ne-middle")
-                    .value.trim();
-                const lastName = document
-                    .getElementById("ne-last")
-                    .value.trim();
-                const role = document.getElementById("ne-role").value;
                 if (!nick) {
                     showToast("Nickname is required.", "error");
                     return;
                 }
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Add failed: " + r.error, "error");
-                            return;
-                        }
-                        employees.push(r.employee);
-                        closeModal("modal-add-employee");
-                        showToast(`${r.employee.nick} added.`, "success");
-                        renderEmployeesAdmin();
-                        renderEmpList();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .createEmployee({
-                        nick,
-                        firstName,
-                        middleName,
-                        lastName,
-                        role,
-                    });
+                submitAddRecord("employee", {
+                    nick,
+                    firstName: document.getElementById("ne-first").value.trim(),
+                    middleName: document.getElementById("ne-middle").value.trim(),
+                    lastName: document.getElementById("ne-last").value.trim(),
+                    role: document.getElementById("ne-role").value,
+                });
             }
 
             // ── BILLING CATEGORIES ADMIN ─────────────────────────────
@@ -368,22 +403,7 @@
             }
 
             function toggleBillingCategoryActive(id) {
-                const c = billingCategories.find((c) => c.id === id);
-                if (!c) return;
-                const makeActive = c.active === false;
-                const verb = makeActive ? "restore" : "remove";
-                if (!confirm(`Are you sure you want to ${verb} ${c.name}?`))
-                    return;
-                bgSave("updateBillingCategory", [id, { active: makeActive }], {
-                    onOk: (r) => {
-                        Object.assign(c, r.billingCategory);
-                        showToast(
-                            `${c.name} ${makeActive ? "restored" : "removed"}.`,
-                            "success",
-                        );
-                        renderBillingCategoriesAdmin();
-                    },
-                });
+                toggleRecordActive("billingCategory", id);
             }
 
             function openAddBillingCategoryModal() {
@@ -397,27 +417,7 @@
                     showToast("Name is required.", "error");
                     return;
                 }
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Add failed: " + r.error, "error");
-                            return;
-                        }
-                        billingCategories.push(r.billingCategory);
-                        closeModal("modal-add-billing-category");
-                        showToast(
-                            `${r.billingCategory.name} added.`,
-                            "success",
-                        );
-                        renderBillingCategoriesAdmin();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .createBillingCategory({ name });
+                submitAddRecord("billingCategory", { name });
             }
 
             // ── ROUTE TYPE MAP ADMIN ─────────────────────────────────
@@ -485,26 +485,7 @@
             }
 
             function toggleRouteTypeMapActive(id) {
-                const m = routeTypeMap.find((x) => x.id === id);
-                if (!m) return;
-                const makeActive = m.active === false;
-                const verb = makeActive ? "restore" : "remove";
-                if (
-                    !confirm(
-                        `Are you sure you want to ${verb} the ${m.fileTypeCode} mapping?`,
-                    )
-                )
-                    return;
-                bgSave("updateRouteTypeMapping", [id, { active: makeActive }], {
-                    onOk: (r) => {
-                        Object.assign(m, r.mapping);
-                        showToast(
-                            `${m.fileTypeCode} ${makeActive ? "restored" : "removed"}.`,
-                            "success",
-                        );
-                        renderRouteTypeMapAdmin();
-                    },
-                });
+                toggleRecordActive("routeTypeMap", id);
             }
 
             function openAddRouteTypeMapModal() {
@@ -515,11 +496,8 @@
             }
 
             function submitAddRouteTypeMap() {
-                const fileTypeCode = document
-                    .getElementById("nrtm-code")
-                    .value.trim();
-                const billingCategory =
-                    document.getElementById("nrtm-category").value;
+                const fileTypeCode = document.getElementById("nrtm-code").value.trim();
+                const billingCategory = document.getElementById("nrtm-category").value;
                 if (!fileTypeCode) {
                     showToast("File type code is required.", "error");
                     return;
@@ -528,27 +506,7 @@
                     showToast("Billing category is required.", "error");
                     return;
                 }
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Add failed: " + r.error, "error");
-                            return;
-                        }
-                        routeTypeMap.push(r.mapping);
-                        closeModal("modal-add-route-type-map");
-                        showToast(
-                            `${r.mapping.fileTypeCode} → ${r.mapping.billingCategory} added.`,
-                            "success",
-                        );
-                        renderRouteTypeMapAdmin();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .createRouteTypeMapping({ fileTypeCode, billingCategory });
+                submitAddRecord("routeTypeMap", { fileTypeCode, billingCategory });
             }
 
             // ── WAYBILL PREFIXES (admin + dispatcher) ────────────────
@@ -568,15 +526,15 @@
             // column advertises a number that is already out — and editing the
             // sequence from that stale view would try to rewind the booklet.
             function refreshWaybillPrefixes() {
-                srv()
-                    .withSuccessHandler((list) => {
+                call("getWaybillPrefixes").then(
+                    (list) => {
                         if (!list) return;
                         waybillPrefixes = list;
                         renderWaybillPrefixesAdmin();
                         populatePrefixSelects();
-                    })
-                    .withFailureHandler(() => {})
-                    .getWaybillPrefixes();
+                    },
+                    () => {},
+                );
             }
 
             function renderWaybillPrefixesAdmin() {
@@ -666,24 +624,7 @@
             }
 
             function toggleWaybillPrefixActive(id) {
-                const p = waybillPrefixes.find((x) => x.id === id);
-                if (!p) return;
-                const label = p.prefix || "(blank prefix)";
-                const makeActive = p.active === false;
-                const verb = makeActive ? "restore" : "remove";
-                if (!confirm(`Are you sure you want to ${verb} ${label}?`))
-                    return;
-                bgSave("updateWaybillPrefix", [id, { active: makeActive }], {
-                    onOk: (r) => {
-                        Object.assign(p, r.waybillPrefix);
-                        showToast(
-                            `${label} ${makeActive ? "restored" : "removed"}.`,
-                            "success",
-                        );
-                        renderWaybillPrefixesAdmin();
-                        populatePrefixSelects();
-                    },
-                });
+                toggleRecordActive("waybillPrefix", id);
             }
 
             function openAddWaybillPrefixModal() {
@@ -694,12 +635,8 @@
             }
 
             function submitAddWaybillPrefix() {
-                const prefix = document
-                    .getElementById("nwp-prefix")
-                    .value.trim();
-                const companyName = document
-                    .getElementById("nwp-company")
-                    .value.trim();
+                const prefix = document.getElementById("nwp-prefix").value.trim();
+                const companyName = document.getElementById("nwp-company").value.trim();
                 const lastSequenceNumber = document
                     .getElementById("nwp-sequence")
                     .value.trim();
@@ -714,32 +651,7 @@
                     );
                     return;
                 }
-                setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
-                        setSyncing(false);
-                        if (!r.success) {
-                            showToast("Add failed: " + r.error, "error");
-                            return;
-                        }
-                        waybillPrefixes.push(r.waybillPrefix);
-                        closeModal("modal-add-waybill-prefix");
-                        showToast(
-                            `${r.waybillPrefix.prefix || "(blank prefix)"} added.`,
-                            "success",
-                        );
-                        renderWaybillPrefixesAdmin();
-                        populatePrefixSelects();
-                    })
-                    .withFailureHandler((e) => {
-                        setSyncing(false);
-                        showToast("Error: " + e.message, "error");
-                    })
-                    .createWaybillPrefix({
-                        prefix,
-                        companyName,
-                        lastSequenceNumber,
-                    });
+                submitAddRecord("waybillPrefix", { prefix, companyName, lastSequenceNumber });
             }
 
             // ── ADMIN: DANGER ZONE ────────────────────────────────────
@@ -855,8 +767,8 @@
                     return;
 
                 setLoading("Clearing all data…");
-                srv()
-                    .withSuccessHandler((r) => {
+                call("clearAllData", phrase).then(
+                    (r) => {
                         hideLoading();
                         if (!r || !r.success) {
                             showToast(
@@ -869,14 +781,14 @@
                         // Every cached global (trips, outlets, the board) is
                         // stale now — a reload is cheaper than invalidating.
                         setTimeout(() => location.reload(), 900);
-                    })
-                    .withFailureHandler((err) => {
+                    },
+                    (err) => {
                         hideLoading();
                         showToast(
                             "Clear failed: " +
                                 ((err && err.message) || "unknown"),
                             "error",
                         );
-                    })
-                    .clearAllData(phrase);
+                    },
+                );
             }

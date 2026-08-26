@@ -24,13 +24,13 @@
             function prefetchDispatch(key) {
                 if (dispatchCache[key] || dispatchPrefetching.has(key)) return;
                 dispatchPrefetching.add(key);
-                srv()
-                    .withSuccessHandler((data) => {
+                call("getDispatchBoardData", key).then(
+                    (data) => {
                         dispatchPrefetching.delete(key);
                         if (!dispatchCache[key]) dispatchCache[key] = data;
-                    })
-                    .withFailureHandler(() => dispatchPrefetching.delete(key))
-                    .getDispatchBoardData(key);
+                    },
+                    () => dispatchPrefetching.delete(key),
+                );
             }
 
             function loadDispatch(useCache) {
@@ -49,8 +49,8 @@
                         .classList.add("on");
                 }
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((data) => {
+                call("getDispatchBoardData", key).then(
+                    (data) => {
                         dispatchCache[key] = data;
                         dispatchData = data;
                         if (!cached) {
@@ -64,8 +64,8 @@
                         setSyncing(false);
                         prefetchDispatch(mdyAddDays(key, -1));
                         prefetchDispatch(mdyAddDays(key, 1));
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         showToast(
                             "Dispatch load failed: " + e.message,
                             "error",
@@ -74,8 +74,8 @@
                             .getElementById("dispatch-loading")
                             .classList.remove("on");
                         setSyncing(false);
-                    })
-                    .getDispatchBoardData(key);
+                    },
+                );
             }
 
             function renderDispatch() {
@@ -687,12 +687,16 @@
                 dispatchData.trips = newOrderIds.map((id, i) =>
                     Object.assign({}, byId[id], { sortOrder: i * 10 }),
                 );
-                flipRender(renderDispatch);
                 // Flash the rows that just moved so the eye can follow them.
-                (flashIds || []).forEach((id) =>
-                    document
-                        .querySelector(`tr[data-tid="${id}"]`)
-                        ?.classList.add("just-moved"),
+                // flipRender resolves once the new rows are in the DOM — under a
+                // view transition the re-render is deferred, so the rows do not
+                // exist yet when this call returns.
+                flipRender(renderDispatch).then(() =>
+                    (flashIds || []).forEach((id) =>
+                        document
+                            .querySelector(`tr[data-tid="${id}"]`)
+                            ?.classList.add("just-moved"),
+                    ),
                 );
                 bgSave("reorderTrips", [dispatchData.date, newOrderIds], {
                     revert: () => {
@@ -702,61 +706,61 @@
                 });
             }
 
-            // FLIP: record each row's screen position, run the re-render (which
-            // rebuilds the tbody), then translate each row back to where it was
-            // and release the transform so it glides to its new home. Rows are
-            // matched across the render by data-tid.
-            // ponytail: transform on a <tr> briefly breaks the sticky FO cell's
-            // horizontal pin — only visible mid-glide when scrolled sideways.
+            // Gives each row a view-transition-name so the browser can pair it
+            // across the re-render. Names must be unique and valid custom
+            // idents, hence the "trip-" prefix — a bare number is not one.
+            function nameDispatchRows(on) {
+                document
+                    .querySelectorAll("#dispatch-tbody tr[data-tid]")
+                    .forEach((tr) => {
+                        tr.style.viewTransitionName = on
+                            ? `trip-${tr.dataset.tid}`
+                            : "";
+                    });
+            }
+
+            // Animates a re-render so rows glide to their new positions instead
+            // of jumping. The browser does the FLIP itself: it snapshots the
+            // named rows, runs `renderFn`, then tweens each name from its old
+            // box to its new one. Unlike the hand-rolled version this replaced,
+            // it never transforms the live <tr>, so the sticky FO cell keeps its
+            // horizontal pin mid-glide.
+            //
+            // Returns a promise that resolves once the new rows are in the DOM —
+            // the re-render is deferred, so callers that touch the fresh rows
+            // (applyReorder's flash) have to wait for it.
             function flipRender(renderFn) {
-                const tbody = document.getElementById("dispatch-tbody");
                 const reduce = window.matchMedia(
                     "(prefers-reduced-motion: reduce)",
                 ).matches;
-                if (!tbody || reduce) return renderFn();
+                // No View Transitions (Firefox/older Safari) or the user asked
+                // for no motion: render plainly, same result without the glide.
+                if (reduce || !document.startViewTransition) {
+                    renderFn();
+                    return Promise.resolve();
+                }
 
-                const before = {};
-                tbody
-                    .querySelectorAll("tr[data-tid]")
-                    .forEach((tr) => {
-                        before[tr.dataset.tid] =
-                            tr.getBoundingClientRect().top;
-                    });
-
-                renderFn();
-
-                const moved = [];
-                tbody.querySelectorAll("tr[data-tid]").forEach((tr) => {
-                    const prev = before[tr.dataset.tid];
-                    if (prev == null) return;
-                    const delta = prev - tr.getBoundingClientRect().top;
-                    if (!delta) return;
-                    tr.style.transform = `translateY(${delta}px)`;
-                    moved.push(tr);
+                nameDispatchRows(true);
+                const transition = document.startViewTransition(() => {
+                    renderFn();
+                    nameDispatchRows(true); // the re-render built fresh rows
                 });
-                if (!moved.length) return;
-
-                requestAnimationFrame(() => {
-                    moved.forEach((tr) => {
-                        tr.style.transition = "transform 0.22s ease";
-                        tr.style.transform = "";
-                        tr.addEventListener(
-                            "transitionend",
-                            () => {
-                                tr.style.transition = "";
-                            },
-                            { once: true },
-                        );
-                    });
-                });
+                // The names are per-transition: left behind, the next one would
+                // try to animate every row it finds them on. Handled on both
+                // settle paths — `finished` *rejects* when a transition is
+                // skipped, which is routine (a second drag interrupts the
+                // first), and an unhandled rejection would be console noise.
+                const unname = () => nameDispatchRows(false);
+                transition.finished.then(unname, unname);
+                return transition.updateCallbackDone;
             }
 
             function groupSelectedTrips(action) {
                 const ids = [...selectedForGroup];
                 if (!ids.length) return;
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("setTripConvoyGroup", ids, action).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast(r.error, "error");
@@ -775,8 +779,9 @@
                                 : "Convoy grouping removed.",
                             "success",
                         );
-                    })
-                    .setTripConvoyGroup(ids, action);
+                    },
+                    toastError,
+                );
             }
 
             function getFilteredTrips() {
@@ -818,25 +823,13 @@
             }
 
             // ── INLINE TRIP EDITING ───────────────────────────────────
+            // Options come straight off TRIP_STATUSES (core.js) so the dropdown can never
+            // offer a status the chips and labels do not know about.
             function statusSelectOptions(current) {
-                const vals = [
-                    "Prepping",
-                    "Backlog",
-                    "Scheduled",
-                    "Preload",
-                    "Delivered",
-                    "Undelivered",
-                    "Foul Trip - No Redeliver",
-                    "Foul Trip - For Redeliver",
-                    "Redeliver",
-                    "Two-Day Trip",
-                ];
-                return vals
-                    .map(
-                        (v) =>
-                            `<option value="${esc(v)}" ${current === v ? "selected" : ""}>${esc(shortStatus(v))}</option>`,
-                    )
-                    .join("");
+                return TRIP_STATUSES.map(
+                    ([v]) =>
+                        `<option value="${esc(v)}" ${current === v ? "selected" : ""}>${esc(shortStatus(v))}</option>`,
+                ).join("");
             }
 
             function waybillCellHtml(t, canE) {
@@ -1127,8 +1120,8 @@
                 )
                     return;
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("deleteImportedTrip", tripId).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast("Delete failed: " + r.error, "error");
@@ -1143,12 +1136,12 @@
                         selectedForGroup.delete(tripId);
                         updateConvoyButtons();
                         renderDispatch();
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
-                    })
-                    .deleteImportedTrip(tripId);
+                    },
+                );
             }
 
             // ── ADD MANUAL TRIP MODAL ──────────────────────────────────
@@ -1212,8 +1205,8 @@
                     return;
                 }
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("markDayScheduled", isoToMDY(dateVal), prefixId).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast(
@@ -1230,8 +1223,9 @@
                             "success",
                         );
                         loadDispatch();
-                    })
-                    .markDayScheduled(isoToMDY(dateVal), prefixId);
+                    },
+                    toastError,
+                );
             }
 
             function openAddTripModal() {
@@ -1338,8 +1332,8 @@
                 };
 
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("createTrip", tripData).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast("Add trip failed: " + r.error, "error");
@@ -1354,10 +1348,10 @@
                         // drop that date's cache so its next visit refetches.
                         delete dispatchCache[isoToMDY(dateVal)];
                         loadDispatch();
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
-                    })
-                    .createTrip(tripData);
+                    },
+                );
             }

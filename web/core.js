@@ -1,21 +1,13 @@
-            // ── XLSX PARSER (SheetJS, vendored) ───────────────────────
-            // These three live in web/vendor/ rather than on a CDN: served
+            // ── VENDORED LIBRARIES ────────────────────────────────────
+            // These two live in web/vendor/ rather than on a CDN: served
             // from our own origin they can't be swapped under us, and the CSP
             // in web/_headers can then refuse every third-party script origin.
-            // Still loaded async (2 MB combined), so the ready flags stay.
+            // Still loaded async (1.1 MB combined), so the ready flags stay.
             // Update = re-download the pinned version, re-check the diff.
-            const xlsxScript = document.createElement("script");
-            xlsxScript.src =
-                "vendor/xlsx.full.min.js";
-            xlsxScript.onload = () => {
-                xlsxReady = true;
-            };
-            document.head.appendChild(xlsxScript);
-            let xlsxReady = false;
 
-            // ExcelJS reads cell fill colors (convoy batches in the route
-            // file), which the community SheetJS build can't. Optional: if it
-            // fails to load, imports still work, just without convoy detection.
+            // ExcelJS is the only .xlsx library: it reads the route file's grid
+            // AND its cell fill colors (convoy batches), and writes the FINAL
+            // ROUTE export. Imports and xlsx export both wait on it.
             const excelJsScript = document.createElement("script");
             excelJsScript.src =
                 "vendor/exceljs.min.js";
@@ -55,7 +47,6 @@
             let lastSelectedId = null; // anchor for shift-click range selection
             let crewRailOpen = false; // crew drag-and-drop rail beside the table
             let crewRailSort = "driver"; // driver | plate | type
-            let saving = false;
 
             // Roster state (Truck Roster assignment tool)
             let selectedRosterTruckId = null;
@@ -67,7 +58,7 @@
 
             // ── AUTH STATE ────────────────────────────────────────────
             // Session token from a verified Google sign-in (see Auth.gs). It is
-            // sent with every backend call via srv() and persisted so a reload
+            // sent with every backend call via call() and persisted so a reload
             // doesn't force a fresh sign-in. localStorage access is guarded —
             // some sandboxed iframe contexts block it.
             function storeGet(k) {
@@ -93,55 +84,34 @@
             // ── SERVER GATEWAY ────────────────────────────────────────
             // All authenticated backend calls POST to the Apps Script /exec
             // endpoint, which dispatches through rpc(sessionToken, fn, args).
-            // srv() keeps the google.script.run builder shape it had when this
-            // ran inside Apps Script, so no call site anywhere else changed.
-            function srv() {
-                let success = () => {};
-                let failure = (err) => {
-                    setSyncing(false);
-                    showToast(
-                        (err && err.message) || "Something went wrong",
-                        "error",
-                    );
-                };
-                let proxy;
-                const builder = {
-                    withSuccessHandler(fn) {
-                        success = fn;
-                        return proxy;
-                    },
-                    withFailureHandler(fn) {
-                        failure = fn;
-                        return proxy;
-                    },
-                };
-                proxy = new Proxy(builder, {
-                    get(target, prop) {
-                        if (prop in target) return target[prop];
-                        if (typeof prop !== "string") return undefined;
-                        // Any other property is treated as the backend fn name.
-                        return (...args) => {
-                            callBackend({
-                                token: sessionToken,
-                                fn: prop,
-                                args: args,
-                            }).then(
-                                (res) => success(res),
-                                (err) => {
-                                    if (
-                                        err &&
-                                        /AUTH_REQUIRED/.test(err.message || "")
-                                    ) {
-                                        handleSessionExpired();
-                                        return;
-                                    }
-                                    failure(err);
-                                },
-                            );
-                        };
-                    },
+            //
+            // One authenticated call, resolving with whatever the rpc returned.
+            // An expired session is handled here rather than at every call site:
+            // handleSessionExpired() takes over the screen with the sign-in
+            // prompt, and the returned promise deliberately never settles —
+            // there is no value to continue a cancelled call with, and neither
+            // handler should run.
+            function call(fnName, ...args) {
+                return callBackend({
+                    token: sessionToken,
+                    fn: fnName,
+                    args: args,
+                }).catch((err) => {
+                    if (err && /AUTH_REQUIRED/.test(err.message || "")) {
+                        handleSessionExpired();
+                        return new Promise(() => {});
+                    }
+                    throw err;
                 });
-                return proxy;
+            }
+
+            // The rejection handler for calls with nothing specific to say.
+            function toastError(err) {
+                setSyncing(false);
+                showToast(
+                    (err && err.message) || "Something went wrong",
+                    "error",
+                );
             }
 
             // One POST per call, to the /exec URL for this environment.
@@ -181,8 +151,8 @@
             function bgSave(rpcName, args, opts) {
                 opts = opts || {};
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call(rpcName, ...args).then(
+                    (r) => {
                         setSyncing(false);
                         if (r && r.success === false) {
                             showToast(r.error || "Save failed", "error");
@@ -190,13 +160,13 @@
                             return;
                         }
                         if (opts.onOk) opts.onOk(r);
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         setSyncing(false);
                         showToast("Error: " + (e && e.message), "error");
                         if (opts.revert) opts.revert();
-                    })
-                    [rpcName](...args);
+                    },
+                );
             }
 
             // ── BOOT ──────────────────────────────────────────────────
@@ -313,8 +283,8 @@
                 }
                 if (!painted) setLoading("Loading data…");
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((boot) => {
+                call("getBootData").then(
+                    (boot) => {
                         setSyncing(false);
                         const raw = JSON.stringify(boot);
                         if (boot.session && boot.session.role) {
@@ -325,20 +295,18 @@
                         // Cached paint already matches the server → done.
                         if (painted && raw === cachedRaw) return;
                         applyBootData(boot);
-                    })
-                    .withFailureHandler((err) => {
+                    },
+                    (err) => {
                         setSyncing(false);
                         hideLoading();
-                        // AUTH_REQUIRED is handled inside srv(); others toast.
-                        if (!/AUTH_REQUIRED/.test(err.message || "")) {
-                            showToast(
-                                "Could not load app data: " +
-                                    (err.message || err),
-                                "error",
-                            );
-                        }
-                    })
-                    .getBootData();
+                        // call() absorbs AUTH_REQUIRED and re-prompts sign-in,
+                        // so anything reaching here is a real failure.
+                        showToast(
+                            "Could not load app data: " + (err.message || err),
+                            "error",
+                        );
+                    },
+                );
             }
 
             function applyBootData(boot) {
@@ -548,35 +516,36 @@
             }
 
             // ── UTILITY HELPERS ───────────────────────────────────────
+            // The trip-status vocabulary, declared once: [value, chip class, short label].
+            // Order is the order the status dropdown offers them. Adding a status here is
+            // the whole change — the chip color, the short label and the dropdown all read
+            // from this list, so they cannot drift apart.
+            const TRIP_STATUSES = [
+                ["Prepping", "sc-prepping", "Prepping"],
+                ["Backlog", "sc-backlog", "Backlog"],
+                ["Scheduled", "sc-scheduled", "Scheduled"],
+                ["Preload", "sc-preload", "Preload"],
+                ["Delivered", "sc-delivered", "Delivered"],
+                ["Undelivered", "sc-undelivered", "Undelivered"],
+                ["Foul Trip - No Redeliver", "sc-fouln", "Foul – No RD"],
+                ["Foul Trip - For Redeliver", "sc-foutr", "Foul – For RD"],
+                ["Redeliver", "sc-redeliver", "Redeliver"],
+                ["Two-Day Trip", "sc-twoday", "Two-Day"],
+            ];
+            const STATUS_CHIP_CLASS = Object.fromEntries(
+                TRIP_STATUSES.map(([value, cls]) => [value, cls]),
+            );
+            const STATUS_SHORT = Object.fromEntries(
+                TRIP_STATUSES.map(([value, , label]) => [value, label]),
+            );
+
+            // An unrecognised status still has to render, so both fall back rather than
+            // blanking the cell: the neutral Scheduled chip, and the raw value as its label.
             function statusChipClass(status) {
-                const map = {
-                    Prepping: "sc-prepping",
-                    Backlog: "sc-backlog",
-                    Scheduled: "sc-scheduled",
-                    Preload: "sc-preload",
-                    Delivered: "sc-delivered",
-                    Undelivered: "sc-undelivered",
-                    "Foul Trip - No Redeliver": "sc-fouln",
-                    "Foul Trip - For Redeliver": "sc-foutr",
-                    Redeliver: "sc-redeliver",
-                    "Two-Day Trip": "sc-twoday",
-                };
-                return map[status] || "sc-scheduled";
+                return STATUS_CHIP_CLASS[status] || "sc-scheduled";
             }
             function shortStatus(status) {
-                const map = {
-                    Prepping: "Prepping",
-                    Backlog: "Backlog",
-                    Scheduled: "Scheduled",
-                    Preload: "Preload",
-                    Delivered: "Delivered",
-                    Undelivered: "Undelivered",
-                    "Foul Trip - No Redeliver": "Foul – No RD",
-                    "Foul Trip - For Redeliver": "Foul – For RD",
-                    Redeliver: "Redeliver",
-                    "Two-Day Trip": "Two-Day",
-                };
-                return map[status] || status;
+                return STATUS_SHORT[status] || status;
             }
 
             // Builds <option> tags for a Billing Category <select>, from the

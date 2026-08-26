@@ -232,8 +232,15 @@ function makeEnv(opts = {}) {
   const fetchImpl = opts.fetch || (() => ({ code: 404, body: '' }));
   let uuidSeq = 0;
 
+  const lockLog = [];
+
   const sandbox = {
-    SpreadsheetApp: { getActiveSpreadsheet: () => ss },
+    SpreadsheetApp: {
+      getActiveSpreadsheet: () => ss,
+      // Nothing is queued in the fake sheet, so flush only has to be observable:
+      // tests assert writers flush before releasing the lock.
+      flush: () => { lockLog.push('flush'); },
+    },
     Session: {
       getActiveUser: () => ({ getEmail: () => email }),
       getScriptTimeZone: () => opts.tz || 'Asia/Shanghai',
@@ -252,10 +259,15 @@ function makeEnv(opts = {}) {
     },
     // Single-threaded tests never contend, so the lock always grants. Set
     // opts.lockUnavailable to exercise the "someone else is issuing" path.
+    // Every acquire/release/flush lands in lockLog, exposed as `_lockLog`.
     LockService: {
       getScriptLock: () => ({
-        tryLock: () => !opts.lockUnavailable,
-        releaseLock: () => {},
+        tryLock: () => {
+          if (opts.lockUnavailable) return false;
+          lockLog.push('lock');
+          return true;
+        },
+        releaseLock: () => { lockLog.push('release'); },
       }),
     },
     ContentService: {
@@ -303,7 +315,7 @@ function makeEnv(opts = {}) {
   sandbox.globalThis = sandbox;
 
   const api = loadBundle(sandbox);
-  return { api, ss, sandbox };
+  return { api, ss, sandbox, lockLog };
 }
 
 /** Reads a FakeSheet's data back out as { headers, rows } for assertions. */

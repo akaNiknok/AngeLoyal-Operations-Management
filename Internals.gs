@@ -79,28 +79,43 @@ function _clearTransactionalSheets() {
 //  INTERNAL HELPERS — Waybill logic
 // ============================================================
 
+var _LOCK_DEPTH = 0;
+
 /**
- * Runs `fn` holding the script lock.
+ * Runs `fn` holding the script lock, and flushes the Sheet before releasing it.
  *
- * Minting a waybill number is a read → reserve → append sequence, and nothing
- * serializes client calls: the dispatch board fires saves in the background
- * (`bgSave`), so two promotions can run as parallel executions, both read the
- * same Last Sequence Number and both mint it.
+ * Every writer is a read → decide → append sequence, and nothing serializes
+ * client calls: the dispatch board fires saves in the background (`bgSave`), so
+ * marking three stops of one load Redeliver runs as three parallel executions.
+ * Unserialized they all read the same Last Sequence Number, the same last row
+ * ID, and none of them sees the sibling row the others just wrote — which is
+ * how prod ended up with two trips sharing ID 91, waybill IDs restarting at 1,
+ * and one carried-over load split across 12870-R/12871-R/12872-R.
  *
- * Never nest these — a second getScriptLock() in the same execution blocks on
- * the first.
+ * The flush matters as much as the lock: appends are queued, so a lock released
+ * before the flush lets the next execution read a half-written row (a blank ID
+ * cell reads as 0, and `_nextRowId` then hands out 1 again).
+ *
+ * `rpc()` wraps every writer in this, so inner calls nest — hence the depth
+ * guard: a second getScriptLock() in the same execution would block on the
+ * first.
  *
  * @param {Function} fn
  * @returns {*} whatever `fn` returns
  */
-function _withWaybillLock(fn) {
+function _withLock(fn) {
+  if (_LOCK_DEPTH > 0) return fn();          // already ours — don't self-deadlock
+
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) {
-    throw new Error('Another waybill number is being issued right now. Please try again.');
+    throw new Error('The system is busy with another change. Please try again.');
   }
+  _LOCK_DEPTH++;
   try {
     return fn();
   } finally {
+    _LOCK_DEPTH--;
+    try { SpreadsheetApp.flush(); } catch (_) {}
     lock.releaseLock();
   }
 }
@@ -191,7 +206,7 @@ function _reserveWaybillSequence(prefixId, newSeqNumber, width) {
  * @returns {{ id: number, waybillNumber: string }}
  */
 function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parentWaybillId) {
-  return _withWaybillLock(() => {
+  return _withLock(() => {
     const sheet     = _getSheet(SHEET_WAYBILLS);
     const wbRows    = sheet.getDataRange().getValues();
     const wbHeaders = wbRows[0].map(h => h.toString().trim());
@@ -244,7 +259,7 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
  * @returns {Array<{tripId: number, waybillId: number, waybillNumber: string}>}
  */
 function _suggestWaybillsForGroups(prefixId, groups) {
-  return _withWaybillLock(() => {
+  return _withLock(() => {
     const sheet     = _getSheet(SHEET_WAYBILLS);
     const wbRows    = sheet.getDataRange().getValues();
     const wbHeaders = wbRows[0].map(h => h.toString().trim());

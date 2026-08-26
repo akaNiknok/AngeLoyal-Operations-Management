@@ -260,12 +260,15 @@ function loadParseRebiscoFile() {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(`${src}
-;globalThis.__parse = parseRebiscoFile;`, sandbox, {
+;globalThis.__parse = parseRebiscoFile;
+;globalThis.__dropCount = dropCount;`, sandbox, {
     filename: 'web/import.js',
   });
   // Round-trip out of the vm's realm: its objects carry a different
   // Object.prototype, which deepStrictEqual counts as a mismatch.
-  return (raw) => JSON.parse(JSON.stringify(sandbox.__parse(raw)));
+  const parse = (raw) => JSON.parse(JSON.stringify(sandbox.__parse(raw)));
+  parse.dropCount = (rows) => sandbox.__dropCount(rows); // the preview's count
+  return parse;
 }
 
 // Mirrors the real file's shape: type columns sit between FREIGHT ORDER and TOTAL.
@@ -320,4 +323,38 @@ test('parseRebiscoFile keeps the whole convoy on the anchor when no recipient fo
 
   assert.deepEqual(rows[0].slots, [{ type: 'L300', count: 4 }]);
   assert.equal(truckCount(rows), 4);
+});
+
+test('the preview drop count is what importRouteFile actually creates', () => {
+  // The ROUTE MAY 12 shape end to end: 6 preview rows (one FO spanning two
+  // outlet rows, one convoy anchor keeping a surplus truck) -> the writer
+  // emits one trip per truck per stop. The preview promises that number.
+  const parse = loadParseRebiscoFile();
+  const rows = parse([
+    RAW_HEADER,
+    ['6100043752', 6, 6, MALL, 'Alabang'],        // anchor: 6 trucks asked for
+    ['6100043765', '', 0, MALL, 'Alabang'],       // riders take one each
+    ['6100043766', '', 0, MALL, 'Alabang'],
+    ['437462', '', 0, MALL, 'Alabang'],
+    ['437463', '', 0, MALL, 'Alabang'],
+    ['6100043739', 1, 1, 'SMCO TAYABAS', 'Quezon'],
+    ['6100043739', '', 0, 'PG SARIAYA', 'Quezon'], // same FO, second stop
+  ]);
+  assert.equal(rows.length, 7);
+
+  const { api } = asDispatcher(importSheets());
+  const res = api.importRouteFile('6/16/2026', rows);
+
+  assert.equal(res.success, true);
+  assert.equal(res.imported, 8); // 7 rows + the anchor's unplaced 6th truck
+  assert.equal(parse.dropCount(rows), res.imported);
+});
+
+test('drop count and row count agree when no FO asks for a second truck', () => {
+  const parse = loadParseRebiscoFile();
+  const { api } = asDispatcher(importSheets());
+  const res = api.importRouteFile('6/16/2026', ROWS);
+
+  assert.equal(parse.dropCount(ROWS), ROWS.length);
+  assert.equal(res.imported, ROWS.length);
 });
