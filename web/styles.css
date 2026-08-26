@@ -968,6 +968,22 @@
                 }
             }
 
+            /* Row reorder glide (flipRender in web/dispatch.js). Each row is
+               given a view-transition-name for the duration of one transition,
+               and the browser tweens each name from its old box to its new one.
+               Only the duration is set — the default cross-fade of the old and
+               new snapshots is imperceptible, because a row that merely moved
+               has identical pixels on both sides. */
+            ::view-transition-group(*) {
+                animation-duration: 0.22s;
+                animation-timing-function: ease;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                ::view-transition-group(*) {
+                    animation: none;
+                }
+            }
+
             .selection-count {
                 font-size: 11px;
                 font-family: "DM Mono", monospace;

@@ -687,12 +687,16 @@
                 dispatchData.trips = newOrderIds.map((id, i) =>
                     Object.assign({}, byId[id], { sortOrder: i * 10 }),
                 );
-                flipRender(renderDispatch);
                 // Flash the rows that just moved so the eye can follow them.
-                (flashIds || []).forEach((id) =>
-                    document
-                        .querySelector(`tr[data-tid="${id}"]`)
-                        ?.classList.add("just-moved"),
+                // flipRender resolves once the new rows are in the DOM — under a
+                // view transition the re-render is deferred, so the rows do not
+                // exist yet when this call returns.
+                flipRender(renderDispatch).then(() =>
+                    (flashIds || []).forEach((id) =>
+                        document
+                            .querySelector(`tr[data-tid="${id}"]`)
+                            ?.classList.add("just-moved"),
+                    ),
                 );
                 bgSave("reorderTrips", [dispatchData.date, newOrderIds], {
                     revert: () => {
@@ -702,53 +706,53 @@
                 });
             }
 
-            // FLIP: record each row's screen position, run the re-render (which
-            // rebuilds the tbody), then translate each row back to where it was
-            // and release the transform so it glides to its new home. Rows are
-            // matched across the render by data-tid.
-            // ponytail: transform on a <tr> briefly breaks the sticky FO cell's
-            // horizontal pin — only visible mid-glide when scrolled sideways.
+            // Gives each row a view-transition-name so the browser can pair it
+            // across the re-render. Names must be unique and valid custom
+            // idents, hence the "trip-" prefix — a bare number is not one.
+            function nameDispatchRows(on) {
+                document
+                    .querySelectorAll("#dispatch-tbody tr[data-tid]")
+                    .forEach((tr) => {
+                        tr.style.viewTransitionName = on
+                            ? `trip-${tr.dataset.tid}`
+                            : "";
+                    });
+            }
+
+            // Animates a re-render so rows glide to their new positions instead
+            // of jumping. The browser does the FLIP itself: it snapshots the
+            // named rows, runs `renderFn`, then tweens each name from its old
+            // box to its new one. Unlike the hand-rolled version this replaced,
+            // it never transforms the live <tr>, so the sticky FO cell keeps its
+            // horizontal pin mid-glide.
+            //
+            // Returns a promise that resolves once the new rows are in the DOM —
+            // the re-render is deferred, so callers that touch the fresh rows
+            // (applyReorder's flash) have to wait for it.
             function flipRender(renderFn) {
-                const tbody = document.getElementById("dispatch-tbody");
                 const reduce = window.matchMedia(
                     "(prefers-reduced-motion: reduce)",
                 ).matches;
-                if (!tbody || reduce) return renderFn();
+                // No View Transitions (Firefox/older Safari) or the user asked
+                // for no motion: render plainly, same result without the glide.
+                if (reduce || !document.startViewTransition) {
+                    renderFn();
+                    return Promise.resolve();
+                }
 
-                const before = {};
-                tbody
-                    .querySelectorAll("tr[data-tid]")
-                    .forEach((tr) => {
-                        before[tr.dataset.tid] =
-                            tr.getBoundingClientRect().top;
-                    });
-
-                renderFn();
-
-                const moved = [];
-                tbody.querySelectorAll("tr[data-tid]").forEach((tr) => {
-                    const prev = before[tr.dataset.tid];
-                    if (prev == null) return;
-                    const delta = prev - tr.getBoundingClientRect().top;
-                    if (!delta) return;
-                    tr.style.transform = `translateY(${delta}px)`;
-                    moved.push(tr);
+                nameDispatchRows(true);
+                const transition = document.startViewTransition(() => {
+                    renderFn();
+                    nameDispatchRows(true); // the re-render built fresh rows
                 });
-                if (!moved.length) return;
-
-                requestAnimationFrame(() => {
-                    moved.forEach((tr) => {
-                        tr.style.transition = "transform 0.22s ease";
-                        tr.style.transform = "";
-                        tr.addEventListener(
-                            "transitionend",
-                            () => {
-                                tr.style.transition = "";
-                            },
-                            { once: true },
-                        );
-                    });
-                });
+                // The names are per-transition: left behind, the next one would
+                // try to animate every row it finds them on. Handled on both
+                // settle paths — `finished` *rejects* when a transition is
+                // skipped, which is routine (a second drag interrupts the
+                // first), and an unhandled rejection would be console noise.
+                const unname = () => nameDispatchRows(false);
+                transition.finished.then(unname, unname);
+                return transition.updateCallbackDone;
             }
 
             function groupSelectedTrips(action) {
