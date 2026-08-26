@@ -551,6 +551,7 @@
         <td style="${crewBg}">${r.loadStart ? esc(r.helperName) : ""}</td>
         <td>${r.loadStart ? esc(r.waybill) : ""}</td>
         <td style="${crewBg}">${r.loadStart ? esc(r.plate) : ""}</td>
+        <td>${esc(shortStatus(t.tripStatus))}</td>
         <td>${esc(t.remarks || "")}</td>
       </tr>`;
                     })
@@ -564,7 +565,7 @@
   <div class="sub">${rows.length} drops · generated from the AngeLoyal OMS dispatch board</div>
   <table><thead><tr>
     <th>Area</th><th>Cust</th><th>Outlet</th><th>Address</th><th>Qty</th><th>CBM</th>
-    <th>FO</th><th>Type</th><th>Tier</th><th>Convoy</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Remarks</th>
+    <th>FO</th><th>Type</th><th>Tier</th><th>Convoy</th><th>Driver</th><th>Helper</th><th>Waybill</th><th>Plate</th><th>Status</th><th>Remarks</th>
   </tr></thead><tbody>${body}</tbody></table>
   </body></html>`;
                 if (mode === "jpg")
