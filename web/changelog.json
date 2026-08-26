@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.6.0",
+      "date": "2026-08-26",
+      "title": "Correct numbers, and the status on the FINAL ROUTE page",
+      "body": "### What is new\n\n- **The FINAL ROUTE page shows the status of each trip.** There is a new Status column between the Plate column and the Remarks column. You see the new column when you print the page. You also see it when you save the page as an image.\n- **A carried-over load keeps one waybill number.** Before, when you changed the status of many stops quickly, each stop received a different Redeliver number. Now all the stops of one load share one number. This is also true for \"Foul Trip - For Redeliver\".\n- **The app gives each trip and each waybill its own number.** Before, two saves at the same moment could give the same number to two different trips. The app now saves one change at a time, so this does not happen.\n- **You can see a new message.** If the app is busy with another change, it shows \"The system is busy with another change. Please try again.\" Wait a moment. Then do your change again.\n\n### What you must know\n\nThe app does not correct the waybill numbers from the days before this update. If a load from before shows more than one Redeliver number, tell the office.\n\n### What is the same\n\nEverything else is the same. The dispatch board, the route file import, the waybills and the driver cards work as before. This version also contains preparation work for Billing and Payroll (Phase 2). You do not see this work on the screen."
+    },
+    {
       "version": "v1.5.0",
       "date": "2026-08-24",
       "title": "",
