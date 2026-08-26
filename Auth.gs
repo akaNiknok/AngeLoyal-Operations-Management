@@ -151,39 +151,43 @@ function logout(sessionToken) {
 
 // Functions the client is allowed to invoke through rpc(). Anything not listed
 // (private helpers, _devDump, etc.) is unreachable from the browser.
+//
+// 'w' marks a writer: rpc() runs those one at a time under the script lock,
+// because every one of them reads the sheet, decides, then appends. Readers
+// ('r') stay parallel — they would otherwise queue behind a slow import.
 const RPC_ALLOWED = {
   // readers
-  getBootData: true,
-  getDispatchBoardData: true,
-  getWaybillPrefixes: true,
+  getBootData: 'r',
+  getDispatchBoardData: 'r',
+  getWaybillPrefixes: 'r',
   // session
-  logout: true,
+  logout: 'r',
   // writers
-  createTrip: true,
-  saveTripChanges: true,
-  bulkSetTripStatus: true,
-  reorderTrips: true,
-  confirmWaybill: true,
-  updateSuggestedWaybill: true,
-  importRouteFile: true,
-  deleteImportedTrip: true,
-  markDayScheduled: true,
-  setTripConvoyGroup: true,
-  updateDefaultAssignment: true,
-  createOutlet: true,
-  updateOutlet: true,
-  createTruck: true,
-  updateTruck: true,
-  createBillingCategory: true,
-  updateBillingCategory: true,
-  createRouteTypeMapping: true,
-  updateRouteTypeMapping: true,
-  saveCustomerGroupColor: true,
-  createWaybillPrefix: true,
-  updateWaybillPrefix: true,
-  createEmployee: true,
-  updateEmployee: true,
-  clearAllData: true,
+  createTrip: 'w',
+  saveTripChanges: 'w',
+  bulkSetTripStatus: 'w',
+  reorderTrips: 'w',
+  confirmWaybill: 'w',
+  updateSuggestedWaybill: 'w',
+  importRouteFile: 'w',
+  deleteImportedTrip: 'w',
+  markDayScheduled: 'w',
+  setTripConvoyGroup: 'w',
+  updateDefaultAssignment: 'w',
+  createOutlet: 'w',
+  updateOutlet: 'w',
+  createTruck: 'w',
+  updateTruck: 'w',
+  createBillingCategory: 'w',
+  updateBillingCategory: 'w',
+  createRouteTypeMapping: 'w',
+  updateRouteTypeMapping: 'w',
+  saveCustomerGroupColor: 'w',
+  createWaybillPrefix: 'w',
+  updateWaybillPrefix: 'w',
+  createEmployee: 'w',
+  updateEmployee: 'w',
+  clearAllData: 'w',
 };
 
 /**
@@ -191,6 +195,9 @@ const RPC_ALLOWED = {
  * token to an identity, scopes it to this request, and dispatches to the named
  * allow-listed function. Throws 'AUTH_REQUIRED' if the session is missing or
  * expired so the client can re-prompt sign-in.
+ *
+ * Writers ('w' in RPC_ALLOWED) run one at a time under the script lock — see
+ * _withLock. Readers run in parallel.
  *
  * @param {string} sessionToken  Token from login(), stored client-side.
  * @param {string} fnName        Allow-listed backend function name.
@@ -207,7 +214,9 @@ function rpc(sessionToken, fnName, args) {
 
   _REQUEST_EMAIL = session.email;
   try {
-    return fn.apply(null, args || []);
+    return RPC_ALLOWED[fnName] === 'w'
+      ? _withLock(() => fn.apply(null, args || []))
+      : fn.apply(null, args || []);
   } finally {
     _REQUEST_EMAIL = null;
   }

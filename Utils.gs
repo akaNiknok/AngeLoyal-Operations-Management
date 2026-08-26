@@ -199,8 +199,10 @@ function _nextBusinessDay(from) {
 function _nextRowId(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return 1;
+  // A blank ID cell reads as 0, not NaN — falling through to `+ 1` would
+  // restart the sequence at 1 and hand out IDs that are already in use.
   const lastId = Number(sheet.getRange(lastRow, 1).getValue());
-  return isNaN(lastId) ? lastRow : lastId + 1;
+  return lastId ? lastId + 1 : lastRow;
 }
 
 /**
@@ -212,8 +214,8 @@ function _nextRowId(sheet) {
  */
 function _nextRowIdFromRows(rows) {
   if (!rows || rows.length < 2) return 1;
-  const lastId = Number(rows[rows.length - 1][0]);
-  return isNaN(lastId) ? rows.length : lastId + 1;
+  const lastId = Number(rows[rows.length - 1][0]);   // blank reads as 0 — see _nextRowId
+  return lastId ? lastId + 1 : rows.length;
 }
 
 /**
