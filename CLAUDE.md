@@ -28,7 +28,7 @@ The project is contractually delivered in 3 phases. See [`BACKLOG.md`](BACKLOG.m
 | :--- | :--- |
 | `Code.gs` | Entry point. Sheet-name constants, RBAC (`ROLES`, `PERMISSIONS`, `_requirePermission`), request-scoped identity (`_REQUEST_EMAIL`, `_getCurrentUserEmail`), the **`doPost` JSON API** the frontend calls (`_jsonOut`), and `doGet`, which now only keeps the dev endpoints and redirects to the frontend (`_frontendUrl`). |
 | `Auth.gs` | Google sign-in + session layer. `login(idToken)` is the one pre-session action: `_verifyIdToken` checks the browser-supplied GIS token against Google's tokeninfo endpoint (**never a local decode**) before `_createSession` mints a token in `CacheService`; and the **`rpc(sessionToken, fnName, args)` gateway** (allow-list `RPC_ALLOWED`) that every other client call funnels through. `OAUTH_CLIENT_ID` lives in Script Properties — there is no client secret. |
-| `Utils.gs` | Generic sheet/row helpers: `_getSheet`, `_val`, `_numOrNull`, date parsing/formatting, `_nextRowId`, `_findRowById`, `_writeRowFields`, `_indexById`. **Reuse these — don't hand-roll sheet access.** |
+| `Utils.gs` | Generic sheet/row helpers: `_getSheet`, `_val`, `_numOrNull`, date parsing/formatting, `_nextRowId`, `_findRowById`, `_writeRowFields`, `_indexById`. Also the master-record writer envelope every CRUD endpoint is built on — `_openSheet`, `_openRow`, `_readFields`, `_writerResult`, `_requireUnique`. **Reuse these — don't hand-roll sheet access.** |
 | `DataReaders.gs` | Read-only accessors. `getBootData()` returns all master data in one round trip. `getDispatchBoardData()`, `getTrips()`, `getWaybillsForTrip()`, etc. |
 | `DataWriters.gs` | All sheet-mutating endpoints (`createTrip`, `saveTripChanges`, `confirmWaybill`, `importRouteFile`, `createOutlet/Truck/Employee/BillingCategory`, roster `updateDefaultAssignment`, …). Largest file. |
 | `Internals.gs` | Private helpers for writers: `_auditLog`, waybill suggestion logic, carry-over trip creation, outlet resolve-or-create, route-frequency append, billing-category rename cascade. |
@@ -44,7 +44,7 @@ dependency order and that is the whole "build".
 - `web/index.html` — the shell (markup + nav) and the script/style tags.
 - `web/config.js` — `location.hostname` → `/exec` URL map, plus `OAUTH_CLIENT_ID`. An unknown host falls back to DEV, never prod.
 - `web/styles.css` — all CSS (DM Sans/DM Mono, design tokens).
-- `web/core.js` — global JS state (`employees`, `trucks`, `dispatchData`, …), `bootApp()` boot sequence, the `srv()`/`callBackend()` transport, GIS sign-in, RBAC UI gating, panel switching, shared utilities.
+- `web/core.js` — global JS state (`employees`, `trucks`, `dispatchData`, …), `bootApp()` boot sequence, the `call()`/`callBackend()` transport, GIS sign-in, RBAC UI gating, panel switching, shared utilities.
 - `web/dispatch.js` — dispatch board (the primary screen).
 - `web/export.js` — client-only exports of a dispatch day: FINAL-ROUTE print/xlsx (mirrors the dispatcher-worked route-file layout) and "Share to Drivers" per-truck .jpg cards (modal markup lives in `web/index.html`).
 - `web/crewboard.js` — crew rail: toggled panel of draggable crew cards (truck + default driver/helpers) dropped onto dispatch rows to assign a whole crew at once.
@@ -55,20 +55,22 @@ dependency order and that is the whole "build".
 - `web/vendor/` — SheetJS, ExcelJS, html2canvas, pinned and served from our own origin so the CSP can refuse every third-party script.
 - `web/_headers` — Cloudflare Pages response headers: CSP, `X-Frame-Options: DENY`, nosniff.
 
-The client calls the backend with `srv().withSuccessHandler(...).fnName(args)`.
+The client calls the backend with `call('fnName', ...args)`, which returns a
+promise (see `web/core.js`); `toastError` is the shared rejection handler and
+`bgSave()` wraps the optimistic-save pattern.
 There is **no router/framework** — `switchPanel()` toggles `.panel` visibility,
 state lives in module-level `let` globals in `web/core.js`.
 
-`pages/index.html` is the standalone public launcher page (a redirect to the
-frontend, nothing else), published from the separate
-`angeloyal-oms-launcher` repo. It stays the link handed to operators through
-the Cloudflare account handover, so the pages.dev URL underneath can change
-without re-teaching anyone. See [DEPLOY.md](DEPLOY.md) before touching it.
+The public launcher page (a redirect to the frontend, nothing else) is **not in
+this repo** — it lives in the separate `angeloyal-oms-launcher` repo, which is
+its only copy. It stays the link handed to operators through the Cloudflare
+account handover, so the pages.dev URL underneath can change without re-teaching
+anyone. See [DEPLOY.md](DEPLOY.md#the-account-launcher-page) before touching it.
 
 ### Data flow
 
 1. Sign-in is **Google Identity Services (GIS)**. The page is served from our own origin now, so the GIS button renders inline; its callback POSTs the Google ID token to `login()`, which **verifies it against Google's tokeninfo endpoint** (never a local decode — the token comes from the browser) and returns an app session token. `core.js` stores it in `localStorage` and reuses it on reload.
-2. Every authenticated client call goes through **`srv()`**, which keeps the old `google.script.run` builder shape but POSTs `{token, fn, args}` to `doPost` → **`rpc(sessionToken, fnName, args)`**. `rpc` resolves the session → sets `_REQUEST_EMAIL` → dispatches. `login` is the only pre-session action; everything else, `logout` included, goes through `rpc`.
+2. Every authenticated client call goes through **`call(fnName, ...args)`**, which POSTs `{token, fn, args}` to `doPost` → **`rpc(sessionToken, fnName, args)`** and returns a promise. It absorbs `AUTH_REQUIRED` centrally (re-prompts sign-in, settles neither handler), so call sites only handle real failures. `rpc` resolves the session → sets `_REQUEST_EMAIL` → dispatches. `login` is the only pre-session action; everything else, `logout` included, goes through `rpc`.
 3. After sign-in, `getBootData()` returns session + all master data (or **just the session** if the verified user has no role) → cached in `core.js` globals.
 4. Dispatch board calls `getDispatchBoardData(date)`; display fields (outlet/driver/truck names) are **derived client-side** from cached master data via `indexById()` — the server intentionally does not re-send them.
 5. Writes go through `DataWriters.gs`, which enforce permissions, write to the sheet, and append to the Audit Log.
@@ -114,6 +116,7 @@ npm run clear-data:prod     # PROD: same, but requires typing "PRODUCTION" to co
 - `.clasp.prod.json` / `.clasp.dev.json` hold the (non-secret) Script IDs; `.clasp.json` is a gitignored generated pointer (each npm command selects its env first via `use:dev`/`use:prod`). `.claspignore` keeps `Docs/` and sample files out of Apps Script.
 - `data/`, `.env`, `*.xlsx`, `*.pdf` are gitignored — they contain real operational data. `DEV_DUMP_TOKEN` (in `.env`) is a password-equivalent.
 - **Automated tests** live in `test/` and run with `npm test` (Node's built-in `node:test` + a `vm` shim — no clasp, no live Sheet, no `npm install`). The harness loads the `.gs` bundle with in-memory fakes for `SpreadsheetApp`/`Session`/`Utilities`; see [`test/README.md`](test/README.md). Phase 1 (records, dispatch, waybills) is broadly covered — Utils helpers, RBAC matrix, waybill numbering/confirmation, carry-over trips, `createTrip`/`saveTripChanges`, `importRouteFile`, master-record CRUD + roster, and the dispatch/read path. **Phase 2 (billing/payroll) is not built yet — write its tests alongside the code.** For anything not covered, still verify by snapshotting live data (`npm run fetch-data`) and/or testing in a deployed copy. When you add backend logic, add a test next to it.
+- **Frontend logic is testable too**, via [`test/webharness.js`](test/webharness.js) — it runs `web/*.js` in the same `vm` style with a stub DOM (`loadWeb(['core.js', 'dispatch.js'], overrides, expose)`). Covered so far: the `call()` transport, the admin-record plumbing, the trip-status vocabulary, and the row-reorder transition. It is deliberately a *logic* harness — the stub DOM has no layout, so anything that depends on real rendering has to be checked in a browser.
 
 ## Working agreements
 

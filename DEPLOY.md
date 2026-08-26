@@ -109,18 +109,19 @@ The old `/u/N/` account-routing bug is **gone** — it was a Google Drive quirk 
 > If the `Users` row looks right and sign-in still fails, check whether the script owner has an outstanding Apps Script authorization prompt. Apps Script re-asks the **owner** to review permissions whenever the project starts using a scope it hadn't consented to yet; until that one-time consent is granted the deployed app runs with a stale authorization for *every* visitor, since it always executes as the owner. Clear it by opening the editor, running any function once, and clicking through the dialog.
 
 ### The account launcher page
-[`pages/index.html`](pages/index.html) is a tiny static page that was built to sidestep the `/u/N/` routing bug. **That bug no longer exists** — but the page is deliberately kept as the link handed to operators, because it is one redirect they never have to re-bookmark: the pages.dev URL underneath it changes when the Cloudflare projects move to AngeLoyal's account, and a Pages project cannot be transferred between accounts. Retire it only after that handover has settled.
+A tiny static page that redirects to the frontend. It was built to sidestep the `/u/N/` routing bug. **That bug no longer exists** — but the page is deliberately kept as the link handed to operators, because it is one redirect they never have to re-bookmark: the pages.dev URL underneath it changes when the Cloudflare projects move to AngeLoyal's account, and a Pages project cannot be transferred between accounts. Retire it only after that handover has settled.
 
-It is **not** an Apps Script partial — `.claspignore` excludes `pages/**` so `npm run push` never uploads it. GitHub Pages requires a *public* repo on the free plan, and this repo stays private, so the page is published from a separate, standalone public repo: **[akaNiknok/angeloyal-oms-launcher](https://github.com/akaNiknok/angeloyal-oms-launcher)**. That repo contains nothing but this page — the frontend URL it points to is meant to be public (identity is still gated server-side by Google sign-in), so there's nothing confidential in it.
+**It does not live in this repo.** GitHub Pages requires a *public* repo on the free plan and this repo stays private, so the page lives in its own standalone public repo, which is its only source of truth: **[akaNiknok/angeloyal-oms-launcher](https://github.com/akaNiknok/angeloyal-oms-launcher)**. That repo contains nothing but the page — the frontend URL it points to is meant to be public (identity is still gated server-side by Google sign-in), so there's nothing confidential in it.
+
+> This repo used to carry a `pages/index.html` copy that had to be hand-synced with `cp`. It was deleted — two copies with no automated sync is just a way to ship a stale redirect. Edit the launcher repo directly.
 
 GitHub Pages is enabled there (Settings → Pages, Source: `master` / root), served at **`https://akaniknok.github.io/angeloyal-oms-launcher/`** — that's the link to hand out.
 
-[`pages/index.html`](pages/index.html) in *this* repo is the source of truth. If the frontend URL ever changes, update it here first, then copy the file into a local checkout of `angeloyal-oms-launcher` and commit/push it there — there's no automated sync between the two repos:
+If the frontend URL ever changes, update it in a local checkout of the launcher repo and push:
 
 ```sh
-cp pages/index.html ../angeloyal-oms-launcher/index.html
 cd ../angeloyal-oms-launcher
-git add index.html && git commit -m "sync EXEC_URL" && git push
+git add index.html && git commit -m "point at the new frontend URL" && git push
 ```
 
 ## Transferring ownership to AngeLoyal
@@ -202,7 +203,7 @@ Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Pa
 - Pull `develop` before starting so you commit on top of the latest.
 
 ## Notes
-- `.claspignore` restricts what gets pushed to the `.gs` files and `appsscript.json` — `web/`, `pages/`, `Docs/` and `Sample Files/` stay local/Git only and are never sent to Apps Script.
+- `.claspignore` restricts what gets pushed to the `.gs` files and `appsscript.json` — `web/`, `Docs/` and `Sample Files/` stay local/Git only and are never sent to Apps Script.
 - `.clasp.prod.json` / `.clasp.dev.json` contain the Script IDs (not secret, just identifiers) and are committed; `.clasp.json` is the gitignored, generated pointer (see [Environments](#environments-prod-vs-dev)).
 - Auth tokens (`~/.clasprc.json`) are per-user and never committed.
 

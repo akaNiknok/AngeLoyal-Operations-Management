@@ -4,7 +4,5 @@
 !appsscript.json
 
 # The frontend is a static site on Cloudflare Pages, not Apps Script partials —
-# re-ignore it so `!*.html` above doesn't push it into the script project. Same
-# for the GitHub Pages launcher (pages/index.html).
+# re-ignore it so `!*.html` above doesn't push it into the script project.
 web/**
-pages/**
