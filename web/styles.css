@@ -327,28 +327,7 @@
                 gap: 12px;
                 min-height: 44px;
             }
-            .btn-google {
-                display: inline-flex;
-                align-items: center;
-                gap: 10px;
-                background: var(--surface);
-                border: 1px solid var(--border-md);
-                color: var(--text);
-                font-weight: 500;
-                padding: 10px 18px;
-            }
-            .btn-google:hover {
-                background: var(--bg);
-            }
-            .btn-google .g-logo {
-                width: 18px;
-                height: 18px;
-                flex-shrink: 0;
-            }
-            .btn-google.disabled {
-                opacity: 0.5;
-                pointer-events: none;
-            }
+
             .auth-actions .btn {
                 text-decoration: none;
             }
@@ -799,26 +778,6 @@
                 margin-right: 6px;
                 flex-shrink: 0;
             }
-            /* Checkbox list (default helper picker) */
-            .chk-list {
-                display: flex;
-                flex-direction: column;
-                gap: 2px;
-                max-height: 68px;
-                overflow-y: auto;
-            }
-            .chk {
-                display: flex;
-                align-items: center;
-                gap: 5px;
-                font-size: 11px;
-                cursor: pointer;
-                white-space: nowrap;
-            }
-            .chk input {
-                margin: 0;
-                cursor: pointer;
-            }
 
             /* Crew rail: a toggled column of draggable crew cards beside the
                dispatch table; table rows are the drop targets. */
@@ -1125,10 +1084,7 @@
                 font-family: "DM Mono", monospace;
                 text-align: right;
             }
-            .td-plate {
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
-            }
+
             .td-wb {
                 font-family: "DM Mono", monospace;
                 font-size: 11px;
@@ -1162,9 +1118,7 @@
                 white-space: normal;
                 overflow: visible;
             }
-            .td-crew .crew-cell {
-                margin-top: 2px;
-            }
+
             .td-crew .crew-driver {
                 margin-right: 4px;
             }
@@ -1337,12 +1291,6 @@
                 color: #2e7d32;
             }
 
-            /* Driver cell */
-            .crew-cell {
-                display: flex;
-                flex-direction: column;
-                gap: 1px;
-            }
             .crew-driver {
                 font-size: 12px;
                 font-weight: 500;
@@ -1395,59 +1343,6 @@
                 max-width: 280px;
             }
 
-            /* ── TRIP DETAIL SIDEBAR ── */
-            .trip-sidebar {
-                width: 300px;
-                flex-shrink: 0;
-                border-left: 1px solid var(--border);
-                display: flex;
-                flex-direction: column;
-                background: var(--surface);
-                overflow: hidden;
-            }
-            .sidebar-head {
-                padding: 10px 14px;
-                border-bottom: 1px solid var(--border);
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                flex-shrink: 0;
-            }
-            .sidebar-head-title {
-                font-weight: 600;
-                font-size: 13px;
-                flex: 1;
-            }
-            .sidebar-close {
-                cursor: pointer;
-                color: var(--hint);
-                font-size: 16px;
-                padding: 2px 6px;
-                border-radius: 4px;
-                border: none;
-                background: transparent;
-            }
-            .sidebar-close:hover {
-                color: var(--text);
-                background: var(--bg);
-            }
-            .sidebar-body {
-                flex: 1;
-                overflow-y: auto;
-                padding: 14px;
-            }
-            .sidebar-footer {
-                padding: 12px 14px;
-                border-top: 1px solid var(--border);
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                flex-shrink: 0;
-            }
-
-            .field-group {
-                margin-bottom: 14px;
-            }
             .field-label {
                 font-size: 10px;
                 font-family: "DM Mono", monospace;
@@ -1468,85 +1363,6 @@
             .field-value.muted {
                 color: var(--muted);
                 font-weight: 400;
-            }
-
-            .wb-confirm-row {
-                display: flex;
-                gap: 6px;
-            }
-            .wb-confirm-row input {
-                flex: 1;
-            }
-
-            .status-select-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 5px;
-                margin-top: 4px;
-            }
-            .status-option {
-                padding: 6px 8px;
-                border-radius: var(--radius-sm);
-                border: 1px solid var(--border);
-                font-size: 11px;
-                cursor: pointer;
-                text-align: center;
-                transition: all 0.1s;
-                background: var(--bg);
-                color: var(--muted);
-            }
-            .status-option:hover {
-                border-color: var(--border-md);
-                color: var(--text);
-            }
-            .status-option.active {
-                border-color: transparent;
-                font-weight: 500;
-            }
-            .status-option.active.sc-scheduled {
-                background: var(--blue-bg);
-                color: var(--blue);
-                border-color: var(--blue-mid);
-            }
-            .status-option.active.sc-delivered {
-                background: var(--green-bg);
-                color: var(--green);
-            }
-            .status-option.active.sc-undelivered {
-                background: var(--red-bg);
-                color: var(--red);
-            }
-            .status-option.active.sc-fouln {
-                background: #fff3e0;
-                color: #bf6800;
-            }
-            .status-option.active.sc-foutr {
-                background: var(--amber-bg);
-                color: var(--amber);
-            }
-            .status-option.active.sc-redeliver {
-                background: var(--purple-bg);
-                color: var(--purple);
-            }
-            .status-option.active.sc-twoday {
-                background: #e8f5e9;
-                color: #2e7d32;
-            }
-
-            .assign-row {
-                display: flex;
-                gap: 6px;
-                align-items: center;
-            }
-            .assign-row select {
-                flex: 1;
-            }
-
-            .remarks-area {
-                width: 100%;
-                height: 60px;
-                resize: none;
-                font-size: 12px;
             }
 
             /* ── IMPORT PANEL ── */
@@ -1786,21 +1602,6 @@
                 font-family: "DM Mono", monospace;
                 margin-top: 1px;
             }
-            .status-pip {
-                width: 7px;
-                height: 7px;
-                border-radius: 50%;
-                flex-shrink: 0;
-            }
-            .pip-full {
-                background: var(--green);
-            }
-            .pip-partial {
-                background: var(--amber);
-            }
-            .pip-empty {
-                background: var(--border-md);
-            }
 
             .badge {
                 font-size: 9px;
@@ -1822,112 +1623,6 @@
             .badge-driver-helper {
                 background: var(--amber-bg);
                 color: var(--amber);
-            }
-
-            .detail-body {
-                padding: 14px;
-                flex: 1;
-                overflow-y: auto;
-            }
-            .detail-plate {
-                font-family: "DM Mono", monospace;
-                font-size: 16px;
-                font-weight: 500;
-                letter-spacing: 0.04em;
-            }
-            .detail-type {
-                font-size: 11px;
-                color: var(--muted);
-                margin-top: 3px;
-            }
-            .section-lbl {
-                font-size: 9px;
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
-                color: var(--hint);
-                font-family: "DM Mono", monospace;
-                margin-bottom: 5px;
-                margin-top: 14px;
-            }
-            .section-lbl:first-child {
-                margin-top: 0;
-            }
-            .crew-item {
-                display: flex;
-                align-items: center;
-                gap: 7px;
-                padding: 7px 9px;
-                background: var(--bg);
-                border: 1px solid var(--border);
-                border-radius: var(--radius-sm);
-                margin-bottom: 4px;
-            }
-            .crew-item-name {
-                flex: 1;
-                font-size: 12px;
-                font-weight: 500;
-            }
-            .remove-btn {
-                font-size: 10px;
-                padding: 2px 7px;
-                border: 1px solid var(--border);
-                border-radius: var(--radius-sm);
-                background: transparent;
-                color: var(--muted);
-                cursor: pointer;
-                font-family: "DM Sans", sans-serif;
-                transition: all 0.1s;
-            }
-            .remove-btn:hover {
-                background: var(--red-bg);
-                color: var(--red);
-                border-color: var(--red);
-            }
-            .assign-bar {
-                padding: 10px 12px;
-                border-top: 1px solid var(--border);
-                background: var(--surface);
-                flex-shrink: 0;
-            }
-            .assign-btn {
-                width: 100%;
-                padding: 8px 14px;
-                font-family: "DM Sans", sans-serif;
-                font-size: 12px;
-                font-weight: 500;
-                border-radius: var(--radius-sm);
-                border: none;
-                cursor: pointer;
-                transition: background 0.12s;
-            }
-            .assign-btn.primary {
-                background: var(--text);
-                color: white;
-            }
-            .assign-btn.primary:hover {
-                background: #333;
-            }
-            .assign-btn.disabled {
-                background: var(--border);
-                color: var(--hint);
-                cursor: default;
-            }
-            .assign-btn + .assign-btn {
-                margin-top: 6px;
-            }
-            .assign-hint {
-                font-size: 10px;
-                color: var(--hint);
-                text-align: center;
-                margin-top: 5px;
-            }
-            .emp-filter-bar {
-                display: flex;
-                gap: 3px;
-                padding: 6px 10px;
-                border-bottom: 1px solid var(--border);
-                flex-shrink: 0;
-                flex-wrap: wrap;
             }
 
             table.data-table {
@@ -1963,23 +1658,6 @@
                 padding: 0 12px;
                 height: 38px;
                 vertical-align: middle;
-            }
-            .inline-edit {
-                display: flex;
-                align-items: center;
-                gap: 5px;
-            }
-            .inline-edit input {
-                font-size: 12px;
-                padding: 3px 7px;
-                width: 120px;
-            }
-            .edit-link {
-                font-size: 10px;
-                color: var(--accent);
-                cursor: pointer;
-                text-decoration: underline;
-                white-space: nowrap;
             }
 
             /* ── TRUCK ROSTER PANEL (default crew template) ── */
@@ -2092,24 +1770,6 @@
             .admin-list-wrap {
                 flex: 1;
                 overflow: auto;
-            }
-            .admin-detail-col {
-                width: 300px;
-                flex-shrink: 0;
-                border-left: 1px solid var(--border);
-                display: flex;
-                flex-direction: column;
-                background: var(--surface);
-            }
-            .detail-footer {
-                padding: 10px 12px;
-                border-top: 1px solid var(--border);
-                display: flex;
-                gap: 6px;
-                flex-shrink: 0;
-            }
-            .detail-footer .btn {
-                flex: 1;
             }
 
             /* ── SETTINGS PANEL ── */
@@ -2424,19 +2084,6 @@
                 font-size: 10px;
                 color: var(--hint);
             }
-            .warning-box {
-                background: var(--amber-bg);
-                border: 1px solid #f0d9b5;
-                border-radius: var(--radius-sm);
-                padding: 8px 12px;
-                font-size: 12px;
-                color: var(--amber);
-            }
-            .warning-box strong {
-                display: block;
-                font-weight: 600;
-                margin-bottom: 3px;
-            }
 
             /* ── SCROLLBARS ── */
             ::-webkit-scrollbar {
@@ -2453,9 +2100,7 @@
 
             /* ── RESPONSIVE ── */
             @media (max-width: 768px) {
-                .trip-sidebar {
-                    display: none;
-                }
+
                 .roster-workspace {
                     flex-direction: column;
                 }
@@ -2476,12 +2121,7 @@
                 .admin-split {
                     flex-direction: column;
                 }
-                .admin-detail-col {
-                    width: 100%;
-                    border-left: none;
-                    border-top: 1px solid var(--border);
-                    max-height: 300px;
-                }
+
             }
             @media (prefers-reduced-motion: reduce) {
                 *,

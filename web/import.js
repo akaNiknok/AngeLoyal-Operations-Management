@@ -1,5 +1,4 @@
             // ── IMPORT ────────────────────────────────────────────────
-            let parsedXlsxData = null;
             // { headerIdx, typeCols } from the last parseRebiscoFile run —
             // parseConvoyFills needs them to scope the fill scan.
             let importParseMeta = null;
@@ -47,7 +46,6 @@
                             header: 1,
                             defval: "",
                         });
-                        parsedXlsxData = raw;
                         importRows = parseRebiscoFile(raw);
                         importExcluded = new Set();
                         renderImportPreview();
@@ -524,7 +522,6 @@
             function clearImport() {
                 importRows = [];
                 importExcluded = new Set();
-                parsedXlsxData = null;
                 document.getElementById("file-input").value = "";
                 document.getElementById("import-file-info").style.display =
                     "none";

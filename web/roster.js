@@ -223,8 +223,7 @@
             }
 
             function doAssign(type) {
-                if (saving || !selectedRosterTruckId || !selectedRosterEmpId)
-                    return;
+                if (!selectedRosterTruckId || !selectedRosterEmpId) return;
                 if (!canEdit()) return;
                 const em = employees.find(
                     (e) => Number(e.id) === Number(selectedRosterEmpId),

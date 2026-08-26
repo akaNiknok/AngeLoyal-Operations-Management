@@ -55,7 +55,6 @@
             let lastSelectedId = null; // anchor for shift-click range selection
             let crewRailOpen = false; // crew drag-and-drop rail beside the table
             let crewRailSort = "driver"; // driver | plate | type
-            let saving = false;
 
             // Roster state (Truck Roster assignment tool)
             let selectedRosterTruckId = null;

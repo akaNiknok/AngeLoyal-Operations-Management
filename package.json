@@ -20,8 +20,7 @@
     "logs": "clasp logs",
     "fetch-data": "node scripts/fetch-sheet-data.js",
     "clear-data": "node scripts/clear-sheet-data.js",
-    "clear-data:prod": "node scripts/clear-sheet-data.js --prod",
-    "backlog:seed": "node scripts/seed-github-issues.mjs",
+    "clear-data:prod": "node scripts/clear-sheet-data.js --prod",
     "backlog:sync": "node scripts/sync-backlog.mjs",
     "deploy:web": "wrangler pages deploy web --project-name angeloyal-oms --branch main --commit-dirty=true",
     "deploy:web:dev": "wrangler pages deploy web --project-name angeloyal-oms-dev --branch main --commit-dirty=true",
@@ -46,8 +45,7 @@
     "fetch-data": "snapshot PROD sheets to data/ (gitignored); add -- --dev for the DEV sheet",
     "clear-data": "DEV: wipe transactional sheets (Trips, Outlets, waybills, logs)",
     "clear-data:prod": "PROD: same wipe, asks you to type PRODUCTION \u2014 post-release only",
-    "changelog:sync": "regenerate web/changelog.json from GitHub Releases (add -- --apply to write)",
-    "backlog:seed": "seed GitHub issues from the backlog doc",
+    "changelog:sync": "regenerate web/changelog.json from GitHub Releases (add -- --apply to write)",
     "backlog:sync": "regenerate BACKLOG.md from the GitHub Project board"
   },
   "devDependencies": {
