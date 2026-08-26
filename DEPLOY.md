@@ -206,6 +206,7 @@ Versioning: **major** = project phase milestone (v1 = Phase 1, v2 = Billing & Pa
 - `.claspignore` restricts what gets pushed to the `.gs` files and `appsscript.json` — `web/`, `Docs/` and `Sample Files/` stay local/Git only and are never sent to Apps Script.
 - `.clasp.prod.json` / `.clasp.dev.json` contain the Script IDs (not secret, just identifiers) and are committed; `.clasp.json` is the gitignored, generated pointer (see [Environments](#environments-prod-vs-dev)).
 - Auth tokens (`~/.clasprc.json`) are per-user and never committed.
+- If your Cloudflare login can see more than one account, `wrangler` refuses to guess and the web half of `npm run release` stops with *"More than one account available"*. Put `CLOUDFLARE_ACCOUNT_ID` in `.env` (wrangler reads it from there; `npx wrangler whoami` lists the IDs). A `wrangler.toml` will not do — Pages rejects `account_id` in the config file.
 
 ## Reading live sheet data locally (for testing/verification)
 `Code.gs` has a token-gated `devDump` endpoint (`doGet` with `?action=devDump`) that returns raw sheet data as JSON. It's used by `scripts/fetch-sheet-data.js` to snapshot the live data for local inspection — never exposed in the UI.
