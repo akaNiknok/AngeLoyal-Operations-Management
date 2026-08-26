@@ -96,8 +96,8 @@
                 });
             }
 
-            // ExcelJS (not SheetJS) so exported rows can carry fill colors —
-            // the community SheetJS build can't write cell styles.
+            // Exported rows carry fill colors, so this goes through ExcelJS
+            // (also the import parser's library — see web/import.js).
             const BATCH_FILLS = ["FFFFF2CC", "FFDCE6F1"]; // alternating pastel yellow/blue, mirrors the manual FINAL ROUTE convention
 
             async function exportDispatchXlsx() {

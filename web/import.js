@@ -23,8 +23,8 @@
                 if (f) processFile(f);
             }
 
-            function processFile(file) {
-                if (!xlsxReady) {
+            async function processFile(file) {
+                if (!excelJsReady || !window.ExcelJS) {
                     showToast(
                         "File parser still loading — try again in a second.",
                         "warning",
@@ -35,51 +35,74 @@
                     file.name;
                 document.getElementById("import-file-info").style.display = "";
 
-                const reader = new FileReader();
-                reader.onload = function (e) {
-                    try {
-                        const wb = XLSX.read(e.target.result, {
-                            type: "array",
-                        });
-                        const ws = wb.Sheets[wb.SheetNames[0]];
-                        const raw = XLSX.utils.sheet_to_json(ws, {
-                            header: 1,
-                            defval: "",
-                        });
-                        importRows = parseRebiscoFile(raw);
-                        importExcluded = new Set();
-                        renderImportPreview();
-                        document.getElementById("btn-run-import").disabled =
-                            importRows.length === 0;
+                try {
+                    const wb = new ExcelJS.Workbook();
+                    await wb.xlsx.load(await file.arrayBuffer());
+                    const ws = wb.worksheets[0];
+                    importRows = parseRebiscoFile(sheetToGrid(ws));
+                    importExcluded = new Set();
+                    renderImportPreview();
+                    document.getElementById("btn-run-import").disabled =
+                        importRows.length === 0;
 
-                        // Convoy detection from fill colors — strictly an
-                        // enhancement. Any failure degrades to no groups.
+                    // Convoy detection reads fill colors off the SAME sheet
+                    // object — strictly an enhancement, so any failure leaves
+                    // the rows on screen with no groups.
+                    try {
                         if (
-                            excelJsReady &&
-                            window.ExcelJS &&
                             importParseMeta &&
-                            importParseMeta.typeCols.length
-                        ) {
-                            parseConvoyFills(e.target.result, importParseMeta)
-                                .then((colorByRow) => {
-                                    if (assignConvoyGroups(colorByRow) > 0)
-                                        renderImportPreview();
-                                })
-                                .catch((err) =>
-                                    console.warn(
-                                        "Convoy fill parse skipped:",
-                                        err,
-                                    ),
-                                );
-                        }
+                            importParseMeta.typeCols.length &&
+                            assignConvoyGroups(
+                                parseConvoyFills(ws, importParseMeta),
+                            ) > 0
+                        )
+                            renderImportPreview();
                     } catch (err) {
-                        showToast(
-                            "Could not read file: " + err.message,
-                            "error",
-                        );
+                        console.warn("Convoy fill parse skipped:", err);
                     }
-                };
-                reader.readAsArrayBuffer(file);
+                } catch (err) {
+                    showToast("Could not read file: " + err.message, "error");
+                }
+            }
+
+            /**
+             * One cell's plain value — what it reads as on screen, which is
+             * what the parser wants. ExcelJS hands back objects for rich text,
+             * hyperlinks and formulas.
+             */
+            function cellValue(cell) {
+                // A formula cell is read through cell.result, NOT value.result:
+                // ExcelJS leaves result off the value object when the cached
+                // number is 0 (every shared SUM in the route file), and a
+                // TOTAL of 0 is load-bearing — it is how Rebisco marks the FOs
+                // riding along in a convoy.
+                const v = cell.formula !== undefined ? cell.result : cell.value;
+                if (v === null || v === undefined) return "";
+                if (typeof v !== "object") return v;
+                if (v.richText) return v.richText.map((t) => t.text || "").join("");
+                if (v.text !== undefined) return v.text; // hyperlink
+                if (v.error !== undefined) return ""; // #REF!, #N/A …
+                return v; // a date cell — the one object with no plainer reading
+            }
+
+            /**
+             * ExcelJS worksheet → the 0-indexed array-of-arrays the parser wants:
+             * grid[r - 1] is sheet row r, grid[r - 1][c - 1] is column c, gaps are
+             * "". A row with no cells stays an empty array, which the parser's
+             * blank-row check already skips.
+             */
+            function sheetToGrid(ws) {
+                const grid = Array.from({ length: ws.rowCount }, () => []);
+                ws.eachRow({ includeEmpty: true }, (row, r) => {
+                    const cells = [];
+                    row.eachCell({ includeEmpty: true }, (cell, c) => {
+                        cells[c - 1] = cellValue(cell);
+                    });
+                    for (let i = 0; i < cells.length; i++)
+                        if (cells[i] === undefined) cells[i] = "";
+                    grid[r - 1] = cells;
+                });
+                return grid;
             }
 
             /** Groups truck units (['L300','L300','6W']) back into slots. */
@@ -316,10 +339,7 @@
              * batches as contiguous same-color runs (alternating yellow/blue);
              * the color itself carries no meaning, a color CHANGE = new batch.
              */
-            async function parseConvoyFills(arrayBuffer, meta) {
-                const wb = new ExcelJS.Workbook();
-                await wb.xlsx.load(arrayBuffer);
-                const ws = wb.worksheets[0];
+            function parseConvoyFills(ws, meta) {
                 const colorByRow = {};
                 for (let r = meta.headerIdx + 2; r <= ws.rowCount; r++) {
                     let key = null;
@@ -407,6 +427,39 @@
                 return n;
             }
 
+            /**
+             * Drops these rows will become on the board — one per truck, per stop.
+             * A file row is not a drop: importRouteFile groups rows by FO, sends the
+             * FO’s first truck round every one of its rows, and adds one more drop
+             * for each extra truck the FO asks for (a split load, e.g. "2×L300").
+             * Mirrors the grouping in importRouteFile (DataWriters.gs) — keep in step.
+             */
+            function dropCount(rows) {
+                const byFO = new Map();
+                let drops = 0;
+                rows.forEach((r) => {
+                    const trucks = (r.slots || []).reduce(
+                        (n, s) => n + (s.count || 1),
+                        0,
+                    );
+                    const g = r.foNumber ? byFO.get(r.foNumber) : null;
+                    if (g) {
+                        g.rows += 1;
+                        g.trucks += trucks;
+                    } else if (r.foNumber) {
+                        byFO.set(r.foNumber, { rows: 1, trucks });
+                    } else {
+                        drops += Math.max(trucks, 1); // no FO — the row stands alone
+                    }
+                });
+                // Every row of an FO is a stop its first truck makes, and every truck
+                // past the first adds one more drop on the FO’s first stop.
+                byFO.forEach((g) => {
+                    drops += g.rows + Math.max(g.trucks, 1) - 1;
+                });
+                return drops;
+            }
+
             function renderImportPreview() {
                 const toolbar = document.getElementById("preview-toolbar");
                 const wrap = document.getElementById("import-preview-table");
@@ -419,8 +472,14 @@
 
                 toolbar.style.display = "";
                 const included = importRows.length - importExcluded.size;
+                const drops = dropCount(
+                    importRows.filter((_, i) => !importExcluded.has(i)),
+                );
                 document.getElementById("preview-count").innerHTML =
-                    `<strong>${included}</strong> of ${importRows.length} rows will be imported`;
+                    `<strong>${included}</strong> of ${importRows.length} rows will be imported` +
+                    (drops === included
+                        ? ""
+                        : ` &rarr; <strong>${drops}</strong> drops`);
 
                 wrap.innerHTML = `
     <table class="preview-table">
@@ -496,7 +555,7 @@
                             showToast("Import failed: " + r.errors[0], "error");
                             return;
                         }
-                        const msg = `Imported ${r.imported} trips in Prepping.${r.skipped > 0 ? " " + r.skipped + " skipped." : ""}`;
+                        const msg = `Imported ${r.imported} drops in Prepping.${r.skipped > 0 ? " " + r.skipped + " skipped." : ""}`;
                         showToast(msg, r.skipped > 0 ? "warning" : "success");
                         if (r.errors.length)
                             console.warn("Import errors:", r.errors);

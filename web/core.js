@@ -1,21 +1,13 @@
-            // ── XLSX PARSER (SheetJS, vendored) ───────────────────────
-            // These three live in web/vendor/ rather than on a CDN: served
+            // ── VENDORED LIBRARIES ────────────────────────────────────
+            // These two live in web/vendor/ rather than on a CDN: served
             // from our own origin they can't be swapped under us, and the CSP
             // in web/_headers can then refuse every third-party script origin.
-            // Still loaded async (2 MB combined), so the ready flags stay.
+            // Still loaded async (1.1 MB combined), so the ready flags stay.
             // Update = re-download the pinned version, re-check the diff.
-            const xlsxScript = document.createElement("script");
-            xlsxScript.src =
-                "vendor/xlsx.full.min.js";
-            xlsxScript.onload = () => {
-                xlsxReady = true;
-            };
-            document.head.appendChild(xlsxScript);
-            let xlsxReady = false;
 
-            // ExcelJS reads cell fill colors (convoy batches in the route
-            // file), which the community SheetJS build can't. Optional: if it
-            // fails to load, imports still work, just without convoy detection.
+            // ExcelJS is the only .xlsx library: it reads the route file's grid
+            // AND its cell fill colors (convoy batches), and writes the FINAL
+            // ROUTE export. Imports and xlsx export both wait on it.
             const excelJsScript = document.createElement("script");
             excelJsScript.src =
                 "vendor/exceljs.min.js";

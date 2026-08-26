@@ -19,6 +19,6 @@ Two independent color systems, in different columns (so a parser must be column-
 
 Anomalies (rare, ignorable): `FFFF0000` red = one-off PRIORITY/alert tags; FINAL files add many theme-colored scratch annotations in cols Y–AL (dispatcher's own notes — noise). A separate **TIER column (X = 1/2/3)** is another grouping dimension (delivery wave), not color-based.
 
-**Parser limitation still applies:** app loads SheetJS *community* (`xlsx.full.min.js` 0.18.5, `Core.html`) which reads values only — fills need **ExcelJS** (CDN, `cell.fill`) or a JSZip/fflate pass over `xl/styles.xml` + sheet XML. Verified locally with python+openpyxl.
+**Parser limitation lifted (2026-08-26):** SheetJS is gone. `web/import.js` now reads grid *and* fills from one **ExcelJS** load (`sheetToGrid` + `parseConvoyFills`, both in `web/import.js`; ExcelJS is vendored at `web/vendor/exceljs.min.js`). Trap found doing it: ExcelJS drops `result` from a formula cell's `value` when the cached number is 0, so read `cell.result` — the route file's TOTAL is a shared `SUM` that is 0 on every convoy rider.
 
 Implication: color-based truck batching is now viable to implement and would capture multi-FO loads that FO-grouping misses. Import logic lives in `Import.html` (parser) and `importRouteFile` in `DataWriters.gs`. See [[clasp-deploy-setup]] for deploy.
