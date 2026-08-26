@@ -1028,8 +1028,28 @@ function updateDefaultAssignment(defaultAssignId, changes) {
 
 
 // ============================================================
-//  DATA WRITERS — Outlets (Admin only)
+//  DATA WRITERS — Master records (Admin / Dispatcher)
+//
+//  Every endpoint below is the same read-modify-write shape, so the
+//  mechanical half lives in Utils.gs (_openSheet / _openRow / _readFields /
+//  _writerResult / _requireUnique) and only the per-record validation is
+//  written out here. The *_FIELDS maps are the single declaration of which
+//  sheet column backs which camelCase key — used for both the audit snapshot
+//  and the read-back.
 // ============================================================
+
+
+// ============================================================
+//  Outlets (Admin only)
+// ============================================================
+
+const OUTLET_FIELDS = {
+  outletName:    'Outlet Name',
+  area:          'Area',
+  address:       'Address',
+  customerGroup: 'Customer Group',
+  notes:         'Notes',
+};
 
 /**
  * Creates a new outlet record.
@@ -1038,7 +1058,7 @@ function updateDefaultAssignment(defaultAssignId, changes) {
  */
 function createOutlet(data) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
+  return _writerResult(() => {
     const outletName = String(data.outletName || '').trim();
     if (!outletName) throw new Error('Outlet name is required.');
 
@@ -1052,14 +1072,8 @@ function createOutlet(data) {
     sheet.appendRow([nextId, outletName, area, address, customerGroup, notes, new Date()]);
 
     _auditLog('OUTLET_CREATE', SHEET_OUTLETS, nextId, '', outletName);
-
-    return {
-      success: true,
-      outlet: { id: nextId, outletName, area, address, customerGroup, notes },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    return { outlet: { id: nextId, outletName, area, address, customerGroup, notes } };
+  });
 }
 
 /**
@@ -1070,22 +1084,9 @@ function createOutlet(data) {
  */
 function updateOutlet(outletId, changes) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
-    const sheet   = _getSheet(SHEET_OUTLETS);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
-
-    const rowIdx = _findRowById(rows, headers, outletId);
-    if (rowIdx === -1) throw new Error(`Outlet ID ${outletId} not found.`);
-
-    const row    = rows[rowIdx];
-    const oldVal = {
-      outletName:    _val(row, headers, 'Outlet Name'),
-      area:          _val(row, headers, 'Area'),
-      address:       _val(row, headers, 'Address'),
-      customerGroup: _val(row, headers, 'Customer Group'),
-      notes:         _val(row, headers, 'Notes'),
-    };
+  return _writerResult(() => {
+    const ctx    = _openRow(SHEET_OUTLETS, outletId, 'Outlet');
+    const oldVal = _readFields(ctx.row, ctx.headers, OUTLET_FIELDS);
 
     const updates = {};
     if (changes.outletName !== undefined) {
@@ -1093,26 +1094,30 @@ function updateOutlet(outletId, changes) {
       if (!outletName) throw new Error('Outlet name is required.');
       updates['Outlet Name'] = outletName;
     }
-    if (changes.area          !== undefined) updates['Area']           = changes.area;
-    if (changes.address       !== undefined) updates['Address']        = changes.address;
-    if (changes.customerGroup !== undefined) updates['Customer Group'] = changes.customerGroup;
-    if (changes.notes         !== undefined) updates['Notes']          = changes.notes;
+    // Free-text columns are stored exactly as typed (no trim), as they always were.
+    ['area', 'address', 'customerGroup', 'notes'].forEach(k => {
+      if (changes[k] !== undefined) updates[OUTLET_FIELDS[k]] = changes[k];
+    });
 
     if (Object.keys(updates).length > 0) {
-      _writeRowFields(sheet, row, rowIdx, headers, updates);
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
     }
-
     _auditLog('OUTLET_EDIT', SHEET_OUTLETS, outletId, JSON.stringify(oldVal), JSON.stringify(changes));
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 
 // ============================================================
-//  DATA WRITERS — Trucks (Admin only)
+//  Trucks (Admin only)
 // ============================================================
+
+const TRUCK_FIELDS = {
+  plate:           'Plate Number',
+  brand:           'Brand',
+  type:            'Type',
+  billingCategory: 'Billing Category',
+  active:          'Active',
+};
 
 /**
  * Creates a new truck record. Billing category is selected directly by
@@ -1125,24 +1130,20 @@ function updateOutlet(outletId, changes) {
  */
 function createTruck(data) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
+  return _writerResult(() => {
     const plate = String(data.plate || '').trim();
     if (!plate) throw new Error('Plate number is required.');
 
-    const sheet   = _getSheet(SHEET_TRUCKS);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
-
-    const dup = rows.slice(1).some(row =>
-      String(_val(row, headers, 'Plate Number')).trim().toLowerCase() === plate.toLowerCase());
-    if (dup) throw new Error(`A truck with plate "${plate}" already exists.`);
+    const ctx = _openSheet(SHEET_TRUCKS);
+    _requireUnique(ctx.rows, ctx.headers, 'Plate Number', plate,
+      `A truck with plate "${plate}" already exists.`);
 
     const brand           = String(data.brand || '').trim();
     const type            = String(data.type  || '').trim();
     const billingCategory = String(data.billingCategory || '').trim();
 
-    const nextId = _nextRowId(sheet);
-    sheet.appendRow([nextId, plate, brand, type, true, billingCategory]);
+    const nextId = _nextRowId(ctx.sheet);
+    ctx.sheet.appendRow([nextId, plate, brand, type, true, billingCategory]);
 
     // Seed a blank Default Assignments row for this truck
     const defSheet  = _getSheet(SHEET_DEFAULT_ASSIGN);
@@ -1152,13 +1153,10 @@ function createTruck(data) {
     _auditLog('TRUCK_CREATE', SHEET_TRUCKS, nextId, '', JSON.stringify({ plate, brand, type, billingCategory }));
 
     return {
-      success: true,
       truck: { id: nextId, plate, brand, type, billingCategory, active: true },
       defaultAssignment: { id: nextDefId, truckId: nextId, defaultDriverId: null, defaultHelperIds: [], notes: '' },
     };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 /**
@@ -1171,63 +1169,41 @@ function createTruck(data) {
  */
 function updateTruck(truckId, changes) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
-    const sheet   = _getSheet(SHEET_TRUCKS);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
-
-    const rowIdx = _findRowById(rows, headers, truckId);
-    if (rowIdx === -1) throw new Error(`Truck ID ${truckId} not found.`);
-
-    const row    = rows[rowIdx];
-    const oldVal = {
-      plate:           _val(row, headers, 'Plate Number'),
-      brand:           _val(row, headers, 'Brand'),
-      type:            _val(row, headers, 'Type'),
-      billingCategory: _val(row, headers, 'Billing Category'),
-      active:          _val(row, headers, 'Active'),
-    };
+  return _writerResult(() => {
+    const ctx    = _openRow(SHEET_TRUCKS, truckId, 'Truck');
+    const oldVal = _readFields(ctx.row, ctx.headers, TRUCK_FIELDS);
 
     const updates = {};
     if (changes.plate !== undefined) {
       const plate = String(changes.plate).trim();
       if (!plate) throw new Error('Plate number is required.');
-      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
-        && String(_val(r, headers, 'Plate Number')).trim().toLowerCase() === plate.toLowerCase());
-      if (dup) throw new Error(`A truck with plate "${plate}" already exists.`);
+      _requireUnique(ctx.rows, ctx.headers, 'Plate Number', plate,
+        `A truck with plate "${plate}" already exists.`, ctx.rowIdx);
       updates['Plate Number'] = plate;
     }
-    if (changes.brand !== undefined) updates['Brand'] = String(changes.brand).trim();
-    if (changes.type !== undefined) updates['Type'] = String(changes.type).trim();
-    if (changes.billingCategory !== undefined) updates['Billing Category'] = String(changes.billingCategory).trim();
+    ['brand', 'type', 'billingCategory'].forEach(k => {
+      if (changes[k] !== undefined) updates[TRUCK_FIELDS[k]] = String(changes[k]).trim();
+    });
     if (changes.active !== undefined) updates['Active'] = !!changes.active;
 
     if (Object.keys(updates).length > 0) {
-      _writeRowFields(sheet, row, rowIdx, headers, updates);
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
     }
-
     _auditLog('TRUCK_EDIT', SHEET_TRUCKS, truckId, JSON.stringify(oldVal), JSON.stringify(changes));
 
-    return {
-      success: true,
-      truck: {
-        id:              truckId,
-        plate:           _val(row, headers, 'Plate Number'),
-        brand:           _val(row, headers, 'Brand'),
-        type:            _val(row, headers, 'Type'),
-        billingCategory: _val(row, headers, 'Billing Category'),
-        active:          _val(row, headers, 'Active') !== false,
-      },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    // Read back from the row _writeRowFields just updated in place.
+    const truck = Object.assign({ id: truckId }, _readFields(ctx.row, ctx.headers, TRUCK_FIELDS));
+    truck.active = truck.active !== false;
+    return { truck: truck };
+  });
 }
 
 
 // ============================================================
-//  DATA WRITERS — Billing Categories (Admin only)
+//  Billing Categories (Admin only)
 // ============================================================
+
+const BILLING_CATEGORY_FIELDS = { name: 'Name', active: 'Active' };
 
 /**
  * Creates a new billing category.
@@ -1236,27 +1212,20 @@ function updateTruck(truckId, changes) {
  */
 function createBillingCategory(data) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
+  return _writerResult(() => {
     const name = String(data.name || '').trim();
     if (!name) throw new Error('Name is required.');
 
-    const sheet   = _getSheet(SHEET_BILLING_CATEGORIES);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
+    const ctx = _openSheet(SHEET_BILLING_CATEGORIES);
+    _requireUnique(ctx.rows, ctx.headers, 'Name', name,
+      `A billing category named "${name}" already exists.`);
 
-    const dup = rows.slice(1).some(row =>
-      String(_val(row, headers, 'Name')).trim().toLowerCase() === name.toLowerCase());
-    if (dup) throw new Error(`A billing category named "${name}" already exists.`);
-
-    const nextId = _nextRowId(sheet);
-    sheet.appendRow([nextId, name, true]);
+    const nextId = _nextRowId(ctx.sheet);
+    ctx.sheet.appendRow([nextId, name, true]);
 
     _auditLog('BILLING_CATEGORY_CREATE', SHEET_BILLING_CATEGORIES, nextId, '', name);
-
-    return { success: true, billingCategory: { id: nextId, name, active: true } };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    return { billingCategory: { id: nextId, name: name, active: true } };
+  });
 }
 
 /**
@@ -1269,60 +1238,47 @@ function createBillingCategory(data) {
  */
 function updateBillingCategory(categoryId, changes) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
-    const sheet   = _getSheet(SHEET_BILLING_CATEGORIES);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
-
-    const rowIdx = _findRowById(rows, headers, categoryId);
-    if (rowIdx === -1) throw new Error(`Billing category ID ${categoryId} not found.`);
-
-    const row    = rows[rowIdx];
-    const oldVal = {
-      name:   _val(row, headers, 'Name'),
-      active: _val(row, headers, 'Active'),
-    };
+  return _writerResult(() => {
+    const ctx    = _openRow(SHEET_BILLING_CATEGORIES, categoryId, 'Billing category');
+    const oldVal = _readFields(ctx.row, ctx.headers, BILLING_CATEGORY_FIELDS);
 
     const updates = {};
     let renamedFrom = null;
     if (changes.name !== undefined) {
       const name = String(changes.name).trim();
       if (!name) throw new Error('Name is required.');
-      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
-        && String(_val(r, headers, 'Name')).trim().toLowerCase() === name.toLowerCase());
-      if (dup) throw new Error(`A billing category named "${name}" already exists.`);
+      _requireUnique(ctx.rows, ctx.headers, 'Name', name,
+        `A billing category named "${name}" already exists.`, ctx.rowIdx);
       if (name !== String(oldVal.name)) renamedFrom = String(oldVal.name);
       updates['Name'] = name;
     }
     if (changes.active !== undefined) updates['Active'] = !!changes.active;
 
     if (Object.keys(updates).length > 0) {
-      _writeRowFields(sheet, row, rowIdx, headers, updates);
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
     }
+    if (renamedFrom) _renameTruckBillingCategory(renamedFrom, updates['Name']);
 
-    if (renamedFrom) {
-      _renameTruckBillingCategory(renamedFrom, updates['Name']);
-    }
+    _auditLog('BILLING_CATEGORY_EDIT', SHEET_BILLING_CATEGORIES, categoryId,
+      JSON.stringify(oldVal), JSON.stringify(changes));
 
-    _auditLog('BILLING_CATEGORY_EDIT', SHEET_BILLING_CATEGORIES, categoryId, JSON.stringify(oldVal), JSON.stringify(changes));
-
-    return {
-      success: true,
-      billingCategory: {
-        id:     categoryId,
-        name:   _val(row, headers, 'Name'),
-        active: _val(row, headers, 'Active') !== false,
-      },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    const billingCategory = Object.assign({ id: categoryId },
+      _readFields(ctx.row, ctx.headers, BILLING_CATEGORY_FIELDS));
+    billingCategory.active = billingCategory.active !== false;
+    return { billingCategory: billingCategory };
+  });
 }
 
 
 // ============================================================
-//  DATA WRITERS — Route Type Map (Admin only)
+//  Route Type Map (Admin only)
 // ============================================================
+
+const ROUTE_TYPE_MAP_FIELDS = {
+  fileTypeCode:    'File Type Code',
+  billingCategory: 'Billing Category',
+  active:          'Active',
+};
 
 /**
  * Creates a new Route Type Map entry (route-file truck-type code → billing
@@ -1333,33 +1289,23 @@ function updateBillingCategory(categoryId, changes) {
  */
 function createRouteTypeMapping(data) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
+  return _writerResult(() => {
     const code     = String(data.fileTypeCode || '').trim();
     const category = String(data.billingCategory || '').trim();
     if (!code) throw new Error('File type code is required.');
     if (!category) throw new Error('Billing category is required.');
 
     getRouteTypeMap(); // ensure the sheet exists (self-bootstraps)
-    const sheet   = _getSheet(SHEET_ROUTE_TYPE_MAP);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
+    const ctx = _openSheet(SHEET_ROUTE_TYPE_MAP);
+    _requireUnique(ctx.rows, ctx.headers, 'File Type Code', code,
+      `A mapping for "${code}" already exists.`);
 
-    const dup = rows.slice(1).some(row =>
-      String(_val(row, headers, 'File Type Code')).trim().toUpperCase() === code.toUpperCase());
-    if (dup) throw new Error(`A mapping for "${code}" already exists.`);
-
-    const nextId = _nextRowId(sheet);
-    sheet.appendRow([nextId, code, category, true]);
+    const nextId = _nextRowId(ctx.sheet);
+    ctx.sheet.appendRow([nextId, code, category, true]);
 
     _auditLog('ROUTE_TYPE_MAP_CREATE', SHEET_ROUTE_TYPE_MAP, nextId, '', `${code} → ${category}`);
-
-    return {
-      success: true,
-      mapping: { id: nextId, fileTypeCode: code, billingCategory: category, active: true },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    return { mapping: { id: nextId, fileTypeCode: code, billingCategory: category, active: true } };
+  });
 }
 
 /**
@@ -1371,29 +1317,17 @@ function createRouteTypeMapping(data) {
  */
 function updateRouteTypeMapping(mappingId, changes) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
+  return _writerResult(() => {
     getRouteTypeMap(); // ensure the sheet exists
-    const sheet   = _getSheet(SHEET_ROUTE_TYPE_MAP);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
-
-    const rowIdx = _findRowById(rows, headers, mappingId);
-    if (rowIdx === -1) throw new Error(`Route type mapping ID ${mappingId} not found.`);
-
-    const row    = rows[rowIdx];
-    const oldVal = {
-      fileTypeCode:    _val(row, headers, 'File Type Code'),
-      billingCategory: _val(row, headers, 'Billing Category'),
-      active:          _val(row, headers, 'Active'),
-    };
+    const ctx    = _openRow(SHEET_ROUTE_TYPE_MAP, mappingId, 'Route type mapping');
+    const oldVal = _readFields(ctx.row, ctx.headers, ROUTE_TYPE_MAP_FIELDS);
 
     const updates = {};
     if (changes.fileTypeCode !== undefined) {
       const code = String(changes.fileTypeCode).trim();
       if (!code) throw new Error('File type code is required.');
-      const dup = rows.slice(1).some((r, i) => (i !== rowIdx - 1)
-        && String(_val(r, headers, 'File Type Code')).trim().toUpperCase() === code.toUpperCase());
-      if (dup) throw new Error(`A mapping for "${code}" already exists.`);
+      _requireUnique(ctx.rows, ctx.headers, 'File Type Code', code,
+        `A mapping for "${code}" already exists.`, ctx.rowIdx);
       updates['File Type Code'] = code;
     }
     if (changes.billingCategory !== undefined) {
@@ -1404,29 +1338,21 @@ function updateRouteTypeMapping(mappingId, changes) {
     if (changes.active !== undefined) updates['Active'] = !!changes.active;
 
     if (Object.keys(updates).length > 0) {
-      _writeRowFields(sheet, row, rowIdx, headers, updates);
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
     }
-
     _auditLog('ROUTE_TYPE_MAP_EDIT', SHEET_ROUTE_TYPE_MAP, mappingId,
       JSON.stringify(oldVal), JSON.stringify(changes));
 
-    return {
-      success: true,
-      mapping: {
-        id:              mappingId,
-        fileTypeCode:    _val(row, headers, 'File Type Code'),
-        billingCategory: _val(row, headers, 'Billing Category'),
-        active:          _val(row, headers, 'Active') !== false,
-      },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    const mapping = Object.assign({ id: mappingId },
+      _readFields(ctx.row, ctx.headers, ROUTE_TYPE_MAP_FIELDS));
+    mapping.active = mapping.active !== false;
+    return { mapping: mapping };
+  });
 }
 
 
 // ============================================================
-//  DATA WRITERS — Customer Group Colors (Admin only)
+//  Customer Group Colors (Admin only)
 // ============================================================
 
 /**
@@ -1441,7 +1367,7 @@ function updateRouteTypeMapping(mappingId, changes) {
  */
 function saveCustomerGroupColor(group, color) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
+  return _writerResult(() => {
     const code = String(group || '').trim();
     if (!code) throw new Error('Customer group is required.');
     const hex = String(color || '').trim();
@@ -1451,42 +1377,34 @@ function saveCustomerGroupColor(group, color) {
     const active = hex !== '';
 
     getCustomerGroupColors(); // ensure the sheet exists (self-bootstraps)
-    const sheet   = _getSheet(SHEET_CG_COLORS);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
+    const ctx = _openSheet(SHEET_CG_COLORS);
 
-    let rowIdx = -1;
-    for (let i = 1; i < rows.length; i++) {
-      if (String(_val(rows[i], headers, 'Customer Group')).trim().toUpperCase() === code.toUpperCase()) {
-        rowIdx = i;
-        break;
-      }
-    }
+    // Upsert by group code, not by ID — the client only knows the code.
+    const want   = code.toUpperCase();
+    const rowIdx = ctx.rows.findIndex((r, i) => i > 0
+      && String(_val(r, ctx.headers, 'Customer Group')).trim().toUpperCase() === want);
 
     let id;
     if (rowIdx === -1) {
-      id = _nextRowId(sheet);
-      sheet.appendRow([id, code, hex, active]);
+      id = _nextRowId(ctx.sheet);
+      ctx.sheet.appendRow([id, code, hex, active]);
     } else {
-      id = _numOrNull(_val(rows[rowIdx], headers, 'ID'));
-      _writeRowFields(sheet, rows[rowIdx], rowIdx, headers, { 'Color': hex, 'Active': active });
+      id = _numOrNull(_val(ctx.rows[rowIdx], ctx.headers, 'ID'));
+      _writeRowFields(ctx.sheet, ctx.rows[rowIdx], rowIdx, ctx.headers, { 'Color': hex, 'Active': active });
     }
 
     _auditLog('CG_COLOR_EDIT', SHEET_CG_COLORS, id, '', `${code} → ${hex || '(cleared)'}`);
-
-    return {
-      success: true,
-      customerGroupColor: { id: id, customerGroup: code, color: hex, active: active },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    return { customerGroupColor: { id: id, customerGroup: code, color: hex, active: active } };
+  });
 }
 
 
 // ============================================================
-//  DATA WRITERS — Waybill Prefixes (Admin + Dispatcher)
+//  Waybill Prefixes (Admin + Dispatcher)
 // ============================================================
+
+// Both prefix endpoints self-migrate a Sheet that predates these columns.
+const WB_PREFIX_ENSURE = ['Active', 'Sequence Width'];
 
 /**
  * Normalizes a Last Sequence Number input. Kept as a digit string so the
@@ -1505,6 +1423,9 @@ function _normalizeSequenceInput(value) {
  * prefix, or '' if it's free. A removed (inactive) row still collides — it's
  * only hidden from the pickers — so the message points at Restore instead of
  * leaving the user hunting for a prefix they can't see.
+ *
+ * Bespoke rather than _requireUnique because the message depends on whether
+ * the colliding row is active.
  *
  * @param {Array[]}  rows       All sheet rows, header included.
  * @param {string[]} headers
@@ -1528,25 +1449,21 @@ function _prefixDupMessage(rows, headers, prefix, skipRowIdx) {
  */
 function createWaybillPrefix(data) {
   _requirePermission('EDIT_WAYBILL_PREFIXES');
-  try {
+  return _writerResult(() => {
     // A blank prefix is legal (waybill number is then the bare sequence).
     const prefix      = String(data.prefix || '').trim();
     const companyName = String(data.companyName || '').trim();
     const seq         = _normalizeSequenceInput(data.lastSequenceNumber);
     if (!companyName) throw new Error('Company name is required.');
 
-    const sheet    = _getSheet(SHEET_WB_PREFIXES);
-    const rows     = sheet.getDataRange().getValues();
-    let   headers  = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
-    headers        = _ensureColumn(sheet, headers, 'Sequence Width');
-
-    const dup = _prefixDupMessage(rows, headers, prefix);
+    const ctx = _openSheet(SHEET_WB_PREFIXES, WB_PREFIX_ENSURE);
+    const dup = _prefixDupMessage(ctx.rows, ctx.headers, prefix);
     if (dup) throw new Error(dup);
 
     // The typed value carries the booklet width in its own length ("0000" → 4);
     // that width is stored in its own column and the counter as a plain number,
     // so nothing later depends on the cell's formatting.
-    const nextId = _nextRowId(sheet);
+    const nextId = _nextRowId(ctx.sheet);
     const values = {
       'ID':                   nextId,
       'Prefix':               prefix,
@@ -1555,13 +1472,12 @@ function createWaybillPrefix(data) {
       'Active':               true,
       'Sequence Width':       seq.length,
     };
-    sheet.appendRow(headers.map(h => (values[h] !== undefined ? values[h] : '')));
+    ctx.sheet.appendRow(ctx.headers.map(h => (values[h] !== undefined ? values[h] : '')));
 
     _auditLog('WAYBILL_PREFIX_CREATE', SHEET_WB_PREFIXES, nextId, '',
       JSON.stringify({ prefix, companyName, lastSequenceNumber: seq }));
 
     return {
-      success: true,
       waybillPrefix: {
         id: nextId,
         prefix,
@@ -1571,9 +1487,7 @@ function createWaybillPrefix(data) {
         active: true,
       },
     };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 /**
@@ -1590,27 +1504,19 @@ function createWaybillPrefix(data) {
  */
 function updateWaybillPrefix(prefixId, changes) {
   _requirePermission('EDIT_WAYBILL_PREFIXES');
-  try {
-    const sheet   = _getSheet(SHEET_WB_PREFIXES);
-    const rows    = sheet.getDataRange().getValues();
-    let   headers = _ensureColumn(sheet, rows[0].map(h => h.toString().trim()), 'Active');
-    headers       = _ensureColumn(sheet, headers, 'Sequence Width');
-
-    const rowIdx = _findRowById(rows, headers, prefixId);
-    if (rowIdx === -1) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
-
-    const row    = rows[rowIdx];
+  return _writerResult(() => {
+    const ctx = _openRow(SHEET_WB_PREFIXES, prefixId, 'Waybill prefix', WB_PREFIX_ENSURE);
     const oldVal = {
-      prefix:             _val(row, headers, 'Prefix'),
-      companyName:        _val(row, headers, 'Company Name'),
-      lastSequenceNumber: _val(row, headers, 'Last Sequence Number'),
-      active:             _val(row, headers, 'Active') !== false,
+      prefix:             _val(ctx.row, ctx.headers, 'Prefix'),
+      companyName:        _val(ctx.row, ctx.headers, 'Company Name'),
+      lastSequenceNumber: _val(ctx.row, ctx.headers, 'Last Sequence Number'),
+      active:             _val(ctx.row, ctx.headers, 'Active') !== false,
     };
 
     const updates = {};
     if (changes.prefix !== undefined) {
       const prefix = String(changes.prefix).trim();
-      const dup = _prefixDupMessage(rows, headers, prefix, rowIdx);
+      const dup = _prefixDupMessage(ctx.rows, ctx.headers, prefix, ctx.rowIdx);
       if (dup) throw new Error(dup);
       updates['Prefix'] = prefix;
     }
@@ -1644,7 +1550,7 @@ function updateWaybillPrefix(prefixId, changes) {
     }
 
     if (Object.keys(updates).length > 0) {
-      _writeRowFields(sheet, row, rowIdx, headers, updates);
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
     }
 
     _auditLog('WAYBILL_PREFIX_EDIT', SHEET_WB_PREFIXES, prefixId,
@@ -1653,28 +1559,27 @@ function updateWaybillPrefix(prefixId, changes) {
     const storedSeq   = seq !== null ? seq.value : Number(oldVal.lastSequenceNumber) || 0;
     const storedWidth = seq !== null
       ? seq.width
-      : (Number(_val(row, headers, 'Sequence Width'))
+      : (Number(_val(ctx.row, ctx.headers, 'Sequence Width'))
          || String(oldVal.lastSequenceNumber == null ? '' : oldVal.lastSequenceNumber).trim().length);
     return {
-      success: true,
       waybillPrefix: {
         id:                 prefixId,
-        prefix:             _val(row, headers, 'Prefix'),
-        companyName:        _val(row, headers, 'Company Name'),
+        prefix:             _val(ctx.row, ctx.headers, 'Prefix'),
+        companyName:        _val(ctx.row, ctx.headers, 'Company Name'),
         lastSequenceNumber: storedSeq,
         sequenceWidth:      storedWidth,
-        active:             _val(row, headers, 'Active') !== false,
+        active:             _val(ctx.row, ctx.headers, 'Active') !== false,
       },
     };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 
 // ============================================================
-//  DATA WRITERS — Employees (Admin only)
+//  Employees (Admin only)
 // ============================================================
+
+const EMPLOYEE_FIELDS = { nick: 'Nickname', role: 'Role', active: 'Active' };
 
 /**
  * Creates a new employee record.
@@ -1683,7 +1588,7 @@ function updateWaybillPrefix(prefixId, changes) {
  */
 function createEmployee(data) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
+  return _writerResult(() => {
     const nick = String(data.nick || '').trim();
     if (!nick) throw new Error('Nickname is required.');
     const role = String(data.role || '').trim();
@@ -1698,14 +1603,8 @@ function createEmployee(data) {
     sheet.appendRow([nextId, nick, firstName, middleName, lastName, role, true]);
 
     _auditLog('EMPLOYEE_CREATE', SHEET_EMPLOYEES, nextId, '', JSON.stringify({ nick, role }));
-
-    return {
-      success: true,
-      employee: { id: nextId, nick, firstName, middleName, lastName, role, active: true },
-    };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+    return { employee: { id: nextId, nick, firstName, middleName, lastName, role, active: true } };
+  });
 }
 
 /**
@@ -1716,46 +1615,30 @@ function createEmployee(data) {
  */
 function updateEmployee(employeeId, changes) {
   _requirePermission('EDIT_MASTER_RECORDS');
-  try {
-    const sheet   = _getSheet(SHEET_EMPLOYEES);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
-
-    const rowIdx = _findRowById(rows, headers, employeeId);
-    if (rowIdx === -1) throw new Error(`Employee ID ${employeeId} not found.`);
-
-    const row    = rows[rowIdx];
-    const oldVal = {
-      nick:   _val(row, headers, 'Nickname'),
-      role:   _val(row, headers, 'Role'),
-      active: _val(row, headers, 'Active'),
-    };
+  return _writerResult(() => {
+    const ctx    = _openRow(SHEET_EMPLOYEES, employeeId, 'Employee');
+    const oldVal = _readFields(ctx.row, ctx.headers, EMPLOYEE_FIELDS);
 
     const updates = {};
-    if (changes.nick !== undefined) {
-      const nick = String(changes.nick).trim();
-      if (!nick) throw new Error('Nickname is required.');
-      updates['Nickname'] = nick;
-    }
-    if (changes.firstName  !== undefined) updates['First Name']  = String(changes.firstName).trim();
-    if (changes.middleName !== undefined) updates['Middle Name'] = String(changes.middleName).trim();
-    if (changes.lastName   !== undefined) updates['Last Name']   = String(changes.lastName).trim();
-    if (changes.role !== undefined) {
-      const role = String(changes.role).trim();
-      if (!role) throw new Error('Role is required.');
-      updates['Role'] = role;
-    }
+    // Nickname and Role are required; the name parts are free-text.
+    [['nick', 'Nickname', 'Nickname is required.'], ['role', 'Role', 'Role is required.']]
+      .forEach(pair => {
+        if (changes[pair[0]] === undefined) return;
+        const v = String(changes[pair[0]]).trim();
+        if (!v) throw new Error(pair[2]);
+        updates[pair[1]] = v;
+      });
+    [['firstName', 'First Name'], ['middleName', 'Middle Name'], ['lastName', 'Last Name']]
+      .forEach(pair => {
+        if (changes[pair[0]] !== undefined) updates[pair[1]] = String(changes[pair[0]]).trim();
+      });
     if (changes.active !== undefined) updates['Active'] = !!changes.active;
 
     if (Object.keys(updates).length > 0) {
-      _writeRowFields(sheet, row, rowIdx, headers, updates);
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
     }
-
     _auditLog('EMPLOYEE_EDIT', SHEET_EMPLOYEES, employeeId, JSON.stringify(oldVal), JSON.stringify(changes));
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  });
 }
 
 

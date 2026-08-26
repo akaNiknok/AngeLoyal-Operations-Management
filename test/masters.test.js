@@ -55,6 +55,31 @@ test('updateTruck rejects renaming a plate onto another truck', () => {
   assert.match(res.error, /already exists/);
 });
 
+// The uniqueness check has to skip the row being edited, or every inline edit
+// would fail: the panel re-sends the plate unchanged alongside whatever the
+// admin actually touched.
+test('a record does not collide with itself on save', () => {
+  const sheets = base({
+    Trucks: [
+      HEADERS.Trucks.slice(),
+      [1, 'AAA-111', 'Isuzu', '6W', true, '6W'],
+      [2, 'BBB-222', '', '', true, '6W'],
+    ],
+    'Billing Categories': [HEADERS['Billing Categories'].slice(), [10, '6W', true]],
+    'Default Assignments': emptySheet('Default Assignments'),
+  });
+  const { api } = asAdmin(sheets);
+
+  const truck = api.updateTruck(1, { plate: 'AAA-111', brand: 'Hino' });
+  assert.equal(truck.success, true);
+  assert.equal(truck.truck.brand, 'Hino');
+  assert.equal(truck.truck.plate, 'AAA-111');
+
+  const cat = api.updateBillingCategory(10, { name: '6W' });
+  assert.equal(cat.success, true);
+  assert.equal(cat.billingCategory.name, '6W');
+});
+
 // ---------------- Billing Categories (rename cascade) ----------------
 
 test('renaming a billing category cascades to every truck using the old name', () => {
