@@ -489,8 +489,8 @@
                 }
 
                 setLoading(`Importing ${rowsToImport.length} rows…`);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("importRouteFile", isoToMDY(dateVal), rowsToImport).then(
+                    (r) => {
                         hideLoading();
                         if (!r.success) {
                             showToast("Import failed: " + r.errors[0], "error");
@@ -511,12 +511,12 @@
                         document.getElementById("dispatch-date").value =
                             dateVal;
                         switchPanel("dispatch");
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         hideLoading();
                         showToast("Import error: " + e.message, "error");
-                    })
-                    .importRouteFile(isoToMDY(dateVal), rowsToImport);
+                    },
+                );
             }
 
             function clearImport() {

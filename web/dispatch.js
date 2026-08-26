@@ -24,13 +24,13 @@
             function prefetchDispatch(key) {
                 if (dispatchCache[key] || dispatchPrefetching.has(key)) return;
                 dispatchPrefetching.add(key);
-                srv()
-                    .withSuccessHandler((data) => {
+                call("getDispatchBoardData", key).then(
+                    (data) => {
                         dispatchPrefetching.delete(key);
                         if (!dispatchCache[key]) dispatchCache[key] = data;
-                    })
-                    .withFailureHandler(() => dispatchPrefetching.delete(key))
-                    .getDispatchBoardData(key);
+                    },
+                    () => dispatchPrefetching.delete(key),
+                );
             }
 
             function loadDispatch(useCache) {
@@ -49,8 +49,8 @@
                         .classList.add("on");
                 }
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((data) => {
+                call("getDispatchBoardData", key).then(
+                    (data) => {
                         dispatchCache[key] = data;
                         dispatchData = data;
                         if (!cached) {
@@ -64,8 +64,8 @@
                         setSyncing(false);
                         prefetchDispatch(mdyAddDays(key, -1));
                         prefetchDispatch(mdyAddDays(key, 1));
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         showToast(
                             "Dispatch load failed: " + e.message,
                             "error",
@@ -74,8 +74,8 @@
                             .getElementById("dispatch-loading")
                             .classList.remove("on");
                         setSyncing(false);
-                    })
-                    .getDispatchBoardData(key);
+                    },
+                );
             }
 
             function renderDispatch() {
@@ -755,8 +755,8 @@
                 const ids = [...selectedForGroup];
                 if (!ids.length) return;
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("setTripConvoyGroup", ids, action).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast(r.error, "error");
@@ -775,8 +775,9 @@
                                 : "Convoy grouping removed.",
                             "success",
                         );
-                    })
-                    .setTripConvoyGroup(ids, action);
+                    },
+                    toastError,
+                );
             }
 
             function getFilteredTrips() {
@@ -818,25 +819,13 @@
             }
 
             // ── INLINE TRIP EDITING ───────────────────────────────────
+            // Options come straight off TRIP_STATUSES (core.js) so the dropdown can never
+            // offer a status the chips and labels do not know about.
             function statusSelectOptions(current) {
-                const vals = [
-                    "Prepping",
-                    "Backlog",
-                    "Scheduled",
-                    "Preload",
-                    "Delivered",
-                    "Undelivered",
-                    "Foul Trip - No Redeliver",
-                    "Foul Trip - For Redeliver",
-                    "Redeliver",
-                    "Two-Day Trip",
-                ];
-                return vals
-                    .map(
-                        (v) =>
-                            `<option value="${esc(v)}" ${current === v ? "selected" : ""}>${esc(shortStatus(v))}</option>`,
-                    )
-                    .join("");
+                return TRIP_STATUSES.map(
+                    ([v]) =>
+                        `<option value="${esc(v)}" ${current === v ? "selected" : ""}>${esc(shortStatus(v))}</option>`,
+                ).join("");
             }
 
             function waybillCellHtml(t, canE) {
@@ -1127,8 +1116,8 @@
                 )
                     return;
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("deleteImportedTrip", tripId).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast("Delete failed: " + r.error, "error");
@@ -1143,12 +1132,12 @@
                         selectedForGroup.delete(tripId);
                         updateConvoyButtons();
                         renderDispatch();
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
-                    })
-                    .deleteImportedTrip(tripId);
+                    },
+                );
             }
 
             // ── ADD MANUAL TRIP MODAL ──────────────────────────────────
@@ -1212,8 +1201,8 @@
                     return;
                 }
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("markDayScheduled", isoToMDY(dateVal), prefixId).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast(
@@ -1230,8 +1219,9 @@
                             "success",
                         );
                         loadDispatch();
-                    })
-                    .markDayScheduled(isoToMDY(dateVal), prefixId);
+                    },
+                    toastError,
+                );
             }
 
             function openAddTripModal() {
@@ -1338,8 +1328,8 @@
                 };
 
                 setSyncing(true);
-                srv()
-                    .withSuccessHandler((r) => {
+                call("createTrip", tripData).then(
+                    (r) => {
                         setSyncing(false);
                         if (!r.success) {
                             showToast("Add trip failed: " + r.error, "error");
@@ -1354,10 +1344,10 @@
                         // drop that date's cache so its next visit refetches.
                         delete dispatchCache[isoToMDY(dateVal)];
                         loadDispatch();
-                    })
-                    .withFailureHandler((e) => {
+                    },
+                    (e) => {
                         setSyncing(false);
                         showToast("Error: " + e.message, "error");
-                    })
-                    .createTrip(tripData);
+                    },
+                );
             }
