@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.7.0",
+      "date": "2026-08-30",
+      "title": "Manage the user accounts in the app",
+      "body": "### What is new\n\n- **An administrator can now manage the user accounts in the app.** Open **Settings**. Go to the **Users** section. You can add a user, change the role of a user and remove the access of a user.\n- **A removed user keeps their history.** The app only takes away the access.\n- **An administrator cannot change or remove their own account.** This keeps one administrator in the app at all times.\n- **The app shows its version at the top right, on the left of your account name.** Click the version to open this box again. The account menu does not have the \"What's new?\" button any more.\n\nThis version also contains preparation work for Billing and Payroll (Phase 2)."
+    },
+    {
       "version": "v1.6.0",
       "date": "2026-08-26",
       "title": "Correct numbers, and the status on the FINAL ROUTE page",
