@@ -33,7 +33,8 @@ The Release body appears verbatim in the app. The readers are Filipino dispatche
 - Use the on-screen label, not the internal name.
 - No jargon (`doPost`, RBAC, CSP), no idioms, no humour.
 - Say what changed for them, not what we changed.
-- Lead with anything that changes their routine. Say plainly when nothing else moved.
+- Lead with anything that changes their routine.
+- Write only what changed. Do not add a "What is the same" section or a closing line that says nothing else moved.
 
 The app's own nouns - trip, waybill, outlet, truck, dispatch board, route file, POD - are approved technical names.
 
