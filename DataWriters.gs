@@ -1643,6 +1643,113 @@ function updateEmployee(employeeId, changes) {
 
 
 // ============================================================
+//  Users (Admin only)
+// ============================================================
+
+const USER_FIELDS = { email: 'Email', displayName: 'Display Name', role: 'Role', active: 'Active' };
+
+/**
+ * Validates one user field set. Shared by create and update so a bad role or
+ * a malformed email cannot reach the sheet from either path.
+ * @param {Object} data     { email, displayName, role } — any may be absent on update.
+ * @param {Object} updates  Column-name map the caller writes into.
+ */
+function _applyUserFields(data, updates) {
+  if (data.email !== undefined) {
+    const email = String(data.email).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('A valid email is required.');
+    updates['Email'] = email;
+  }
+  if (data.displayName !== undefined) {
+    const name = String(data.displayName).trim();
+    if (!name) throw new Error('Display name is required.');
+    updates['Display Name'] = name;
+  }
+  if (data.role !== undefined) {
+    const role = String(data.role).trim();
+    const valid = Object.keys(ROLES).map(k => ROLES[k]);
+    if (valid.indexOf(role) === -1) throw new Error(`Role must be one of: ${valid.join(', ')}.`);
+    updates['Role'] = role;
+  }
+}
+
+/**
+ * Adds a user to the access list.
+ * @param {Object} data  { email, displayName, role }
+ * @returns {{ success: boolean, user: Object } | { success: false, error: string }}
+ */
+function createUser(data) {
+  _requirePermission('EDIT_USERS');
+  return _writerResult(() => {
+    const updates = {};
+    _applyUserFields({
+      email:       data.email,
+      displayName: data.displayName,
+      role:        data.role,
+    }, updates);
+    if (!updates['Email'])        throw new Error('A valid email is required.');
+    if (!updates['Display Name']) throw new Error('Display name is required.');
+    if (!updates['Role'])         throw new Error('Role is required.');
+
+    const ctx = _openSheet(SHEET_USERS);
+    _requireUnique(ctx.rows, ctx.headers, 'Email', updates['Email'],
+      `A user with the email "${updates['Email']}" already exists.`);
+
+    const nextId = _nextRowId(ctx.sheet);
+    ctx.sheet.appendRow([nextId, updates['Email'], updates['Display Name'], updates['Role'], true]);
+
+    _auditLog('USER_CREATE', SHEET_USERS, nextId, '',
+      JSON.stringify({ email: updates['Email'], role: updates['Role'] }));
+    return { user: {
+      id: nextId, email: updates['Email'], displayName: updates['Display Name'],
+      role: updates['Role'], active: true,
+    } };
+  });
+}
+
+/**
+ * Updates a user. An Admin cannot change their own Role or Active flag — that
+ * is the one edit nobody can undo from inside the app, because it takes away
+ * the panel that would undo it.
+ *
+ * @param {number} userId
+ * @param {Object} changes  Any of { email, displayName, role, active }
+ * @returns {{ success: boolean, user: Object } | { success: false, error: string }}
+ */
+function updateUser(userId, changes) {
+  _requirePermission('EDIT_USERS');
+  return _writerResult(() => {
+    const ctx    = _openRow(SHEET_USERS, userId, 'User');
+    const oldVal = _readFields(ctx.row, ctx.headers, USER_FIELDS);
+
+    const isSelf = String(oldVal.email).trim().toLowerCase() ===
+      String(_getCurrentUserEmail()).trim().toLowerCase();
+    const dropsSelfRole = changes.role !== undefined && String(changes.role).trim() !== String(oldVal.role);
+    if (isSelf && (changes.active === false || dropsSelfRole)) {
+      throw new Error('You cannot change your own role or remove your own access.');
+    }
+
+    const updates = {};
+    _applyUserFields(changes, updates);
+    if (updates['Email']) {
+      _requireUnique(ctx.rows, ctx.headers, 'Email', updates['Email'],
+        `A user with the email "${updates['Email']}" already exists.`, ctx.rowIdx);
+    }
+    if (changes.active !== undefined) updates['Active'] = !!changes.active;
+
+    if (Object.keys(updates).length > 0) {
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
+    }
+    _auditLog('USER_EDIT', SHEET_USERS, userId, JSON.stringify(oldVal), JSON.stringify(changes));
+
+    const user = Object.assign({ id: userId }, _readFields(ctx.row, ctx.headers, USER_FIELDS));
+    user.active = user.active !== false;
+    return { user: user };
+  });
+}
+
+
+// ============================================================
 //  DATA WRITERS — Maintenance
 // ============================================================
 

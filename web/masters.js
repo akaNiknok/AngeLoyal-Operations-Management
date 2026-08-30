@@ -40,6 +40,16 @@
                         renderEmpList();
                     },
                 },
+                user: {
+                    list: () => users,
+                    create: "createUser",
+                    update: "updateUser",
+                    echo: "user",
+                    modal: "modal-add-user",
+                    name: (u) => u.displayName || u.email,
+                    noun: "account",
+                    after: renderUsersAdmin,
+                },
                 billingCategory: {
                     list: () => billingCategories,
                     create: "createBillingCategory",
@@ -337,6 +347,118 @@
                     lastName: document.getElementById("ne-last").value.trim(),
                     role: document.getElementById("ne-role").value,
                 });
+            }
+
+            // ── USERS ADMIN ──────────────────────────────────────────
+            // The access list. It is not in getBootData — only an Admin may read
+            // it — so the Settings panel pulls it on open.
+            const USER_ROLES = ["Admin", "Dispatcher", "Payroll", "Viewer"];
+
+            function refreshUsers() {
+                call("getUsers").then(
+                    (list) => {
+                        if (!list) return;
+                        users = list;
+                        renderUsersAdmin();
+                    },
+                    () => {},
+                );
+            }
+
+            function renderUsersAdmin() {
+                const tbody = document.getElementById("users-tbody");
+                if (!tbody) return;
+                const showInactive =
+                    document.getElementById("users-show-inactive").checked;
+
+                const filtered = users.filter(
+                    (u) => showInactive || u.active !== false,
+                );
+                document.getElementById("users-count").textContent =
+                    `${filtered.length} users`;
+
+                tbody.innerHTML = filtered
+                    .map((u) => {
+                        // You cannot demote or remove yourself — the server refuses
+                        // it too, this just keeps the control from lying.
+                        const isSelf =
+                            (u.email || "").toLowerCase() ===
+                            (currentUser.email || "").toLowerCase();
+                        const cell = (field, value) =>
+                            `<input class="cell-input" value="${esc(value)}" onchange="updateUserField(${u.id},'${field}',this.value)">`;
+                        const roleCell = isSelf
+                            ? `<span>${esc(u.role)}</span>`
+                            : `<select class="cell-input" onchange="updateUserField(${u.id},'role',this.value)">` +
+                              USER_ROLES.map(
+                                  (r) =>
+                                      `<option value="${r}"${r === u.role ? " selected" : ""}>${r}</option>`,
+                              ).join("") +
+                              `</select>`;
+                        return `<tr>
+    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${u.id}</td>
+    <td>${cell("email", u.email)}</td>
+    <td>${cell("displayName", u.displayName)}</td>
+    <td>${roleCell}</td>
+    <td>${statusChip(u.active)}</td>
+    <td>${isSelf ? "" : rowActionBtn("toggleUserActive", u.id, u.active)}</td>
+  </tr>`;
+                    })
+                    .join("");
+            }
+
+            function updateUserField(id, field, value) {
+                const u = users.find((x) => x.id === id);
+                if (!u) return;
+                const old = u[field];
+                const next = value.trim();
+                if (!next) {
+                    showToast(
+                        field === "email"
+                            ? "Email is required."
+                            : "Display name is required.",
+                        "error",
+                    );
+                    renderUsersAdmin();
+                    return;
+                }
+                u[field] = next;
+                renderUsersAdmin();
+                bgSave("updateUser", [id, { [field]: next }], {
+                    onOk: (r) => {
+                        Object.assign(u, r.user);
+                        renderUsersAdmin();
+                    },
+                    revert: () => {
+                        u[field] = old;
+                        renderUsersAdmin();
+                    },
+                });
+            }
+
+            function toggleUserActive(id) {
+                toggleRecordActive("user", id);
+            }
+
+            function openAddUserModal() {
+                document.getElementById("nu-email").value = "";
+                document.getElementById("nu-name").value = "";
+                document.getElementById("nu-role").value = "Viewer";
+                openModal("modal-add-user");
+            }
+
+            function submitAddUser() {
+                const email = document.getElementById("nu-email").value.trim();
+                const displayName = document.getElementById("nu-name").value.trim();
+                const role = document.getElementById("nu-role").value;
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    showToast("A valid email is required.", "error");
+                    return;
+                }
+                if (!displayName) {
+                    showToast("Display name is required.", "error");
+                    return;
+                }
+                submitAddRecord("user", { email, displayName, role });
             }
 
             // ── BILLING CATEGORIES ADMIN ─────────────────────────────

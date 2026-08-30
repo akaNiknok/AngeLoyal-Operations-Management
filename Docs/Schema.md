@@ -344,6 +344,8 @@ The global ledger recording all administrative, operational, and data state modi
 * CG\_COLOR\_EDIT — A customer group's dispatch-board color was set or cleared (New Value = "GROUP → #hex" or "GROUP → (cleared)")  
 * WAYBILL\_PREFIX\_CREATE — New prefix added to the Waybill Prefixes list  
 * WAYBILL\_PREFIX\_EDIT — Updates to a waybill prefix (prefix code, company name, re-basing the Last Sequence Number, Active/Inactive toggling)
+* USER\_CREATE — New account added to the Users access list
+* USER\_EDIT — Administrative updates to a user account (email, display name, role, Active/Inactive toggling)
 * LOGIN — A verified Google sign-in opened a session (Table = Users, New Value = the account's email)
 * DATA\_CLEAR — An Admin wiped every transactional row of this environment from the Admin panel (Table blank, New Value = the list of cleared sheets). Written *after* the wipe, so it is the first row of the fresh Audit Log.
 
