@@ -37,6 +37,7 @@
             let outlets = [];
             let defaultAssignments = [];
             let billingCategories = [];
+            let users = []; // access list, loaded on the Settings panel (Admin only)
             let routeTypeMap = [];
             let customerGroupColors = [];
 
@@ -500,6 +501,7 @@
                     refreshWaybillPrefixes();
                 }
                 if (name === "settings") {
+                    refreshUsers();
                     renderBillingCategoriesAdmin();
                     renderRouteTypeMapAdmin();
                     renderCustomerGroupColors();

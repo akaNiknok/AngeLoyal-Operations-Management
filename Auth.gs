@@ -160,6 +160,7 @@ const RPC_ALLOWED = {
   getBootData: 'r',
   getDispatchBoardData: 'r',
   getWaybillPrefixes: 'r',
+  getUsers: 'r',
   // session
   logout: 'r',
   // writers
@@ -185,6 +186,8 @@ const RPC_ALLOWED = {
   saveCustomerGroupColor: 'w',
   createWaybillPrefix: 'w',
   updateWaybillPrefix: 'w',
+  createUser: 'w',
+  updateUser: 'w',
   createEmployee: 'w',
   updateEmployee: 'w',
   clearAllData: 'w',

@@ -1,7 +1,7 @@
 // ============================================================
 //  web/masters.js — the shared admin-record plumbing.
-//  The five admin tables (trucks, employees, billing categories,
-//  route type map, waybill prefixes) all route Remove/Restore and
+//  The six admin tables (users, trucks, employees, billing
+//  categories, route type map, waybill prefixes) all route Remove/Restore and
 //  Add through toggleRecordActive() / submitAddRecord(). What has to
 //  hold: each entity hits its own rpc, the saved row is adopted into
 //  the right local list, and the confirm/toast wording per entity
@@ -28,7 +28,8 @@ function loadMasters(overrides = {}) {
     // the lists the specs point at
     trucks: [], employees: [], billingCategories: [], routeTypeMap: [],
     waybillPrefixes: [], defaultAssignments: [], outlets: [], customerGroupColors: [],
-    currentUser: { role: 'Admin' },
+    users: [],
+    currentUser: { role: 'Admin', email: 'admin@angeloyal.com' },
     // UI seams
     confirm: (msg) => { calls.confirms.push(msg); return true; },
     showToast: (msg, kind) => calls.toasts.push({ msg, kind }),
@@ -127,6 +128,18 @@ test('toggling an id that is not in the list does nothing', () => {
   assert.equal(calls.confirms.length, 0);
 });
 
+test('removing a user reads as an account, and the echoed row wins', () => {
+  const { sandbox, calls } = loadMasters();
+  sandbox.users.push({ id: 4, email: 'vi@angeloyal.com', displayName: 'Vi Viewer', active: true });
+
+  sandbox.toggleRecordActive('user', 4);
+
+  assert.equal(calls.bgSave[0].rpcName, 'updateUser');
+  assert.match(calls.confirms[0], /remove the Vi Viewer account\?/);
+  calls.bgSave[0].opts.onOk({ user: { id: 4, email: 'vi@angeloyal.com', displayName: 'Vi Viewer', active: false } });
+  assert.equal(sandbox.users[0].active, false);
+});
+
 // ---------------- Add ----------------
 
 test('adding pushes the created record onto its own list and closes its modal', async () => {
@@ -186,5 +199,34 @@ test('every admin spec points at a distinct rpc pair and modal', () => {
     assert.equal(typeof s.name, 'function');
     assert.equal(typeof s.after, 'function');
   }
-  assert.equal(specs.length, 5);
+  assert.equal(specs.length, 6);
+});
+
+// ---------------- Users panel ----------------
+
+// The Users table is the one admin table with a per-row branch: an admin must
+// not be offered a control that would lock them out of the panel. The server
+// refuses it either way, so what is tested here is that the UI agrees.
+test('the signed-in admin gets no role dropdown and no Remove on their own row', () => {
+  const els = {};
+  const el = (id) => (els[id] = els[id] || { value: '', checked: true, innerHTML: '', textContent: '' });
+  const { sandbox } = loadMasters({
+    document: { getElementById: el, createElement: () => el('tmp'), querySelectorAll: () => [] },
+  });
+  sandbox.users.push(
+    { id: 1, email: 'admin@angeloyal.com', displayName: 'Ada Admin', role: 'Admin', active: true },
+    { id: 2, email: 'vi@angeloyal.com', displayName: 'Vi Viewer', role: 'Viewer', active: true },
+  );
+
+  sandbox.renderUsersAdmin();
+  const html = els['users-tbody'].innerHTML;
+
+  assert.equal(els['users-count'].textContent, '2 users');
+  // own row: role is plain text, no Remove button
+  assert.equal(/updateUserField\(1,'role'/.test(html), false);
+  assert.equal(/toggleUserActive\(1\)/.test(html), false);
+  // somebody else's row: full controls
+  assert.match(html, /updateUserField\(2,'role'/);
+  assert.match(html, /toggleUserActive\(2\)/);
+  assert.match(html, /<option value="Viewer" selected>/);
 });

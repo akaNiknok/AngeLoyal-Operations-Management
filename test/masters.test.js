@@ -266,3 +266,46 @@ test('saveCustomerGroupColor is admin-gated', () => {
   const viewer = makeEnv({ sheets: base(), userEmail: EMAIL.Viewer });
   assert.throws(() => viewer.api.saveCustomerGroupColor('PG', '#111111'), /Access denied/);
 });
+
+// ---------------- Users ----------------
+
+test('createUser validates the email and the role, and refuses a duplicate', () => {
+  const { api, ss } = asAdmin(base());
+
+  assert.match(api.createUser({ email: 'not-an-email', displayName: 'X', role: 'Viewer' }).error, /valid email/);
+  assert.match(api.createUser({ email: 'x@y.com', displayName: '', role: 'Viewer' }).error, /Display name/);
+  assert.match(api.createUser({ email: 'x@y.com', displayName: 'X', role: 'Owner' }).error, /Role must be one of/);
+
+  const ok = api.createUser({ email: ' New@Angeloyal.com ', displayName: 'New Guy', role: 'Dispatcher' });
+  assert.equal(ok.success, true);
+  assert.equal(ok.user.email, 'New@Angeloyal.com');
+  assert.equal(ok.user.active, true);
+
+  const dup = api.createUser({ email: 'new@angeloyal.com', displayName: 'Twin', role: 'Viewer' });
+  assert.equal(dup.success, false);
+  assert.match(dup.error, /already exists/);
+
+  const rows = dump(ss, 'Users').rows.map((r) => rowObject(HEADERS.Users, r));
+  assert.equal(rows[rows.length - 1]['Role'], 'Dispatcher');
+});
+
+test('an admin cannot demote or deactivate their own account', () => {
+  const { api } = asAdmin(base());
+  // fixture row 1 is the signed-in admin
+  assert.match(api.updateUser(1, { role: 'Viewer' }).error, /your own role/);
+  assert.match(api.updateUser(1, { active: false }).error, /your own role/);
+  // renaming yourself is fine
+  assert.equal(api.updateUser(1, { displayName: 'Ada A.' }).success, true);
+  // and so is touching somebody else
+  assert.equal(api.updateUser(4, { role: 'Payroll', active: false }).success, true);
+});
+
+test('getUsers and the user writers are admin-gated', () => {
+  const dispatcher = makeEnv({ sheets: base(), userEmail: EMAIL.Dispatcher });
+  assert.throws(() => dispatcher.api.getUsers(), /Access denied/);
+  assert.throws(() => dispatcher.api.createUser({ email: 'a@b.com', displayName: 'A', role: 'Viewer' }), /Access denied/);
+  assert.throws(() => dispatcher.api.updateUser(4, { active: false }), /Access denied/);
+
+  const { api } = asAdmin(base());
+  assert.equal(api.getUsers().length, 5);
+});

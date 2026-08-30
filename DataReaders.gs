@@ -104,6 +104,27 @@ function getBillingCategories() {
   })).filter(r => r.id !== null);
 }
 
+/**
+ * Returns every row of the Users sheet, active or not. Admin-only, and kept
+ * out of getBootData on purpose: nobody else needs the account list, and it
+ * would otherwise sit in every admin's localStorage boot cache.
+ * @returns {Object[]} Array of { id, email, displayName, role, active }
+ */
+function getUsers() {
+  _requirePermission('EDIT_USERS');
+  const sheet   = _getSheet(SHEET_USERS);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+
+  return rows.slice(1).map(row => ({
+    id:          _numOrNull(_val(row, headers, 'ID')),
+    email:       _val(row, headers, 'Email'),
+    displayName: _val(row, headers, 'Display Name'),
+    role:        _val(row, headers, 'Role'),
+    active:      _val(row, headers, 'Active') !== false,
+  })).filter(u => u.id !== null);
+}
+
 /** Default Route Type Map rows seeded the first time the sheet is created. */
 const ROUTE_TYPE_MAP_DEFAULTS = [
   ['10W', '10W'],

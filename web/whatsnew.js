@@ -37,12 +37,14 @@ function maybeShowWhatsNew() {
     loadChangelog().then((releases) => {
         if (!releases.length) return;
         const latest = releases[0].version;
+        // The header version tag is the only way in, so label it first.
+        document.getElementById("app-version").textContent = latest;
         if (!shouldShowWhatsNew(latest, storeGet(SEEN_KEY))) return;
         openWhatsNew();
     });
 }
 
-// Account menu → "What's new?". Always opens, seen or not.
+// Header version tag → "What's new". Always opens, seen or not.
 function openWhatsNew() {
     closeAccountMenu();
     loadChangelog().then((releases) => {

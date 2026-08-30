@@ -112,6 +112,13 @@
                 </nav>
 
                 <div class="header-right">
+                    <button
+                        class="app-version"
+                        id="app-version"
+                        type="button"
+                        title="What's new?"
+                        onclick="openWhatsNew()"
+                    ></button>
                     <div class="account-menu" id="account-menu">
                         <button
                             class="user-chip"
@@ -146,14 +153,6 @@
                                 </div>
                             </div>
                             <div class="account-dropdown-sep"></div>
-                            <button
-                                class="account-action"
-                                type="button"
-                                onclick="openWhatsNew()"
-                            >
-                                <span class="account-action-icon">✨</span>
-                                What's new?
-                            </button>
                             <button
                                 class="account-action"
                                 type="button"
@@ -903,6 +902,50 @@
                 </div>
                 <div class="admin-scroll">
                     <div class="settings-inner">
+                    <!-- Users -->
+                    <div class="settings-section" style="margin-bottom: 18px">
+                        <div class="settings-section-head">
+                            <span class="settings-section-title">Users</span>
+                            <span class="tb-label" id="users-count"></span>
+                            <label
+                                class="tb-label"
+                                style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    id="users-show-inactive"
+                                    checked
+                                    onchange="renderUsersAdmin()"
+                                />
+                                Show inactive
+                            </label>
+                            <div class="tb-spacer"></div>
+                            <button
+                                class="btn btn-primary btn-sm"
+                                onclick="openAddUserModal()"
+                            >
+                                + Add user
+                            </button>
+                        </div>
+                        <p class="settings-section-hint">
+                            Who can sign in, and what each account can do. A
+                            removed user keeps their history but loses access.
+                        </p>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px">ID</th>
+                                    <th>Email</th>
+                                    <th>Display Name</th>
+                                    <th style="width: 120px">Role</th>
+                                    <th style="width: 90px">Status</th>
+                                    <th style="width: 90px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-tbody"></tbody>
+                        </table>
+                    </div>
+
                     <div class="settings-grid">
                     <div class="settings-col">
                     <!-- Billing Categories -->
@@ -1463,6 +1506,55 @@
                         onclick="submitAddEmployee()"
                     >
                         Add employee
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add User Modal -->
+        <div class="modal-backdrop" id="modal-add-user">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Add user</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-add-user')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">Email</label>
+                        <input
+                            type="email"
+                            id="nu-email"
+                            placeholder="name@example.com"
+                        />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Display Name</label>
+                        <input type="text" id="nu-name" placeholder="e.g. Ada Cruz" />
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Role</label>
+                        <select id="nu-role">
+                            <option value="Admin">Admin</option>
+                            <option value="Dispatcher">Dispatcher</option>
+                            <option value="Payroll">Payroll</option>
+                            <option value="Viewer">Viewer</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-add-user')"
+                    >
+                        Cancel
+                    </button>
+                    <button class="btn btn-primary" onclick="submitAddUser()">
+                        Add user
                     </button>
                 </div>
             </div>
