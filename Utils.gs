@@ -295,6 +295,17 @@ function _waybillNumberString(prefix, seq, width, suffix) {
 }
 
 /**
+ * Strips a trailing -R / -FT off a waybill number, leaving the number the
+ * booklet actually carries. Redelivering a redeliver must stay 1001-R, not
+ * grow into 1001-R-R.
+ * @param {string} waybillNumber
+ * @returns {string}
+ */
+function _baseWaybillNumber(waybillNumber) {
+  return String(waybillNumber || '').replace(/-(R|FT)$/, '');
+}
+
+/**
  * Builds a { id → object } index from an array of objects that have an `id` field.
  * @param {Object[]} arr
  * @returns {Object}

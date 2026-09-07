@@ -94,8 +94,8 @@ test('carry-over stops of one merged load share a single -R waybill', () => {
   const wb = dump(ss, 'Waybills');
   const forTrip = (id) => wb.rows.map((r) => rowObject(wb.headers, r))
     .find((w) => Number(w['Trip ID']) === Number(id));
-  assert.equal(forTrip(idA)['Waybill Number'], 'AL-41-R');
-  assert.equal(forTrip(idB)['Waybill Number'], 'AL-41-R'); // joined, not AL-42-R
+  assert.equal(forTrip(idA)['Waybill Number'], 'AL-40-R'); // the load's own number
+  assert.equal(forTrip(idB)['Waybill Number'], 'AL-40-R'); // joined, not AL-41-R
   assert.equal(forTrip(idB)['Waybill Type'], 'Redeliver');
 });
 
@@ -118,10 +118,60 @@ test('Redeliver spawns a -R suggested waybill on the new trip', () => {
     .map((r) => rowObject(headers, r))
     .find((w) => Number(w['Trip ID']) === Number(newId));
   assert.ok(wb, 'expected a waybill for the carry-over trip');
-  assert.equal(wb['Waybill Number'], 'AL-41-R'); // next seq + redeliver suffix
+  // Rebisco's rule: the redeliver keeps the ORIGINAL number. AL-40 → AL-40-R,
+  // never the next free number with -R stapled on.
+  assert.equal(wb['Waybill Number'], 'AL-40-R');
   assert.equal(wb['Waybill Type'], 'Redeliver');
   assert.equal(Number(wb['Parent Waybill ID']), 70);
+  assert.equal(Number(wb['Sequence Number']), 40); // the parent's, not a new one
   assert.equal(wb.Locked, false); // suggested, not confirmed
+});
+
+// The number came out of the parent, so the prefix counter must not move —
+// spending a sequence here is what pushed every later Regular waybill off by
+// one against the physical booklet.
+test('a Redeliver does not advance the prefix counter', () => {
+  const { ss } = setup('Redeliver');
+  const { headers, rows } = dump(ss, 'Waybill Prefixes');
+  const pref = rowObject(headers, rows[0]);
+  assert.equal(Number(pref['Last Sequence Number']), 40); // untouched
+});
+
+// Redelivering a redeliver stays -R. The suffix is stripped off the parent
+// before the new one goes on, so it can never grow into AL-40-R-R.
+test('redelivering a redeliver stays -R', () => {
+  const sheets = buildSheets();
+  const { api, ss } = makeEnv({ sheets, userEmail: 'dispatch@angeloyal.com' });
+
+  const first = api._createCarryoverTrip(
+    dump(ss, 'Trips').rows[0], dump(ss, 'Trips').headers, ORIGINAL_TRIP_ID, 'Redeliver');
+
+  // Confirm the carry-over's -R waybill, then carry IT over again.
+  const wb1 = dump(ss, 'Waybills');
+  const rowIdx = wb1.rows.findIndex((r) => Number(rowObject(wb1.headers, r)['Trip ID']) === first);
+  assert.ok(rowIdx !== -1);
+
+  const trips2 = dump(ss, 'Trips');
+  const firstRow = trips2.rows.find((r) => Number(r[0]) === first);
+  const second = api._createCarryoverTrip(firstRow, trips2.headers, first, 'Redeliver');
+
+  const wb2 = dump(ss, 'Waybills');
+  const forTrip = (id) => wb2.rows.map((r) => rowObject(wb2.headers, r))
+    .find((w) => Number(w['Trip ID']) === Number(id));
+  assert.equal(forTrip(second)['Waybill Number'], 'AL-40-R'); // not AL-40-R-R
+});
+
+// A brand-new Regular waybill must still mint and reserve normally — the
+// carry-over path is the only one that reuses a number.
+test('a Regular waybill still mints the next number and reserves it', () => {
+  const sheets = buildSheets();
+  const { api, ss } = makeEnv({ sheets, userEmail: 'dispatch@angeloyal.com' });
+
+  const made = api._createSuggestedWaybill(99, 1, 'FO-888', 'Regular', null);
+  assert.equal(made.waybillNumber, 'AL-41');
+
+  const { headers, rows } = dump(ss, 'Waybill Prefixes');
+  assert.equal(Number(rowObject(headers, rows[0])['Last Sequence Number']), 41);
 });
 
 test('Foul Trip spawns a -FT suggested waybill', () => {
@@ -130,7 +180,7 @@ test('Foul Trip spawns a -FT suggested waybill', () => {
   const wb = rows
     .map((r) => rowObject(headers, r))
     .find((w) => Number(w['Trip ID']) === Number(newId));
-  assert.equal(wb['Waybill Number'], 'AL-41-FT');
+  assert.equal(wb['Waybill Number'], 'AL-40-FT'); // the original number + -FT
   assert.equal(wb['Waybill Type'], 'Foul Trip');
 });
 
