@@ -41,6 +41,10 @@
             let routeTypeMap = [];
             let customerGroupColors = [];
 
+            // Billing state
+            let billingChargeTypes = [];
+            let origins = []; // warehouse names the rate matrix carries
+
             // Dispatch state
             let dispatchData = null; // { trips, date }
             let statusFilter = "all";
@@ -320,6 +324,8 @@
                 billingCategories = boot.billingCategories || [];
                 routeTypeMap = boot.routeTypeMap || [];
                 customerGroupColors = boot.customerGroupColors || [];
+                billingChargeTypes = boot.billingChargeTypes || [];
+                origins = boot.origins || [];
                 applyCustomerGroupColors();
 
                 applyRoleToUI(currentUser.role);
@@ -329,6 +335,7 @@
                 if (!currentUser.role) return;
 
                 populatePrefixSelects();
+                populateOriginOptions();
                 onMasterDataReady();
             }
 
@@ -365,6 +372,12 @@
                     document
                         .querySelectorAll(".admin-only")
                         .forEach((el) => el.classList.remove("admin-only"));
+                }
+                // Billing and the rate matrix are Admin and Payroll work.
+                if (role === "Admin" || role === "Payroll") {
+                    document
+                        .querySelectorAll(".payroll-only")
+                        .forEach((el) => el.classList.remove("payroll-only"));
                 }
                 // Nav items open to both Admin and Dispatcher.
                 if (role === "Admin" || role === "Dispatcher") {
@@ -500,6 +513,8 @@
                     renderWaybillPrefixesAdmin();
                     refreshWaybillPrefixes();
                 }
+                if (name === "billing") openBilling();
+                if (name === "billing-matrix") openBillingMatrix();
                 if (name === "settings") {
                     refreshUsers();
                     renderBillingCategoriesAdmin();

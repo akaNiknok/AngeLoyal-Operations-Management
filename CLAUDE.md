@@ -18,7 +18,7 @@ It is a **Google Apps Script web app**: the `.gs` backend runs on Apps Script, t
 ## Phases
 
 1. **Records, Dispatch, Waybills** — largely BUILT. Employee/truck/outlet records, dispatch board, Rebisco route-file import, waybills, truck roster, RBAC, admin panels.
-2. **Billing & Payroll** — NOT STARTED. DOE freight-rate matrix with date-locked rates, Mano fee, split-load farthest-area rule, Rebisco-format batch export, trips/night differential/absences, SSS/PhilHealth/Pag-IBIG, 13th month, payslips.
+2. **Billing & Payroll** — BILLING BUILT, PAYROLL NOT STARTED. Built: origin warehouse on import, the DOE freight-rate matrix with date-locked rates and effective-dated blocks, the weekly diesel price history, the Mano fee, the flat 3-drop fee, the split-load highest-rate rule, the Billing panel with overrides and deferrals, and print/PDF in the Rebisco format. Not built: the `RTVS BILLING` second tab for bad-order returns. Payroll is untouched — trips/night differential/absences, SSS/PhilHealth/Pag-IBIG, 13th month, payslips.
 3. **Visibility & Alerts** — NOT STARTED. POD status logging with business-day aging, management dashboard, billing/payroll report exports, driver route history.
 
 The GitHub Project board is the backlog source of truth: `gh issue list --json number,title,state,labels`, `gh issue view <n>`. `BACKLOG.md` is a gitignored snapshot — regenerate with `npm run backlog:sync -- --apply --project 2 --owner akaNiknok`. Update this section when a phase moves.
@@ -53,6 +53,8 @@ Apps Script does not serve the frontend. `web/index.html` loads the scripts in d
 | `import.js` | Rebisco `.xlsx` route-file parsing and import. |
 | `roster.js` | Truck roster (driver/helper ↔ truck, edits Default Assignments) and the Outlets admin. |
 | `masters.js` | Admin master-detail panels, the Waybill Prefixes panel (Admin **and** Dispatcher, gated by `EDIT_WAYBILL_PREFIXES`), and the Settings danger zone — an Admin-only `clearAllData()` behind a typed confirmation phrase, scoped to the current environment. |
+| `billing.js` | The Billing panel: one row per billable waybill over a date range, filtered by status, origin and subcon (the waybill prefix). Mano, the drop fee and the hauling rate compute but can be typed over; totals never can. Prints the Rebisco billing format through `export.js`'s `printHtmlDocument`. |
+| `billing-matrix.js` | The Billing Matrix panel: the rate grid for one origin across the 25 diesel bands, the weekly diesel price entry, and the `.xlsx` seed that loads a rates workbook one sheet per origin. `FUEL_BANDS` here must name the bands exactly as `_fuelBandLabel()` does in `Internals.gs`. |
 | `whatsnew.js` + `changelog.json` | The "What's new?" dialog. `npm run changelog:sync -- --apply` generates the JSON from GitHub Releases, because the repo is private. |
 | `vendor/` | ExcelJS and html2canvas, pinned and self-hosted so the CSP can refuse every third-party script. ExcelJS is the only spreadsheet library. |
 | `_headers` | Cloudflare Pages response headers: CSP, `X-Frame-Options: DENY`, nosniff. |

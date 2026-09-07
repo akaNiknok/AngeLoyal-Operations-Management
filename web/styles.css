@@ -134,7 +134,8 @@
                 color: var(--text);
             }
             .nav-btn.admin-only,
-            .nav-btn.dispatcher-only {
+            .nav-btn.dispatcher-only,
+            .nav-btn.payroll-only {
                 display: none;
             }
 
@@ -2115,6 +2116,26 @@
             .form-row textarea {
                 width: 100%;
             }
+            /* A checkbox must not stretch to the row width — that pushed the
+               label text of every checkbox list out to the right edge. */
+            .form-row input[type="checkbox"],
+            .form-row input[type="radio"] {
+                width: auto;
+            }
+            .form-check-list {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .form-check-list label {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                cursor: pointer;
+            }
+            .form-check-list .tb-label {
+                margin-left: auto;
+            }
             .form-row textarea {
                 height: 70px;
                 resize: none;
@@ -2122,6 +2143,49 @@
             .form-hint {
                 font-size: 10px;
                 color: var(--hint);
+            }
+
+            /* ── FREIGHT RATE MATRIX ──
+               25 band columns scroll sideways, so the header row and the two
+               identity columns pin in place. Without them you lose track of
+               which area a rate belongs to two screens to the right. */
+            #rate-matrix-table thead th {
+                position: sticky;
+                top: 0;
+                z-index: 2;
+                background: var(--bg);
+            }
+            #rate-matrix-table th.rm-pin,
+            #rate-matrix-table td.rm-pin {
+                position: sticky;
+                left: 0;
+                background: var(--surface);
+                z-index: 1;
+            }
+            #rate-matrix-table th.rm-pin-2,
+            #rate-matrix-table td.rm-pin-2 {
+                /* Set from the rendered width of the Area column — a guessed
+                   offset leaves a band column showing through the seam. */
+                left: var(--rm-pin-2-left, 150px);
+            }
+            #rate-matrix-table thead th.rm-pin {
+                z-index: 3;
+            }
+            /* Alternate shading per area, so the truck types of one area read
+               as one block instead of a wall of rows. */
+            #rate-matrix-table tr.rm-alt td {
+                background: var(--bg);
+            }
+            #rate-matrix-table tr.rm-origin-head td {
+                background: var(--border);
+                font-weight: 600;
+            }
+            /* The heading cell spans the whole table, so pinning the cell does
+               nothing — pin the label inside it instead. */
+            #rate-matrix-table tr.rm-origin-head span {
+                position: sticky;
+                left: 4px;
+                display: inline-block;
             }
 
             /* ── SCROLLBARS ── */

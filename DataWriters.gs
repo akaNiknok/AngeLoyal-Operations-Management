@@ -34,6 +34,7 @@ function createTrip(tripData) {
 
     // 3. Write trip row
     const sheet   = _getSheet(SHEET_TRIPS);
+    _ensureTripColumns(sheet);
     const nextId  = _nextRowId(sheet);
     const now     = new Date();
     const email   = _getCurrentUserEmail();
@@ -68,6 +69,8 @@ function createTrip(tripData) {
       email,
       Utilities.formatDate(now, tz, 'M/d/yyyy HH:mm:ss'),
       tripData.convoyGroup     || '',
+      '',                          // Sort Order — set by dragging the board
+      tripData.origin          || '',
     ]);
 
     // 4. Write suggested waybill if a prefix is provided
@@ -511,14 +514,20 @@ function updateSuggestedWaybill(waybillId, newNumber) {
  * the response can be lost after the write lands, and the retry used to append
  * the file a second and third time.
  *
+ * One route file covers one Rebisco warehouse, so the origin is chosen once in
+ * the Import panel and stamped on every trip the file creates. Billing reads it
+ * back to pick the right sheet of the Freight Rates matrix.
+ *
  * @param {string}   tripDate   'M/d/yyyy' — the date these trips are for
  * @param {Object[]} rowData    Array of parsed route rows
+ * @param {string}   [origin]   Warehouse the file departs from (e.g. 'TANZA')
  * @returns {{ success: boolean, imported: number, skipped: number, duplicates: number, errors: string[],
  *             newOutlets: { id: number, outletName: string, area: string, address: string,
  *                           customerGroup: string, notes: string }[] }}
  */
-function importRouteFile(tripDate, rowData) {
+function importRouteFile(tripDate, rowData, origin) {
   _requirePermission('ADD_MANUAL_TRIP');
+  origin = String(origin || '').trim();
   try {
     const defaults       = getDefaultAssignments();
     const trucks         = getTrucks();
@@ -603,6 +612,7 @@ function importRouteFile(tripDate, rowData) {
 
     // --- Next IDs for the sheets we'll append to ---
     const tripsSheet = _getSheet(SHEET_TRIPS);
+    _ensureTripColumns(tripsSheet);
     const auditSheet = _getSheet(SHEET_AUDIT);
     let nextTripId  = _nextRowId(tripsSheet);
     let nextAuditId = _nextRowId(auditSheet);
@@ -650,6 +660,8 @@ function importRouteFile(tripDate, rowData) {
         email,
         nowStr,
         rd.convoyGroup ? String(convoyTokenBase + Number(rd.convoyGroup)) : '',
+        '',                      // Sort Order — set later by dragging the board
+        origin,                  // selects the Freight Rates sheet at billing time
       ]);
 
       newAuditRows.push([
@@ -1850,4 +1862,706 @@ function clearAllData(confirmPhrase) {
   } catch (e) {
     return { success: false, error: e.message };
   }
+}
+
+
+// ============================================================
+//  BILLING — Freight Rates, Fuel Prices, Charge Types
+// ============================================================
+
+/**
+ * Seeds or replaces one origin's rate block.
+ *
+ * A rates workbook holds one sheet per warehouse, so the Billing Matrix panel
+ * parses a sheet and posts it here as flat rows. Re-posting the same origin and
+ * effective date replaces that block rather than stacking a second copy — a
+ * partial paste is the normal way this goes wrong, and two blocks with the same
+ * date would make the lookup arbitrary.
+ *
+ * @param {string} origin         Warehouse name, e.g. 'TANZA'.
+ * @param {string} effectiveDate  'M/d/yyyy' — first date the block applies.
+ * @param {Object[]} rows         [{ area, truckType, bands: { '65.01-70': 15300, ... } }]
+ * @returns {{ success: boolean, imported: number, replaced: number } | { success: false, error: string }}
+ */
+function importFreightRates(origin, effectiveDate, rows) {
+  _requirePermission('EDIT_FREIGHT_RATES');
+  return _writerResult(() => {
+    const originName = String(origin || '').trim();
+    if (!originName) throw new Error('Origin warehouse is required.');
+
+    const effDate = String(effectiveDate || '').trim();
+    if (!_parseDateStrict(effDate)) {
+      throw new Error('Effective date is required, in M/d/yyyy format.');
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new Error('No rate rows to import.');
+    }
+
+    const headers = _freightRateHeaders();
+    const sheet   = _getOrCreateSheet(SHEET_FREIGHT_RATES, headers);
+    const sheetRows = sheet.getDataRange().getValues();
+    const sheetHeaders = sheetRows[0].map(h => h.toString().trim());
+
+    // Drop any earlier block for the same origin and date. Deleting bottom-up
+    // keeps the remaining row indexes valid.
+    const wantOrigin = _normArea(originName);
+    const doomed = [];
+    for (let i = 1; i < sheetRows.length; i++) {
+      if (_normArea(_val(sheetRows[i], sheetHeaders, 'Origin')) !== wantOrigin) continue;
+      const eff = _readDateCell(_val(sheetRows[i], sheetHeaders, 'Effective Date'));
+      if (_formatDate(eff) === effDate) doomed.push(i + 1);
+    }
+    for (let i = doomed.length - 1; i >= 0; i--) sheet.deleteRow(doomed[i]);
+
+    let nextId = _nextRowId(sheet);
+    const newRows = rows.map(r => {
+      const area = String(r.area || '').trim();
+      const type = String(r.truckType || '').trim();
+      if (!area || !type) throw new Error('Every rate row needs an area and a truck type.');
+      const bands = r.bands || {};
+      const values = [nextId++, originName, area, type, effDate];
+      for (let i = 1; i <= FUEL_BAND_COUNT; i++) {
+        const v = bands[_fuelBandLabel(i)];
+        values.push((v === null || v === undefined || v === '') ? '' : Number(v));
+      }
+      return values;
+    });
+
+    _appendRows(sheet, newRows);
+
+    _auditLog('FREIGHT_RATE_IMPORT', SHEET_FREIGHT_RATES, '', '',
+      `${originName} → ${newRows.length} rows effective ${effDate}`);
+
+    return { imported: newRows.length, replaced: doomed.length };
+  });
+}
+
+/**
+ * Edits one rate cell from the Billing Matrix panel.
+ *
+ * @param {number} rateId
+ * @param {string} bandLabel  Band column, e.g. '65.01-70'.
+ * @param {number|string} value  Blank clears the cell.
+ * @returns {{ success: boolean, rate: Object } | { success: false, error: string }}
+ */
+function updateFreightRate(rateId, bandLabel, value) {
+  _requirePermission('EDIT_FREIGHT_RATES');
+  return _writerResult(() => {
+    const label = String(bandLabel || '').trim();
+    let known = false;
+    for (let i = 1; i <= FUEL_BAND_COUNT; i++) if (_fuelBandLabel(i) === label) known = true;
+    if (!known) throw new Error(`"${label}" is not a price band on the matrix.`);
+
+    const raw = String(value === null || value === undefined ? '' : value).trim();
+    if (raw !== '' && !(isFinite(Number(raw)) && Number(raw) >= 0)) {
+      throw new Error('A rate must be a number that is zero or more.');
+    }
+    const newVal = raw === '' ? '' : Number(raw);
+
+    const ctx = _openRow(SHEET_FREIGHT_RATES, rateId, 'Freight rate');
+    const old = _val(ctx.row, ctx.headers, label);
+    _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, { [label]: newVal });
+
+    _auditLog('FREIGHT_RATE_EDIT', SHEET_FREIGHT_RATES, rateId,
+      JSON.stringify({ band: label, value: old }),
+      JSON.stringify({ band: label, value: newVal }));
+
+    return {
+      rate: {
+        id:        rateId,
+        origin:    String(_val(ctx.row, ctx.headers, 'Origin')).trim(),
+        area:      String(_val(ctx.row, ctx.headers, 'Area')).trim(),
+        truckType: String(_val(ctx.row, ctx.headers, 'Truck Type')).trim(),
+        band:      label,
+        value:     newVal,
+      },
+    };
+  });
+}
+
+/**
+ * Records the weekly DOE diesel price for NCR (the Quezon City "Common Price").
+ * The DOE publishes a PDF only, so this is typed in by hand.
+ *
+ * The DOE posts on a Monday and the price runs Tuesday to the following
+ * Monday, so an effective date is always a Tuesday. A non-Tuesday date is
+ * accepted — a mid-week special adjustment happens — but the panel warns.
+ *
+ * A row can be corrected with updateFuelPrice or dropped with deleteFuelPrice.
+ * The Audit Log carries the trail of what changed; the sheet carries only the
+ * current truth, so an operator can fix a typo without leaving a wrong price
+ * behind that a later billing might index on.
+ *
+ * @param {{ effectiveDate: string, dieselPrice: number }} data
+ * @returns {{ success: boolean, fuelPrice: Object } | { success: false, error: string }}
+ */
+function addFuelPrice(data) {
+  _requirePermission('EDIT_FREIGHT_RATES');
+  return _writerResult(() => {
+    const effDate = String((data && data.effectiveDate) || '').trim();
+    if (!_parseDateStrict(effDate)) {
+      throw new Error('Effective date is required, in M/d/yyyy format.');
+    }
+
+    const price = Number(data && data.dieselPrice);
+    if (!isFinite(price) || price <= 0) {
+      throw new Error('Enter the diesel price as a number greater than zero.');
+    }
+
+    const headers = ['ID', 'Effective Date', 'Diesel Price', 'Added By', 'Added At'];
+    const sheet   = _getOrCreateSheet(SHEET_FUEL_PRICES, headers);
+    const nextId  = _nextRowId(sheet);
+    const email   = _getCurrentUserEmail();
+    const now     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+
+    sheet.appendRow([nextId, effDate, price, email, now]);
+
+    _auditLog('FUEL_PRICE_ADD', SHEET_FUEL_PRICES, nextId, '',
+      `${price} effective ${effDate}`);
+
+    return {
+      fuelPrice: {
+        id: nextId, effectiveDate: effDate, dieselPrice: price,
+        addedBy: email, addedAt: now,
+        band: _fuelBandLabel(_fuelBandIndex(price)),
+      },
+    };
+  });
+}
+
+/**
+ * Corrects one recorded diesel price. Only the effective date and the price
+ * itself are editable — everything else on the row is provenance.
+ *
+ * @param {number} priceId
+ * @param {{ effectiveDate: string, dieselPrice: number }} changes
+ * @returns {{ success: boolean, fuelPrice: Object } | { success: false, error: string }}
+ */
+function updateFuelPrice(priceId, changes) {
+  _requirePermission('EDIT_FREIGHT_RATES');
+  return _writerResult(() => {
+    const ctx  = _openRow(SHEET_FUEL_PRICES, priceId, 'Fuel price');
+    const next = {};
+
+    if (changes && changes.effectiveDate !== undefined) {
+      const effDate = String(changes.effectiveDate || '').trim();
+      if (!_parseDateStrict(effDate)) {
+        throw new Error('Effective date is required, in M/d/yyyy format.');
+      }
+      next['Effective Date'] = effDate;
+    }
+    if (changes && changes.dieselPrice !== undefined) {
+      const price = Number(changes.dieselPrice);
+      if (!isFinite(price) || price <= 0) {
+        throw new Error('Enter the diesel price as a number greater than zero.');
+      }
+      next['Diesel Price'] = price;
+    }
+    if (Object.keys(next).length === 0) throw new Error('Nothing to change.');
+
+    const oldDate  = _formatDate(_readDateCell(_val(ctx.row, ctx.headers, 'Effective Date')));
+    const oldPrice = _numOrNull(_val(ctx.row, ctx.headers, 'Diesel Price'));
+    _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, next);
+
+    const effDate = next['Effective Date'] !== undefined ? next['Effective Date'] : oldDate;
+    const price   = next['Diesel Price']   !== undefined ? next['Diesel Price']   : oldPrice;
+
+    _auditLog('FUEL_PRICE_EDIT', SHEET_FUEL_PRICES, priceId,
+      `${oldPrice} effective ${oldDate}`, `${price} effective ${effDate}`);
+
+    return {
+      fuelPrice: {
+        id:            priceId,
+        effectiveDate: effDate,
+        dieselPrice:   price,
+        addedBy:       String(_val(ctx.row, ctx.headers, 'Added By') || ''),
+        band:          _fuelBandLabel(_fuelBandIndex(price)),
+      },
+    };
+  });
+}
+
+/**
+ * Removes one recorded diesel price — a duplicate, or a week entered twice.
+ * A billing already stamped with a billing number keeps the rate it was priced
+ * at, so this cannot re-price closed history.
+ *
+ * @param {number} priceId
+ * @returns {{ success: boolean, deleted: number } | { success: false, error: string }}
+ */
+function deleteFuelPrice(priceId) {
+  _requirePermission('EDIT_FREIGHT_RATES');
+  return _writerResult(() => {
+    const ctx   = _openRow(SHEET_FUEL_PRICES, priceId, 'Fuel price');
+    const date  = _formatDate(_readDateCell(_val(ctx.row, ctx.headers, 'Effective Date')));
+    const price = _numOrNull(_val(ctx.row, ctx.headers, 'Diesel Price'));
+
+    ctx.sheet.deleteRow(ctx.rowIdx + 1);
+
+    _auditLog('FUEL_PRICE_DELETE', SHEET_FUEL_PRICES, priceId,
+      `${price} effective ${date}`, '');
+
+    return { deleted: priceId };
+  });
+}
+
+const BILLING_CHARGE_TYPE_FIELDS = { label: 'Label', sortOrder: 'Sort Order', active: 'Active' };
+
+/**
+ * Adds a manual money column to the billing output.
+ * @param {{ label: string, sortOrder: number }} data
+ * @returns {{ success: boolean, billingChargeType: Object } | { success: false, error: string }}
+ */
+function createBillingChargeType(data) {
+  _requirePermission('EDIT_BILLING');
+  return _writerResult(() => {
+    const label = String((data && data.label) || '').trim();
+    if (!label) throw new Error('Label is required.');
+
+    getBillingChargeTypes();   // self-seeds the sheet on a Sheet that predates billing
+    const ctx = _openSheet(SHEET_BILLING_CHARGE_TYPES);
+    _requireUnique(ctx.rows, ctx.headers, 'Label', label,
+      `A billing column named "${label}" already exists.`);
+
+    const nextId    = _nextRowId(ctx.sheet);
+    const sortOrder = _numOrNull(data && data.sortOrder);
+    ctx.sheet.appendRow([nextId, label, sortOrder === null ? nextId * 10 : sortOrder, true]);
+
+    _auditLog('BILLING_CHARGE_TYPE_CREATE', SHEET_BILLING_CHARGE_TYPES, nextId, '', label);
+
+    return {
+      billingChargeType: {
+        id: nextId, label: label,
+        sortOrder: sortOrder === null ? nextId * 10 : sortOrder, active: true,
+      },
+    };
+  });
+}
+
+/**
+ * Renames, reorders or deactivates a manual money column.
+ *
+ * Deactivating keeps the column off new billings but never touches the amounts
+ * already recorded against it — a past billing must still print what it billed.
+ *
+ * @param {number} chargeTypeId
+ * @param {{ label?: string, sortOrder?: number, active?: boolean }} changes
+ * @returns {{ success: boolean, billingChargeType: Object } | { success: false, error: string }}
+ */
+function updateBillingChargeType(chargeTypeId, changes) {
+  _requirePermission('EDIT_BILLING');
+  return _writerResult(() => {
+    getBillingChargeTypes();   // self-seeds the sheet on a Sheet that predates billing
+    const ctx    = _openRow(SHEET_BILLING_CHARGE_TYPES, chargeTypeId, 'Billing column');
+    const oldVal = _readFields(ctx.row, ctx.headers, BILLING_CHARGE_TYPE_FIELDS);
+    const updates = {};
+
+    if (changes && changes.label !== undefined) {
+      const label = String(changes.label).trim();
+      if (!label) throw new Error('Label is required.');
+      _requireUnique(ctx.rows, ctx.headers, 'Label', label,
+        `A billing column named "${label}" already exists.`, ctx.rowIdx);
+      updates['Label'] = label;
+    }
+    if (changes && changes.sortOrder !== undefined) {
+      updates['Sort Order'] = _numOrNull(changes.sortOrder);
+    }
+    if (changes && changes.active !== undefined) {
+      updates['Active'] = changes.active === true;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
+    }
+
+    _auditLog('BILLING_CHARGE_TYPE_EDIT', SHEET_BILLING_CHARGE_TYPES, chargeTypeId,
+      JSON.stringify(oldVal), JSON.stringify(changes));
+
+    const rec = Object.assign({ id: chargeTypeId },
+      _readFields(ctx.row, ctx.headers, BILLING_CHARGE_TYPE_FIELDS));
+    rec.active    = rec.active !== false;
+    rec.sortOrder = _numOrNull(rec.sortOrder);
+    return { billingChargeType: rec };
+  });
+}
+
+
+// ============================================================
+//  BILLING — the billing ledger
+// ============================================================
+
+/** Trip statuses whose waybill is finished work and can be billed. */
+const BILLABLE_TRIP_STATUSES = ['Delivered', 'Two-Day Trip'];
+
+/**
+ * Groups the billable trips of a date range by waybill number.
+ *
+ * The billable unit is a waybill, and a waybill covers every stop one truck
+ * makes on one freight order. The stops are what carry the cartons and the
+ * areas, so the group — not any single trip row — is what a billing line is
+ * computed from.
+ *
+ * A load only counts once every one of its stops is delivered: a half-delivered
+ * load is still in progress, and billing it would price the drops it has, not
+ * the drops it will end up making.
+ *
+ * @param {string} from  'M/d/yyyy'
+ * @param {string} to    'M/d/yyyy'
+ * @returns {Object[]} [{ waybillNumber, waybillId, trips: [...] }]
+ */
+function _billableWaybillGroups(from, to) {
+  const trips = getTrips(from, to);
+  if (trips.length === 0) return [];
+
+  const wbSheet   = _getSheet(SHEET_WAYBILLS);
+  const wbRows    = wbSheet.getDataRange().getValues();
+  const wbHeaders = wbRows[0].map(h => h.toString().trim());
+
+  // Trip ID -> the confirmed waybill covering it.
+  const wbByTrip = {};
+  for (let i = 1; i < wbRows.length; i++) {
+    if (_val(wbRows[i], wbHeaders, 'Locked') !== true) continue;
+    const tripId = _numOrNull(_val(wbRows[i], wbHeaders, 'Trip ID'));
+    if (tripId === null) continue;
+    wbByTrip[tripId] = {
+      id:     _numOrNull(_val(wbRows[i], wbHeaders, 'ID')),
+      number: String(_val(wbRows[i], wbHeaders, 'Waybill Number') || ''),
+    };
+  }
+
+  const groups   = {};
+  const rejected = {};
+  trips.forEach(t => {
+    const wb = wbByTrip[t.id];
+    if (!wb || !wb.number) return;
+    if (BILLABLE_TRIP_STATUSES.indexOf(t.tripStatus) === -1) {
+      rejected[wb.number] = true;   // one unfinished stop holds the whole load
+      return;
+    }
+    const g = groups[wb.number] || (groups[wb.number] = {
+      waybillNumber: wb.number, waybillId: wb.id, trips: [],
+    });
+    g.trips.push(t);
+    if (wb.id < g.waybillId) g.waybillId = wb.id;
+  });
+
+  return Object.keys(groups)
+    .filter(n => !rejected[n])
+    .map(n => groups[n]);
+}
+
+/**
+ * Builds the values a billing line holds for a waybill group, from the rate
+ * matrix and the diesel price in force on the load's Billing Date.
+ *
+ * @param {Object} group      From _billableWaybillGroups().
+ * @param {Object[]} rates    From getFreightRates().
+ * @param {Object[]} prices   From getFuelPrices().
+ * @param {Object} trucksById
+ * @returns {Object} the computed fields, plus `warning`
+ */
+function _priceWaybillGroup(group, rates, prices, trucksById) {
+  // Trip Date is the day the load was delivered and is what the billing
+  // prints. Billing Date is the original operational day and is what selects
+  // the price — a carry-over keeps the fuel band of the day it was ordered.
+  const first       = group.trips[0];
+  const billingDate = _parseDate(first.billingDate || first.tripDate);
+
+  const fuel  = _fuelPriceOn(prices, billingDate);
+  const band  = fuel ? _fuelBandIndex(fuel.price) : null;
+  const truck = trucksById[first.truckId];
+
+  const computed = band === null
+    ? {
+        area: first.area || '', drops: group.trips.length,
+        cartons: group.trips.reduce((s, t) => s + (Number(t.quantity) || 0), 0),
+        haulingRate: 0, mano: 0, dropFee: 0,
+        warning: `No diesel price recorded on or before ${first.billingDate || first.tripDate}.`,
+      }
+    : _computeBillingLine(group.trips, _indexRates(rates, billingDate), band);
+
+  return Object.assign(computed, {
+    waybillNumber: group.waybillNumber,
+    waybillId:     group.waybillId,
+    tripDate:      first.tripDate,
+    billingDate:   first.billingDate || first.tripDate,
+    origin:        first.origin || '',
+    plateNumber:   truck ? truck.plate : '',
+    foNumber:      first.foNumber || '',
+    truckType:     first.truckBillingCategory || '',
+    dieselPrice:   fuel ? fuel.price : '',
+    rateBand:      band === null ? '' : _fuelBandLabel(band),
+  });
+}
+
+/**
+ * Returns the billing lines for a date range, creating the ones that do not
+ * exist yet and refreshing the computed fields on the ones that do.
+ *
+ * This reads *and* writes, so it is marked 'w' in RPC_ALLOWED and runs under
+ * the script lock: opening the same range in two tabs would otherwise mint two
+ * lines for one waybill.
+ *
+ * A line is left alone once it carries a Billing Number — a submitted billing
+ * is history and must keep the numbers it was submitted with. On an unbilled
+ * line, only the fields the user has not overridden are recomputed.
+ *
+ * @param {string} from  'M/d/yyyy' — matched against Trip Date
+ * @param {string} to    'M/d/yyyy'
+ * @returns {{ success: boolean, lines: Object[], chargeTypes: Object[], totals: Object }
+ *           | { success: false, error: string }}
+ */
+function getBillingLines(from, to) {
+  _requirePermission('VIEW_BILLING');
+  return _writerResult(() => {
+    const sheet     = _getOrCreateSheet(SHEET_BILLING_LINES, BILLING_LINE_HEADERS);
+    const rows      = sheet.getDataRange().getValues();
+    const headers   = rows[0].map(h => h.toString().trim());
+
+    const groups     = _billableWaybillGroups(from, to);
+    const rates      = getFreightRates();
+    const prices     = getFuelPrices();
+    const trucksById = _indexById(getTrucks());
+
+    const email = _getCurrentUserEmail();
+    const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+
+    // Existing lines by waybill number, so a re-open updates instead of appending.
+    const byNumber = {};
+    for (let i = 1; i < rows.length; i++) {
+      const num = String(_val(rows[i], headers, 'Waybill Number') || '');
+      if (num) byNumber[num] = i;
+    }
+
+    const newRows  = [];
+    const newAudit = [];
+    let nextId     = _nextRowId(sheet);
+
+    groups.forEach(g => {
+      const priced   = _priceWaybillGroup(g, rates, prices, trucksById);
+      const existing = byNumber[g.waybillNumber];
+
+      if (existing === undefined) {
+        const total = priced.haulingRate + priced.mano + priced.dropFee;
+        const id = nextId++;
+        newRows.push([
+          id, priced.waybillNumber, priced.waybillId, priced.tripDate,
+          priced.billingDate, priced.origin, priced.plateNumber, priced.foNumber,
+          priced.truckType, priced.area, priced.drops, priced.cartons,
+          priced.dieselPrice, priced.rateBand, priced.haulingRate, priced.mano,
+          priced.dropFee, '', total, '', 'Not Billed', '', '', email, now, '', '',
+        ]);
+        newAudit.push(['BILLING_LINE_CREATE', id, '', priced.waybillNumber]);
+        return;
+      }
+
+      // A billed line is frozen. So is any field the user typed over.
+      const row = rows[existing];
+      if (String(_val(row, headers, 'Billing Number') || '').trim()) return;
+
+      const overrides = _parseJsonCell(_val(row, headers, 'Overrides'), []);
+      const updates   = {
+        'Trip Date': priced.tripDate, 'Billing Date': priced.billingDate,
+        'Origin': priced.origin, 'Plate Number': priced.plateNumber,
+        'FO Number': priced.foNumber, 'Truck Type': priced.truckType,
+        'Drops': priced.drops, 'Cartons': priced.cartons,
+        'Diesel Price': priced.dieselPrice, 'Rate Band': priced.rateBand,
+      };
+      if (overrides.indexOf('haulingRate') === -1) {
+        updates['Hauling Rate'] = priced.haulingRate;
+        updates['Area']         = priced.area;
+      }
+      if (overrides.indexOf('mano') === -1)    updates['Mano']     = priced.mano;
+      if (overrides.indexOf('dropFee') === -1) updates['Drop Fee'] = priced.dropFee;
+
+      const manual = _parseJsonCell(_val(row, headers, 'Manual Charges'), {});
+      updates['Total'] =
+        (updates['Hauling Rate'] !== undefined ? updates['Hauling Rate'] : (_numOrNull(_val(row, headers, 'Hauling Rate')) || 0)) +
+        (updates['Mano']         !== undefined ? updates['Mano']         : (_numOrNull(_val(row, headers, 'Mano')) || 0)) +
+        (updates['Drop Fee']     !== undefined ? updates['Drop Fee']     : (_numOrNull(_val(row, headers, 'Drop Fee')) || 0)) +
+        _sumManualCharges(manual);
+
+      _writeRowFields(sheet, row, existing, headers, updates);
+    });
+
+    if (newRows.length) {
+      _appendRows(sheet, newRows);
+      newAudit.forEach(a => _auditLog(a[0], SHEET_BILLING_LINES, a[1], a[2], a[3]));
+    }
+
+    // Re-read so the appends and the field writes both land in the answer.
+    const finalRows    = sheet.getDataRange().getValues();
+    const finalHeaders = finalRows[0].map(h => h.toString().trim());
+    const wanted       = {};
+    groups.forEach(g => { wanted[g.waybillNumber] = true; });
+
+    const lines = finalRows.slice(1)
+      .map(r => _billingLineFromRow(r, finalHeaders))
+      .filter(l => l !== null && wanted[l.waybillNumber])
+      .sort((a, b) => a.waybillNumber < b.waybillNumber ? -1 : (a.waybillNumber > b.waybillNumber ? 1 : 0));
+
+    // The warnings are recomputed rather than stored: they describe the rate
+    // matrix as it stands now, which is what the user can act on.
+    const warnByNumber = {};
+    groups.forEach(g => {
+      const w = _priceWaybillGroup(g, rates, prices, trucksById).warning;
+      if (w) warnByNumber[g.waybillNumber] = w;
+    });
+    lines.forEach(l => { l.warning = warnByNumber[l.waybillNumber] || ''; });
+
+    return {
+      lines:       lines,
+      chargeTypes: getBillingChargeTypes(),
+      totals:      _billingTotals(lines),
+    };
+  });
+}
+
+/**
+ * Edits one billing line: a manual charge, an override of a computed amount,
+ * or the notes. Total is always recomputed here and is never accepted from the
+ * client.
+ *
+ * Passing null for haulingRate, mano or dropFee drops the override and lets the
+ * next refresh recompute that field.
+ *
+ * @param {number} lineId
+ * @param {{ manualCharges?: Object, haulingRate?: number|null, mano?: number|null,
+ *           dropFee?: number|null, notes?: string }} changes
+ * @returns {{ success: boolean, line: Object } | { success: false, error: string }}
+ */
+function saveBillingLine(lineId, changes) {
+  _requirePermission('EDIT_BILLING');
+  return _writerResult(() => {
+    const ctx = _openRow(SHEET_BILLING_LINES, lineId, 'Billing line');
+
+    if (String(_val(ctx.row, ctx.headers, 'Billing Number') || '').trim()) {
+      throw new Error('This line is already on a submitted billing. Clear its billing number first.');
+    }
+
+    const oldVal    = _billingLineFromRow(ctx.row, ctx.headers);
+    const overrides = _parseJsonCell(_val(ctx.row, ctx.headers, 'Overrides'), []);
+    const updates   = {};
+
+    const OVERRIDABLE = { haulingRate: 'Hauling Rate', mano: 'Mano', dropFee: 'Drop Fee' };
+    Object.keys(OVERRIDABLE).forEach(key => {
+      if (!changes || changes[key] === undefined) return;
+      const at = overrides.indexOf(key);
+      if (changes[key] === null) {
+        if (at !== -1) overrides.splice(at, 1);   // back to the computed value
+        return;
+      }
+      const n = Number(changes[key]);
+      if (!isFinite(n) || n < 0) throw new Error(`${OVERRIDABLE[key]} must be a number that is zero or more.`);
+      updates[OVERRIDABLE[key]] = n;
+      if (at === -1) overrides.push(key);
+    });
+
+    let manual = _parseJsonCell(_val(ctx.row, ctx.headers, 'Manual Charges'), {});
+    if (changes && changes.manualCharges !== undefined) {
+      const clean = {};
+      Object.keys(changes.manualCharges || {}).forEach(k => {
+        const n = Number(changes.manualCharges[k]);
+        if (!isFinite(n)) throw new Error('A manual charge must be a number.');
+        if (n !== 0) clean[String(k)] = n;   // a zero is the same as no charge
+      });
+      manual = clean;
+      updates['Manual Charges'] = Object.keys(clean).length ? JSON.stringify(clean) : '';
+    }
+
+    if (changes && changes.notes !== undefined) updates['Notes'] = String(changes.notes);
+
+    updates['Overrides'] = overrides.length ? JSON.stringify(overrides) : '';
+
+    const rate = updates['Hauling Rate'] !== undefined ? updates['Hauling Rate'] : oldVal.haulingRate;
+    const mano = updates['Mano']         !== undefined ? updates['Mano']         : oldVal.mano;
+    const drop = updates['Drop Fee']     !== undefined ? updates['Drop Fee']     : oldVal.dropFee;
+    updates['Total'] = rate + mano + drop + _sumManualCharges(manual);
+
+    updates['Updated By'] = _getCurrentUserEmail();
+    updates['Updated At'] = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+
+    _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, updates);
+    _auditLog('BILLING_LINE_EDIT', SHEET_BILLING_LINES, lineId,
+      JSON.stringify({ haulingRate: oldVal.haulingRate, mano: oldVal.mano,
+                       dropFee: oldVal.dropFee, manualCharges: oldVal.manualCharges }),
+      JSON.stringify(changes));
+
+    return { line: _billingLineFromRow(ctx.row, ctx.headers) };
+  });
+}
+
+/**
+ * Defers a line to a later billing, or brings a deferred line back.
+ *
+ * @param {number[]} lineIds
+ * @param {string}   status  'Not Billed' or 'Deferred'
+ * @returns {{ success: boolean, updated: number } | { success: false, error: string }}
+ */
+function setBillingLineStatus(lineIds, status) {
+  _requirePermission('EDIT_BILLING');
+  return _writerResult(() => {
+    const next = String(status || '').trim();
+    if (['Not Billed', 'Deferred'].indexOf(next) === -1) {
+      throw new Error('A line can only be set to Not Billed or Deferred.');
+    }
+    const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
+    if (!ids.length) throw new Error('No lines selected.');
+
+    const ctx = _openSheet(SHEET_BILLING_LINES);
+    let updated = 0;
+    ids.forEach(id => {
+      const rowIdx = _findRowById(ctx.rows, ctx.headers, id);
+      if (rowIdx === -1) return;
+      const row = ctx.rows[rowIdx];
+      if (String(_val(row, ctx.headers, 'Billing Number') || '').trim()) {
+        throw new Error('A line already on a submitted billing cannot be deferred.');
+      }
+      const old = String(_val(row, ctx.headers, 'Status') || '');
+      if (old === next) return;
+      _writeRowFields(ctx.sheet, row, rowIdx, ctx.headers, { 'Status': next });
+      _auditLog('BILLING_LINE_STATUS_CHANGE', SHEET_BILLING_LINES, id, old, next);
+      updated++;
+    });
+
+    return { updated: updated };
+  });
+}
+
+/**
+ * Stamps a Rebisco billing number on a set of lines and marks them Billed.
+ * Passing a blank number clears the stamp, which is how a billing submitted by
+ * mistake is reopened for editing.
+ *
+ * @param {number[]} lineIds
+ * @param {string}   billingNumber
+ * @returns {{ success: boolean, updated: number, billingNumber: string }
+ *           | { success: false, error: string }}
+ */
+function setBillingNumber(lineIds, billingNumber) {
+  _requirePermission('EDIT_BILLING');
+  return _writerResult(() => {
+    const ids = Array.isArray(lineIds) ? lineIds : [lineIds];
+    if (!ids.length) throw new Error('No lines selected.');
+
+    const num     = String(billingNumber || '').trim();
+    const clearing = num === '';
+
+    const ctx = _openSheet(SHEET_BILLING_LINES);
+    let updated = 0;
+    ids.forEach(id => {
+      const rowIdx = _findRowById(ctx.rows, ctx.headers, id);
+      if (rowIdx === -1) return;
+      _writeRowFields(ctx.sheet, ctx.rows[rowIdx], rowIdx, ctx.headers, {
+        'Billing Number': num,
+        'Status':         clearing ? 'Not Billed' : 'Billed',
+      });
+      updated++;
+    });
+
+    _auditLog('BILLING_NUMBER_SET', SHEET_BILLING_LINES, '', '',
+      `${clearing ? '(cleared)' : num} → ${updated} lines`);
+
+    return { updated: updated, billingNumber: num };
+  });
 }

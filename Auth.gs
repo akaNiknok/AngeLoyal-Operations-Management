@@ -161,6 +161,8 @@ const RPC_ALLOWED = {
   getDispatchBoardData: 'r',
   getWaybillPrefixes: 'r',
   getUsers: 'r',
+  getFreightRates: 'r',
+  getFuelPrices: 'r',
   // session
   logout: 'r',
   // writers
@@ -191,6 +193,17 @@ const RPC_ALLOWED = {
   updateUser: 'w',
   createEmployee: 'w',
   updateEmployee: 'w',
+  createBillingChargeType: 'w',
+  updateBillingChargeType: 'w',
+  getBillingLines: 'w',
+  saveBillingLine: 'w',
+  setBillingLineStatus: 'w',
+  setBillingNumber: 'w',
+  importFreightRates: 'w',
+  updateFreightRate: 'w',
+  addFuelPrice: 'w',
+  updateFuelPrice: 'w',
+  deleteFuelPrice: 'w',
   clearAllData: 'w',
 };
 

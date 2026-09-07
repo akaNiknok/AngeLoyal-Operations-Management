@@ -528,6 +528,35 @@
                 document.getElementById("btn-run-import").disabled = !include;
             }
 
+            // Fills the origin dropdown from the warehouses the rate matrix
+            // already carries. The last option types in a new name, because a
+            // warehouse must be importable before anyone seeds its rates.
+            const IMPORT_ORIGIN_NEW = "__new__";
+
+            function populateOriginOptions(keep) {
+                const sel = document.getElementById("import-origin");
+                if (!sel) return;
+                const want = keep !== undefined ? keep : sel.value;
+                const list = origins || [];
+                sel.innerHTML =
+                    '<option value="">Select warehouse…</option>' +
+                    list.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("") +
+                    (want && !list.includes(want)
+                        ? `<option value="${esc(want)}">${esc(want)}</option>`
+                        : "") +
+                    `<option value="${IMPORT_ORIGIN_NEW}">+ New warehouse…</option>`;
+                sel.value = want || "";
+            }
+
+            function onImportOriginChange() {
+                const sel = document.getElementById("import-origin");
+                if (sel.value !== IMPORT_ORIGIN_NEW) return;
+                const name = (prompt("New origin warehouse name") || "")
+                    .trim()
+                    .toUpperCase();
+                populateOriginOptions(name);
+            }
+
             function runImport() {
                 if (!canEdit()) {
                     showToast("Your role cannot import trips.", "warning");
@@ -547,8 +576,27 @@
                     return;
                 }
 
+                // One route file is one warehouse. Billing reads the origin back
+                // to pick the right sheet of the rate matrix, so a blank one
+                // leaves every trip in the file unpriceable.
+                const originVal = document
+                    .getElementById("import-origin")
+                    .value.trim();
+                if (!originVal || originVal === IMPORT_ORIGIN_NEW) {
+                    showToast(
+                        "Pick the origin warehouse — billing needs it to find the rate.",
+                        "warning",
+                    );
+                    return;
+                }
+
                 setLoading(`Importing ${rowsToImport.length} rows…`);
-                call("importRouteFile", isoToMDY(dateVal), rowsToImport).then(
+                call(
+                    "importRouteFile",
+                    isoToMDY(dateVal),
+                    rowsToImport,
+                    originVal,
+                ).then(
                     (r) => {
                         hideLoading();
                         if (!r.success) {

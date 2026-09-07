@@ -50,8 +50,9 @@ function _auditLog(action, table, rowId, oldValue, newValue) {
 /**
  * Deletes every data row (header row survives) from the transactional sheets.
  * Master data — Employees, Trucks, Users, Billing Categories, Waybill Prefixes
- * and their sequence counters, Default Assignments, Route Type Map — is left
- * alone: this resets operations, it does not re-provision the company.
+ * and their sequence counters, Default Assignments, Route Type Map, Freight
+ * Rates, Fuel Prices, Billing Charge Types — is left alone: this resets
+ * operations, it does not re-provision the company.
  *
  * Shared by the token-gated _devClear endpoint (scripts/clear-sheet-data.js)
  * and the Admin panel's clearAllData() so there is exactly one definition of
@@ -60,7 +61,8 @@ function _auditLog(action, table, rowId, oldValue, newValue) {
  * @returns {string[]} names of the sheets that were cleared (missing ones are skipped)
  */
 function _clearTransactionalSheets() {
-  const sheetNames = [SHEET_TRIPS, SHEET_OUTLETS, SHEET_ROUTE_FREQ, SHEET_WAYBILLS, SHEET_AUDIT];
+  const sheetNames = [SHEET_TRIPS, SHEET_OUTLETS, SHEET_ROUTE_FREQ, SHEET_WAYBILLS,
+                      SHEET_BILLING_LINES, SHEET_AUDIT];
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cleared = [];
   sheetNames.forEach(name => {
@@ -518,6 +520,7 @@ function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason
   const tier           = _val(originalRow, headers, 'Tier');
 
   const sheet   = _getSheet(SHEET_TRIPS);
+  _ensureTripColumns(sheet);
   const nextId  = _nextRowId(sheet);
   const email   = _getCurrentUserEmail();
   const now     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
@@ -547,6 +550,8 @@ function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason
     email,
     now,
     '',              // Convoy Group — a next-day carry-over leaves its convoy
+    '',              // Sort Order — the new day orders its own board
+    _val(originalRow, headers, 'Origin'),  // same load, same warehouse
   ]);
 
   // Suggest waybill with correct suffix. Re-read the Trips sheet so the row
@@ -689,5 +694,223 @@ function _renameTruckBillingCategory(oldName, newName) {
 
   if (changed) {
     sheet.getRange(2, colIdx + 1, colValues.length, 1).setValues(colValues);
+  }
+}
+
+
+/**
+ * Adds any Trips column this build writes but an older Sheet does not have
+ * yet, and returns the header row.
+ *
+ * Every trip writer appends a fixed-width array, so a Sheet that predates a
+ * column would either take the value in the wrong place or reject the range
+ * outright. Same self-migration the Waybill Prefixes sheet does for
+ * Sequence Width — see _reserveWaybillSequence.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @returns {string[]} headers, including any column just added
+ */
+function _ensureTripColumns(sheet) {
+  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .getValues()[0].map(h => h.toString().trim());
+  ['Convoy Group', 'Sort Order', 'Origin'].forEach(col => {
+    headers = _ensureColumn(sheet, headers, col);
+  });
+  return headers;
+}
+
+
+// ============================================================
+//  BILLING — rate lookup and line computation
+// ============================================================
+
+/**
+ * Normalizes an area name for matching. The rate matrix and the route files
+ * disagree on case and punctuation for the same place — "Las PiNas" vs
+ * "LAS PINAS", "Sta. Rosa" vs "STA ROSA" — so both sides compare on this key.
+ *
+ * @param {string} s
+ * @returns {string} Uppercase, letters and digits only.
+ */
+function _normArea(s) {
+  return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Returns the 1-based diesel price band for a price, clamped to the matrix.
+ * Band 1 is 30.01-35, band 25 is 150.01-155. A price at or below the base
+ * clamps to 1 and a price above the top clamps to 25, so a lookup can never
+ * fall off the end of the matrix.
+ *
+ * @param {number} price  Peso price per liter.
+ * @returns {number} 1..FUEL_BAND_COUNT
+ */
+function _fuelBandIndex(price) {
+  const p = Number(price);
+  if (!isFinite(p)) return 1;
+  const i = Math.ceil((p - FUEL_BAND_BASE) / FUEL_BAND_WIDTH);
+  return Math.min(Math.max(i, 1), FUEL_BAND_COUNT);
+}
+
+/**
+ * Returns the Freight Rates column header for a band index, e.g. 8 -> '65.01-70'.
+ * Kept in step with the 'Freight Rates' headers in test/fixtures.js.
+ *
+ * @param {number} bandIndex  1-based.
+ * @returns {string}
+ */
+function _fuelBandLabel(bandIndex) {
+  const lower = FUEL_BAND_BASE + FUEL_BAND_WIDTH * (bandIndex - 1);
+  return `${lower}.01-${lower + FUEL_BAND_WIDTH}`;
+}
+
+/**
+ * Returns the diesel price in force on a date: the newest Fuel Prices row
+ * whose Effective Date is on or before it. Returns null when the sheet holds
+ * no price that early — the caller flags the line rather than billing at zero.
+ *
+ * @param {Object[]} prices  From getFuelPrices(), newest first or any order.
+ * @param {Date}     onDate
+ * @returns {{ price: number, effectiveDate: string } | null}
+ */
+function _fuelPriceOn(prices, onDate) {
+  const t = onDate ? onDate.getTime() : 0;
+  let best = null;
+  (prices || []).forEach(p => {
+    // _parseDate('') answers today, which would let an undated row price
+    // every past billing. A row with no Effective Date is not in force.
+    if (!p.effectiveDate) return;
+    const d = _parseDate(p.effectiveDate);
+    if (!d || d.getTime() > t) return;
+    if (!best || d.getTime() > _parseDate(best.effectiveDate).getTime()) best = p;
+  });
+  return best ? { price: best.dieselPrice, effectiveDate: best.effectiveDate } : null;
+}
+
+/**
+ * Indexes rate rows for lookup by origin, area and truck type. Only the rows
+ * whose Effective Date is on or before `onDate` are kept, and where a key has
+ * several such blocks the newest one wins — that is the date lock: a rate
+ * revision published today can never re-price a billing from last week.
+ *
+ * @param {Object[]} rates   From getFreightRates().
+ * @param {Date}     onDate
+ * @returns {Object} Map of 'ORIGIN|AREA|TYPE' -> rate row.
+ */
+function _indexRates(rates, onDate) {
+  const t   = onDate ? onDate.getTime() : 0;
+  const map = {};
+  (rates || []).forEach(r => {
+    if (!r.effectiveDate) return;   // undated rows are not in force — see _fuelPriceOn
+    const eff = _parseDate(r.effectiveDate);
+    if (!eff || eff.getTime() > t) return;
+    const key = _normArea(r.origin) + '|' + _normArea(r.area) + '|' + _normArea(r.truckType);
+    const cur = map[key];
+    if (!cur || eff.getTime() > _parseDate(cur.effectiveDate).getTime()) map[key] = r;
+  });
+  return map;
+}
+
+/**
+ * Looks one rate out of an index built by _indexRates.
+ * Returns null when the combination has no rate — an unknown area, a truck
+ * type the matrix does not carry, or an origin nobody has seeded yet.
+ *
+ * @param {Object} rateIndex
+ * @param {string} origin
+ * @param {string} area
+ * @param {string} truckType
+ * @param {number} bandIndex
+ * @returns {number|null}
+ */
+function _rateFor(rateIndex, origin, area, truckType, bandIndex) {
+  const row = rateIndex[_normArea(origin) + '|' + _normArea(area) + '|' + _normArea(truckType)];
+  if (!row) return null;
+  const v = row.bands[_fuelBandLabel(bandIndex)];
+  return (v === null || v === undefined || v === '') ? null : Number(v);
+}
+
+/**
+ * Computes one billing line from the trips that share a waybill.
+ *
+ * The load bills at the highest-rate drop, not the first: Rebisco pays the
+ * farthest point of a multi-area route. Mano is a per-store fee, so it counts
+ * full carton blocks on each drop separately and then sums. The drop fee is
+ * flat once the load has DROP_FEE_MIN stops.
+ *
+ * Returns the computed money fields plus `warning`, which is set when no rate
+ * matched — the panel shows the line flagged rather than billing it at zero.
+ *
+ * @param {Object[]} trips      Trip rows of one waybill (at least one).
+ * @param {Object}   rateIndex  From _indexRates() for this line's Billing Date.
+ * @param {number}   bandIndex
+ * @returns {{ area: string, drops: number, cartons: number, haulingRate: number,
+ *             mano: number, dropFee: number, warning: string }}
+ */
+function _computeBillingLine(trips, rateIndex, bandIndex) {
+  const origin    = (trips[0] && trips[0].origin) || '';
+  const truckType = (trips[0] && trips[0].truckBillingCategory) || '';
+
+  let area = (trips[0] && trips[0].area) || '';
+  let haulingRate = null;
+  let cartons = 0;
+  let mano    = 0;
+  const unpriced = [];
+
+  trips.forEach(t => {
+    const qty = Number(t.quantity) || 0;
+    cartons += qty;
+    mano    += Math.floor(qty / MANO_CARTON_STEP) * MANO_FEE;
+
+    const rate = _rateFor(rateIndex, origin, t.area, truckType, bandIndex);
+    if (rate === null) { unpriced.push(t.area || '(blank)'); return; }
+    if (haulingRate === null || rate > haulingRate) { haulingRate = rate; area = t.area; }
+  });
+
+  let warning = '';
+  if (haulingRate === null) {
+    warning = `No rate for ${origin || '(no origin)'} / ${unpriced.join(', ')} / ${truckType || '(no type)'}.`;
+  } else if (unpriced.length) {
+    warning = `Priced without ${unpriced.join(', ')} — no rate for those areas.`;
+  }
+
+  return {
+    area:        area,
+    drops:       trips.length,
+    cartons:     cartons,
+    haulingRate: haulingRate === null ? 0 : haulingRate,
+    mano:        mano,
+    dropFee:     trips.length >= DROP_FEE_MIN ? DROP_FEE : 0,
+    warning:     warning,
+  };
+}
+
+/**
+ * Sums the manual charge amounts on a billing line.
+ * @param {Object} manualCharges  { chargeTypeId: amount }
+ * @returns {number}
+ */
+function _sumManualCharges(manualCharges) {
+  let sum = 0;
+  Object.keys(manualCharges || {}).forEach(k => { sum += Number(manualCharges[k]) || 0; });
+  return sum;
+}
+
+/**
+ * Parses a JSON cell, returning `fallback` on anything unreadable. Sheet cells
+ * get edited by hand, so a malformed blob must not take down a whole billing.
+ *
+ * @param {*} raw
+ * @param {*} fallback
+ * @returns {*}
+ */
+function _parseJsonCell(raw, fallback) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return fallback;
+  try {
+    const v = JSON.parse(s);
+    return (v && typeof v === 'object') ? v : fallback;
+  } catch (e) {
+    return fallback;
   }
 }

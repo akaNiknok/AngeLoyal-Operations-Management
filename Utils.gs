@@ -154,6 +154,25 @@ function _parseDate(str) {
 }
 
 /**
+ * Parses 'M/d/yyyy' and returns null on anything else. Use this to validate
+ * user input: _parseDate answers today for a blank string, which silently
+ * turns a missing date into "now" — wrong for a rate or a price that has to be
+ * dated on purpose.
+ *
+ * @param {string} str
+ * @returns {Date|null}
+ */
+function _parseDateStrict(str) {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(str || '').trim());
+  if (!m) return null;
+  const month = Number(m[1]), day = Number(m[2]), year = Number(m[3]);
+  const d = new Date(year, month - 1, day);
+  // Rejects a rolled-over date such as 2/30/2026, which Date accepts happily.
+  if (d.getMonth() !== month - 1 || d.getDate() !== day || d.getFullYear() !== year) return null;
+  return d;
+}
+
+/**
  * Returns a Date set to midnight (start of day) in the script timezone.
  * @param {Date} d
  * @returns {Date}

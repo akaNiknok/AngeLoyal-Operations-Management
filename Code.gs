@@ -21,6 +21,31 @@ const SHEET_ROUTE_FREQ      = 'Route Frequency Log';
 const SHEET_WAYBILLS        = 'Waybills';
 const SHEET_ROUTE_TYPE_MAP  = 'Route Type Map';
 const SHEET_CG_COLORS       = 'Customer Group Colors';
+const SHEET_FREIGHT_RATES   = 'Freight Rates';
+const SHEET_FUEL_PRICES     = 'Fuel Prices';
+const SHEET_BILLING_CHARGE_TYPES = 'Billing Charge Types';
+const SHEET_BILLING_LINES   = 'Billing Lines';
+
+
+// ============================================================
+//  BILLING CONSTANTS
+// ============================================================
+
+// The DOE rate matrix indexes on a diesel price band 5 pesos wide. The first
+// band is 30.01-35 and the columns are named by the band midpoint (32.5), so
+// band 1 = 32.5 and band 25 = 152.5. A price outside that range clamps.
+const FUEL_BAND_WIDTH   = 5;
+const FUEL_BAND_BASE    = 30;   // the lower edge of band 1
+const FUEL_BAND_COUNT   = 25;
+
+// Contractual fees, VAT inclusive. A billing line snapshots the amounts it
+// used, so a change here can never re-price a past billing.
+const MANO_CARTON_STEP  = 100;  // one Mano fee for each full 100 cartons at one store
+const MANO_FEE          = 392;  // 350 + 12% VAT
+const DROP_FEE_MIN      = 3;    // the fee starts at this many drops on one FO
+const DROP_FEE          = 560;  // 500 + 12% VAT
+const VAT_RATE          = 0.12;
+const WITHHOLDING_RATE  = 0.02;
 
 
 // ============================================================
@@ -47,6 +72,9 @@ const PERMISSIONS = {
   EDIT_USERS:             [ROLES.ADMIN],
   VIEW_AUDIT:             [ROLES.ADMIN],
   CLEAR_ALL_DATA:         [ROLES.ADMIN],
+  VIEW_BILLING:           [ROLES.ADMIN, ROLES.PAYROLL],
+  EDIT_BILLING:           [ROLES.ADMIN, ROLES.PAYROLL],
+  EDIT_FREIGHT_RATES:     [ROLES.ADMIN],
 };
 
 // Identity for the current request, set by rpc()/login() (see Auth.gs) from a
