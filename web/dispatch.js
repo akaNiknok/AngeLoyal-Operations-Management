@@ -402,6 +402,8 @@
                     editing && n >= 2 ? "" : "none";
                 document.getElementById("btn-ungroup-convoy").style.display =
                     editing && n >= 1 ? "" : "none";
+                document.getElementById("btn-delete-selected").style.display =
+                    editing && n >= 1 ? "" : "none";
 
                 const show = editing && n >= 1;
                 const countEl = document.getElementById("selection-count");
@@ -1136,6 +1138,53 @@
                         selectedForGroup.delete(tripId);
                         updateConvoyButtons();
                         renderDispatch();
+                    },
+                    (e) => {
+                        setSyncing(false);
+                        showToast("Error: " + e.message, "error");
+                    },
+                );
+            }
+
+            // Bulk delete of the current selection. Same rules as the per-row
+            // ✕: the server refuses any trip that already has a confirmed
+            // waybill, and says which ones it kept.
+            function confirmDeleteSelected() {
+                if (!canEdit() || !dispatchData) return;
+                const ids = [...selectedForGroup];
+                if (!ids.length) return;
+                if (
+                    !confirm(
+                        `Remove ${ids.length} trip${ids.length === 1 ? "" : "s"}? Any without a confirmed waybill are deleted permanently.`,
+                    )
+                )
+                    return;
+
+                setSyncing(true);
+                call("bulkDeleteTrips", ids).then(
+                    (r) => {
+                        setSyncing(false);
+                        if (!r.success) {
+                            showToast("Delete failed: " + r.error, "error");
+                            return;
+                        }
+                        const blocked = r.blocked || [];
+                        const kept = new Set(blocked.map((b) => b.tripId));
+                        // Drop only what the server actually deleted —
+                        // dispatchData is the cached object for this date.
+                        dispatchData.trips = (dispatchData.trips || []).filter(
+                            (t) => !ids.includes(t.id) || kept.has(t.id),
+                        );
+                        selectedForGroup.clear();
+                        updateConvoyButtons();
+                        renderDispatch();
+                        showToast(
+                            `${r.deleted} trip${r.deleted === 1 ? "" : "s"} removed.` +
+                                (blocked.length
+                                    ? ` ${blocked.length} kept — confirmed waybill.`
+                                    : ""),
+                            blocked.length ? "warning" : "success",
+                        );
                     },
                     (e) => {
                         setSyncing(false);
