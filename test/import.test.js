@@ -199,6 +199,70 @@ test('importRouteFile is gated by ADD_MANUAL_TRIP permission', () => {
   assert.throws(() => api.importRouteFile('6/16/2026', ROWS), /Access denied/);
 });
 
+// ---------------- re-import idempotency ----------------
+// The transport cannot guarantee the client sees the response. A long import
+// that times out on the way back is written all the same, and the dispatcher
+// retries — which once put three copies of one route file on one board.
+
+test('re-importing the same file on the same date adds nothing', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  api.importRouteFile('6/16/2026', ROWS);
+  const afterFirst = dump(ss, 'Trips').rows.length;
+
+  const res = api.importRouteFile('6/16/2026', ROWS);
+
+  assert.equal(res.success, true);
+  assert.equal(res.imported, 0);
+  assert.equal(res.duplicates, 3);
+  assert.equal(res.skipped, 3);
+  assert.equal(dump(ss, 'Trips').rows.length, afterFirst); // no second copy
+});
+
+test('a third attempt still adds nothing', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  api.importRouteFile('6/16/2026', ROWS);
+  api.importRouteFile('6/16/2026', ROWS);
+  api.importRouteFile('6/16/2026', ROWS);
+  assert.equal(dump(ss, 'Trips').rows.length, 3); // not 9
+});
+
+test('a second import brings in only the FOs the date does not have', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  api.importRouteFile('6/16/2026', ROWS);
+
+  const mixed = ROWS.concat([
+    { foNumber: 'FO-9', outletName: 'Outlet Gamma', area: 'Batangas', restrictions: '6W',
+      quantity: 4, cbm: 1, tier: 1, slots: [{ type: '6WC', count: 1 }] },
+  ]);
+  const res = api.importRouteFile('6/16/2026', mixed);
+
+  assert.equal(res.imported, 1);     // only FO-9
+  assert.equal(res.duplicates, 3);
+  assert.equal(dump(ss, 'Trips').rows.length, 4);
+});
+
+test('the same FO on a DIFFERENT date still imports', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  api.importRouteFile('6/16/2026', ROWS);
+  const res = api.importRouteFile('6/17/2026', ROWS);
+
+  assert.equal(res.imported, 3);     // dedupe is per date, not global
+  assert.equal(res.duplicates, 0);
+  assert.equal(dump(ss, 'Trips').rows.length, 6);
+});
+
+test('blank-FO rows are never deduped — they have no key', () => {
+  const blanks = [
+    { foNumber: '', outletName: 'Walk-in A', area: 'Cavite', quantity: 1, cbm: 1, slots: [{ type: '6WC', count: 1 }] },
+    { foNumber: '', outletName: 'Walk-in B', area: 'Cavite', quantity: 1, cbm: 1, slots: [{ type: '6WC', count: 1 }] },
+  ];
+  const { api, ss } = asDispatcher(importSheets());
+  const res = api.importRouteFile('6/16/2026', blanks);
+  assert.equal(res.imported, 2);
+  assert.equal(res.duplicates, 0);
+  assert.equal(dump(ss, 'Trips').rows.length, 2);
+});
+
 // ---------------- deleteImportedTrip ----------------
 
 function withTripAndWaybill(locked) {
@@ -230,6 +294,70 @@ test('deleteImportedTrip refuses to delete a trip with a confirmed waybill', () 
   assert.match(res.error, /confirmed waybill/);
   assert.equal(dump(ss, 'Trips').rows.length, 1); // untouched
 });
+
+// ---------------- bulkDeleteTrips ----------------
+
+function withThreeTrips() {
+  const trip = (id, fo) =>
+    HEADERS.Trips.map((h) => (h === 'ID' ? id : h === 'FO Number' ? fo : ''));
+  return asDispatcher(importSheets({
+    Trips: [HEADERS.Trips.slice(), trip(70, 'FO-700'), trip(71, 'FO-701'), trip(72, 'FO-702')],
+    Waybills: [
+      HEADERS.Waybills.slice(),
+      // 71 is confirmed — the bulk delete must keep it and take the others.
+      [80, 'AL-50', 1, 50, 70, 'FO-700', 'Regular', '', 'Suggested', false, '', ''],
+      [81, 'AL-51', 1, 51, 71, 'FO-701', 'Regular', '', 'Confirmed', true, '', ''],
+    ],
+  }));
+}
+
+test('bulkDeleteTrips removes every selected trip and its suggested waybills', () => {
+  const { api, ss } = withThreeTrips();
+  const res = api.bulkDeleteTrips([70, 72]);
+
+  assert.equal(res.success, true);
+  assert.equal(res.deleted, 2);
+  assert.equal(res.blocked.length, 0);
+  const ids = dump(ss, 'Trips').rows.map((r) => Number(r[0]));
+  assert.deepEqual(ids, [71]);
+  // 70's suggested waybill went with it; 71's confirmed one stayed.
+  const wbIds = dump(ss, 'Waybills').rows.map((r) => Number(r[0]));
+  assert.deepEqual(wbIds, [81]);
+});
+
+// One refusal must not abort the rest — the dispatcher selected a block and
+// expects everything deletable in it to go.
+test('bulkDeleteTrips keeps a confirmed-waybill trip and still deletes the others', () => {
+  const { api, ss } = withThreeTrips();
+  const res = api.bulkDeleteTrips([70, 71, 72]);
+
+  assert.equal(res.success, true);
+  assert.equal(res.deleted, 2);
+  assert.equal(res.blocked.length, 1);
+  assert.equal(res.blocked[0].tripId, 71);
+  assert.match(res.blocked[0].error, /confirmed waybill/);
+  assert.deepEqual(dump(ss, 'Trips').rows.map((r) => Number(r[0])), [71]);
+});
+
+test('bulkDeleteTrips rejects an empty selection', () => {
+  const { api } = withThreeTrips();
+  const res = api.bulkDeleteTrips([]);
+  assert.equal(res.success, false);
+  assert.match(res.error, /No trips selected/);
+});
+
+test('bulkDeleteTrips is gated by ADD_MANUAL_TRIP permission', () => {
+  const { api } = makeEnv({ sheets: withThreeTripsSheets(), userEmail: EMAIL.Viewer });
+  assert.throws(() => api.bulkDeleteTrips([70]), /permission/i);
+});
+
+function withThreeTripsSheets() {
+  const trip = (id, fo) =>
+    HEADERS.Trips.map((h) => (h === 'ID' ? id : h === 'FO Number' ? fo : ''));
+  return importSheets({
+    Trips: [HEADERS.Trips.slice(), trip(70, 'FO-700'), trip(71, 'FO-701'), trip(72, 'FO-702')],
+  });
+}
 
 // ---------------- _resolveOrCreateOutlet ----------------
 

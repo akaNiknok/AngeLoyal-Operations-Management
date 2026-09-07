@@ -507,9 +507,13 @@ function updateSuggestedWaybill(waybillId, newNumber) {
  * sheet in one batch at the end instead of once per row — needed because a
  * 44-row import previously meant 400+ individual Sheets API calls.
  *
+ * An FO already present on the date is a re-import and is skipped whole —
+ * the response can be lost after the write lands, and the retry used to append
+ * the file a second and third time.
+ *
  * @param {string}   tripDate   'M/d/yyyy' — the date these trips are for
  * @param {Object[]} rowData    Array of parsed route rows
- * @returns {{ success: boolean, imported: number, skipped: number, errors: string[],
+ * @returns {{ success: boolean, imported: number, skipped: number, duplicates: number, errors: string[],
  *             newOutlets: { id: number, outletName: string, area: string, address: string,
  *                           customerGroup: string, notes: string }[] }}
  */
@@ -534,13 +538,17 @@ function importRouteFile(tripDate, rowData) {
 
     // Trucks already committed on this date (existing trips) — never double-book.
     // Same pass finds the highest convoy token already used on the date, so a
-    // second import's batch tokens don't collide with the first's.
+    // second import's batch tokens don't collide with the first's, and records
+    // which FOs the date already holds (see importedFOs below).
     const usedTruckIds = {};
+    const existingFOs  = {};
     let convoyTokenBase = 0;
     getTrips(tripDate, tripDate).forEach(t => {
       if (t.truckId) usedTruckIds[t.truckId] = true;
       const cg = Number(t.convoyGroup);
       if (cg > convoyTokenBase) convoyTokenBase = cg;
+      const fo = String(t.foNumber || '').trim();
+      if (fo) existingFOs[fo] = true;
     });
 
     // Resolve a file type code (e.g. "4WC") → billing category → next free truck.
@@ -602,9 +610,10 @@ function importRouteFile(tripDate, rowData) {
     const newTripRows  = [];
     const newAuditRows = [];
 
-    let imported = 0;
-    let skipped  = 0;
-    const errors = [];
+    let imported   = 0;
+    let skipped    = 0;
+    let duplicates = 0;     // drops dropped because their FO is already on the date
+    const errors   = [];
 
     // Creates one trip row and returns its ID. No waybills yet — imported
     // trips land in 'Prepping'; markDayScheduled suggests the waybills
@@ -676,6 +685,23 @@ function importRouteFile(tripDate, rowData) {
 
     groups.forEach(g => {
       try {
+        // Idempotency. The transport cannot guarantee the client sees the
+        // response: a long import that times out on the way back is written
+        // all the same, and the dispatcher retries. Three retries once put
+        // three copies of a whole route file on one board. An FO already on
+        // the date is therefore a re-import, not new work — skip it.
+        // Blank-FO rows have no key, so they are never deduped.
+        // ponytail: per-FO, not per-row. A corrected file that adds a stop to
+        // an FO already imported needs that stop keyed in by hand; today it
+        // silently duplicated the whole FO instead.
+        const foKey = String(g.foNumber || '').trim();
+        if (foKey && existingFOs[foKey]) {
+          duplicates += g.rows.length;
+          skipped    += g.rows.length;
+          return;
+        }
+        if (foKey) existingFOs[foKey] = true;
+
         // Expand truck slots: one entry per truck needed across the FO's rows.
         const slotTypes = [];
         g.rows.forEach(rd => (rd.slots || []).forEach(s => {
@@ -712,9 +738,9 @@ function importRouteFile(tripDate, rowData) {
     _appendRows(tripsSheet, newTripRows);
     _appendRows(auditSheet, newAuditRows);
 
-    return { success: true, imported, skipped, errors, newOutlets };
+    return { success: true, imported, skipped, duplicates, errors, newOutlets };
   } catch (e) {
-    return { success: false, imported: 0, skipped: 0, errors: [e.message] };
+    return { success: false, imported: 0, skipped: 0, duplicates: 0, errors: [e.message] };
   }
 }
 
@@ -753,6 +779,44 @@ function deleteImportedTrip(tripId) {
     return { success: false, error: e.message };
   }
 }
+
+/**
+ * Deletes several trips in one call (bulk row-selection action on the dispatch
+ * board). Reuses deleteImportedTrip per id, so the confirmed-waybill guard,
+ * the suggested-waybill cleanup and the audit trail behave exactly as they do
+ * for the per-row delete.
+ *
+ * A trip that refuses to delete does not abort the rest: the caller gets back
+ * how many went and which ones stayed, so the board can say why.
+ *
+ * ponytail: one sheet read + deleteRow per trip. A dispatcher clears a handful
+ * of rows at a time; batch the row removal only if someone starts deleting a
+ * whole board.
+ *
+ * @param {number[]} tripIds
+ * @returns {{ success: true, deleted: number, blocked: { tripId: number, error: string }[] }
+ *          | { success: false, error: string }}
+ */
+function bulkDeleteTrips(tripIds) {
+  _requirePermission('ADD_MANUAL_TRIP');
+  try {
+    const ids = (tripIds || []).map(Number).filter(Boolean);
+    if (ids.length === 0) throw new Error('No trips selected.');
+
+    let deleted = 0;
+    const blocked = [];
+    ids.forEach(id => {
+      const r = deleteImportedTrip(id);
+      if (r && r.success) deleted++;
+      else blocked.push({ tripId: id, error: (r && r.error) || 'Delete failed.' });
+    });
+
+    return { success: true, deleted: deleted, blocked: blocked };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 
 /**
  * Promotes every 'Prepping' trip on a date to 'Scheduled' and suggests
