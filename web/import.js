@@ -528,15 +528,33 @@
                 document.getElementById("btn-run-import").disabled = !include;
             }
 
-            // Fills the origin datalist from the warehouses the rate matrix
-            // already carries. It only suggests — the input stays free text so
-            // a new warehouse can be imported before anyone seeds its rates.
-            function populateOriginOptions() {
-                const list = document.getElementById("import-origin-options");
-                if (!list) return;
-                list.innerHTML = (origins || [])
-                    .map((o) => `<option value="${esc(o)}"></option>`)
-                    .join("");
+            // Fills the origin dropdown from the warehouses the rate matrix
+            // already carries. The last option types in a new name, because a
+            // warehouse must be importable before anyone seeds its rates.
+            const IMPORT_ORIGIN_NEW = "__new__";
+
+            function populateOriginOptions(keep) {
+                const sel = document.getElementById("import-origin");
+                if (!sel) return;
+                const want = keep !== undefined ? keep : sel.value;
+                const list = origins || [];
+                sel.innerHTML =
+                    '<option value="">Select warehouse…</option>' +
+                    list.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("") +
+                    (want && !list.includes(want)
+                        ? `<option value="${esc(want)}">${esc(want)}</option>`
+                        : "") +
+                    `<option value="${IMPORT_ORIGIN_NEW}">+ New warehouse…</option>`;
+                sel.value = want || "";
+            }
+
+            function onImportOriginChange() {
+                const sel = document.getElementById("import-origin");
+                if (sel.value !== IMPORT_ORIGIN_NEW) return;
+                const name = (prompt("New origin warehouse name") || "")
+                    .trim()
+                    .toUpperCase();
+                populateOriginOptions(name);
             }
 
             function runImport() {
@@ -564,9 +582,9 @@
                 const originVal = document
                     .getElementById("import-origin")
                     .value.trim();
-                if (!originVal) {
+                if (!originVal || originVal === IMPORT_ORIGIN_NEW) {
                     showToast(
-                        "Enter the origin warehouse — billing needs it to find the rate.",
+                        "Pick the origin warehouse — billing needs it to find the rate.",
                         "warning",
                     );
                     return;

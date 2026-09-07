@@ -33,6 +33,8 @@
                     from.value = monday.toISOString().slice(0, 10);
                     to.value = today.toISOString().slice(0, 10);
                 }
+                const docDate = document.getElementById("bl-doc-date");
+                if (!docDate.value) docDate.value = todayStr();
                 populateBillingFilters();
                 loadBilling();
             }
@@ -335,6 +337,36 @@
 
             // ── Print / PDF ───────────────────────────────────────────
 
+            const BILLING_MONTHS = [
+                "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+                "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
+            ];
+
+            // The line the paper billing carries under the billing number, e.g.
+            // "BILLING JULY 2 - 6, 2026". A range that crosses a month or a
+            // year spells both ends out rather than collapsing them.
+            function billingRangeLabel(fromIso, toIso) {
+                if (!fromIso || !toIso) return "";
+                const a = new Date(fromIso + "T00:00:00");
+                const b = new Date(toIso + "T00:00:00");
+                const mo = (d) => BILLING_MONTHS[d.getMonth()];
+
+                if (a.getFullYear() !== b.getFullYear()) {
+                    return `BILLING ${mo(a)} ${a.getDate()}, ${a.getFullYear()} - ${mo(b)} ${b.getDate()}, ${b.getFullYear()}`;
+                }
+                if (a.getMonth() !== b.getMonth()) {
+                    return `BILLING ${mo(a)} ${a.getDate()} - ${mo(b)} ${b.getDate()}, ${b.getFullYear()}`;
+                }
+                return `BILLING ${mo(a)} ${a.getDate()} - ${b.getDate()}, ${b.getFullYear()}`;
+            }
+
+            // The letterhead the paper billing prints, lifted from the company's
+            // own format workbook. Resolved against the page URL because the
+            // print document lives in an about:blank iframe.
+            function billingLetterheadUrl() {
+                return new URL("assets/billing-letterhead.png", location.href).href;
+            }
+
             // Reuses the dispatch print path: a self-contained document in a
             // hidden iframe, and the browser's own Print dialog makes the PDF.
             function printBilling() {
@@ -352,6 +384,7 @@
                 const num = document.getElementById("bl-number").value.trim();
                 const from = document.getElementById("bl-from").value;
                 const to = document.getElementById("bl-to").value;
+                const docDate = document.getElementById("bl-doc-date").value;
 
                 const head =
                     `<th>DATE</th><th>PLATE #</th><th>WAYBILL #</th><th>FREIGHT ORDER #</th>
@@ -385,28 +418,45 @@
                 const html = `<!DOCTYPE html><html><head><title>BILLING ${esc(num || from)}</title>
   <style>${PRINT_BASE_CSS}
     .n { text-align: right; font-variant-numeric: tabular-nums; }
-    .meta { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .head { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 8px; }
+    .head img { height: 52px; }
+    .head-meta { margin-left: auto; text-align: right; line-height: 1.6; }
+    .head-meta .k { color: #555; }
+    .head-meta .range { font-weight: bold; }
     .totals { width: 300px; margin-left: auto; margin-top: 10px; }
     .totals td { border: none; padding: 1px 4px; }
     .totals .n { border-top: 1px solid #999; }
-    .sign { margin-top: 28px; display: flex; gap: 60px; }
-    .sign div { border-top: 1px solid #333; padding-top: 3px; width: 220px; }
+    .foot { display: flex; align-items: flex-start; gap: 40px; margin-top: 10px; }
+    .wb-total { font-weight: bold; white-space: nowrap; }
+    .sign { margin-top: 24px; display: flex; gap: 60px; }
+    .sign .name { border-bottom: 1px solid #333; padding-top: 14px; width: 220px; text-align: center; font-weight: bold; }
   </style></head><body>
-  <h1>ANGELOYAL LOGISTICS — TRIPS BILLING</h1>
-  <div class="meta">
-    <span class="sub">${esc(from)} to ${esc(to)} · ${rows.length} waybills</span>
-    <span class="sub">BILLING # ${esc(num) || "__________"}</span>
+  <div class="head">
+    <img src="${billingLetterheadUrl()}" alt="ANGELOYAL">
+    <div class="head-meta">
+      <div><span class="k">BILLING #</span> ${esc(num) || "__________"}</div>
+      <div><span class="k">DATE:</span> ${esc(isoToMDY(docDate)) || "__________"}</div>
+      <div class="range">${esc(billingRangeLabel(from, to))}</div>
+    </div>
   </div>
   <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
-  <table class="totals"><tbody>
-    <tr><td>TOTAL SALES VAT INC :</td><td class="n">${PESO(gross)}</td></tr>
-    <tr><td>LESS VAT :</td><td class="n" style="border:none">${PESO(lessVat)}</td></tr>
-    <tr><td>AMOUNT NET OF VAT :</td><td class="n" style="border:none">${PESO(net)}</td></tr>
-    <tr><td>ADD VAT :</td><td class="n" style="border:none">${PESO(net * 0.12)}</td></tr>
-    <tr><td>LESS WITH HOLDING TAX :</td><td class="n" style="border:none">${PESO(ewt)}</td></tr>
-    <tr><td><strong>TOTAL AMOUNT DUE :</strong></td><td class="n"><strong>${PESO(gross - ewt)}</strong></td></tr>
-  </tbody></table>
-  <div class="sign"><div>RECEIVED BY:</div><div>APPROVED BY:</div></div>
+  <div class="foot">
+    <div>
+      <div class="wb-total">TOTAL WAYBILLS: ${rows.length}</div>
+      <div class="sign">
+        <div><div>RECEIVED BY:</div><div class="name">&nbsp;</div></div>
+        <div><div>APPROVED BY:</div><div class="name">ANGELO DYNALD S. MEDINA</div></div>
+      </div>
+    </div>
+    <table class="totals"><tbody>
+      <tr><td>TOTAL SALES VAT INC :</td><td class="n">${PESO(gross)}</td></tr>
+      <tr><td>LESS VAT :</td><td class="n" style="border:none">${PESO(lessVat)}</td></tr>
+      <tr><td>AMOUNT NET OF VAT :</td><td class="n" style="border:none">${PESO(net)}</td></tr>
+      <tr><td>ADD VAT :</td><td class="n" style="border:none">${PESO(net * 0.12)}</td></tr>
+      <tr><td>LESS WITH HOLDING TAX :</td><td class="n" style="border:none">${PESO(ewt)}</td></tr>
+      <tr><td><strong>TOTAL AMOUNT DUE :</strong></td><td class="n"><strong>${PESO(gross - ewt)}</strong></td></tr>
+    </tbody></table>
+  </div>
   </body></html>`;
 
                 printHtmlDocument(html);

@@ -1983,11 +1983,16 @@ function updateFreightRate(rateId, bandLabel, value) {
  * Records the weekly DOE diesel price for NCR (the Quezon City "Common Price").
  * The DOE publishes a PDF only, so this is typed in by hand.
  *
- * The history is append-only: a correction is a new row with the same effective
- * date, and the newest row wins. That keeps the trail of what a billing was
- * priced from even after someone fixes a typo.
+ * The DOE posts on a Monday and the price runs Tuesday to the following
+ * Monday, so an effective date is always a Tuesday. A non-Tuesday date is
+ * accepted — a mid-week special adjustment happens — but the panel warns.
  *
- * @param {{ effectiveDate: string, dieselPrice: number, sourceNote: string }} data
+ * A row can be corrected with updateFuelPrice or dropped with deleteFuelPrice.
+ * The Audit Log carries the trail of what changed; the sheet carries only the
+ * current truth, so an operator can fix a typo without leaving a wrong price
+ * behind that a later billing might index on.
+ *
+ * @param {{ effectiveDate: string, dieselPrice: number }} data
  * @returns {{ success: boolean, fuelPrice: Object } | { success: false, error: string }}
  */
 function addFuelPrice(data) {
@@ -2003,14 +2008,13 @@ function addFuelPrice(data) {
       throw new Error('Enter the diesel price as a number greater than zero.');
     }
 
-    const headers = ['ID', 'Effective Date', 'Diesel Price', 'Source Note', 'Added By', 'Added At'];
+    const headers = ['ID', 'Effective Date', 'Diesel Price', 'Added By', 'Added At'];
     const sheet   = _getOrCreateSheet(SHEET_FUEL_PRICES, headers);
     const nextId  = _nextRowId(sheet);
     const email   = _getCurrentUserEmail();
     const now     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
-    const note    = String((data && data.sourceNote) || '').trim();
 
-    sheet.appendRow([nextId, effDate, price, note, email, now]);
+    sheet.appendRow([nextId, effDate, price, email, now]);
 
     _auditLog('FUEL_PRICE_ADD', SHEET_FUEL_PRICES, nextId, '',
       `${price} effective ${effDate}`);
@@ -2018,10 +2022,86 @@ function addFuelPrice(data) {
     return {
       fuelPrice: {
         id: nextId, effectiveDate: effDate, dieselPrice: price,
-        sourceNote: note, addedBy: email, addedAt: now,
+        addedBy: email, addedAt: now,
         band: _fuelBandLabel(_fuelBandIndex(price)),
       },
     };
+  });
+}
+
+/**
+ * Corrects one recorded diesel price. Only the effective date and the price
+ * itself are editable — everything else on the row is provenance.
+ *
+ * @param {number} priceId
+ * @param {{ effectiveDate: string, dieselPrice: number }} changes
+ * @returns {{ success: boolean, fuelPrice: Object } | { success: false, error: string }}
+ */
+function updateFuelPrice(priceId, changes) {
+  _requirePermission('EDIT_FREIGHT_RATES');
+  return _writerResult(() => {
+    const ctx  = _openRow(SHEET_FUEL_PRICES, priceId, 'Fuel price');
+    const next = {};
+
+    if (changes && changes.effectiveDate !== undefined) {
+      const effDate = String(changes.effectiveDate || '').trim();
+      if (!_parseDateStrict(effDate)) {
+        throw new Error('Effective date is required, in M/d/yyyy format.');
+      }
+      next['Effective Date'] = effDate;
+    }
+    if (changes && changes.dieselPrice !== undefined) {
+      const price = Number(changes.dieselPrice);
+      if (!isFinite(price) || price <= 0) {
+        throw new Error('Enter the diesel price as a number greater than zero.');
+      }
+      next['Diesel Price'] = price;
+    }
+    if (Object.keys(next).length === 0) throw new Error('Nothing to change.');
+
+    const oldDate  = _formatDate(_readDateCell(_val(ctx.row, ctx.headers, 'Effective Date')));
+    const oldPrice = _numOrNull(_val(ctx.row, ctx.headers, 'Diesel Price'));
+    _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, next);
+
+    const effDate = next['Effective Date'] !== undefined ? next['Effective Date'] : oldDate;
+    const price   = next['Diesel Price']   !== undefined ? next['Diesel Price']   : oldPrice;
+
+    _auditLog('FUEL_PRICE_EDIT', SHEET_FUEL_PRICES, priceId,
+      `${oldPrice} effective ${oldDate}`, `${price} effective ${effDate}`);
+
+    return {
+      fuelPrice: {
+        id:            priceId,
+        effectiveDate: effDate,
+        dieselPrice:   price,
+        addedBy:       String(_val(ctx.row, ctx.headers, 'Added By') || ''),
+        band:          _fuelBandLabel(_fuelBandIndex(price)),
+      },
+    };
+  });
+}
+
+/**
+ * Removes one recorded diesel price — a duplicate, or a week entered twice.
+ * A billing already stamped with a billing number keeps the rate it was priced
+ * at, so this cannot re-price closed history.
+ *
+ * @param {number} priceId
+ * @returns {{ success: boolean, deleted: number } | { success: false, error: string }}
+ */
+function deleteFuelPrice(priceId) {
+  _requirePermission('EDIT_FREIGHT_RATES');
+  return _writerResult(() => {
+    const ctx   = _openRow(SHEET_FUEL_PRICES, priceId, 'Fuel price');
+    const date  = _formatDate(_readDateCell(_val(ctx.row, ctx.headers, 'Effective Date')));
+    const price = _numOrNull(_val(ctx.row, ctx.headers, 'Diesel Price'));
+
+    ctx.sheet.deleteRow(ctx.rowIdx + 1);
+
+    _auditLog('FUEL_PRICE_DELETE', SHEET_FUEL_PRICES, priceId,
+      `${price} effective ${date}`, '');
+
+    return { deleted: priceId };
   });
 }
 

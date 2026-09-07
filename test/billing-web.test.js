@@ -198,3 +198,55 @@ test('a workbook column midpoint maps onto its band', () => {
   assert.equal(ui.bandLabelForPrice(67.5), '65.01-70');
   assert.equal(ui.bandLabelForPrice(152.5), '150.01-155');
 });
+
+// ── The DOE price week ────────────────────────────────────────
+// The DOE posts NCR pump prices on a Monday and each posting runs Tuesday to
+// the following Monday, so an effective date is a Tuesday.
+
+test('the latest Tuesday is today when today is a Tuesday, else the one before', () => {
+  const { ui } = loadBilling();
+
+  assert.equal(ui.latestTuesdayIso('2026-09-01'), '2026-09-01'); // a Tuesday
+  assert.equal(ui.latestTuesdayIso('2026-09-02'), '2026-09-01'); // Wednesday
+  assert.equal(ui.latestTuesdayIso('2026-09-07'), '2026-09-01'); // the Monday it ends on
+  assert.equal(ui.latestTuesdayIso('2026-09-08'), '2026-09-08'); // the next Tuesday
+});
+
+test('isTuesdayIso agrees with the DOE posting titles', () => {
+  const { ui } = loadBilling();
+
+  // "September 1 to 7", "August 25 to 31" — every posting starts on a Tuesday.
+  assert.equal(ui.isTuesdayIso('2026-09-01'), true);
+  assert.equal(ui.isTuesdayIso('2026-08-25'), true);
+  assert.equal(ui.isTuesdayIso('2026-09-07'), false); // the Monday it ends on
+  assert.equal(ui.isTuesdayIso(''), false);
+});
+
+test('mdyToIso is the inverse of isoToMDY', () => {
+  const { ui } = loadBilling();
+
+  assert.equal(ui.mdyToIso('9/1/2026'), '2026-09-01');
+  assert.equal(ui.mdyToIso('12/25/2026'), '2026-12-25');
+  assert.equal(ui.mdyToIso(''), '');
+  assert.equal(ui.isoToMDY(ui.mdyToIso('7/4/2026')), '7/4/2026');
+});
+
+// ── The printed billing header ────────────────────────────────
+
+test('the printed range collapses a same-month week and spells out the rest', () => {
+  const { ui } = loadBilling();
+
+  assert.equal(
+    ui.billingRangeLabel('2026-07-02', '2026-07-06'),
+    'BILLING JULY 2 - 6, 2026'
+  );
+  assert.equal(
+    ui.billingRangeLabel('2026-06-29', '2026-07-05'),
+    'BILLING JUNE 29 - JULY 5, 2026'
+  );
+  assert.equal(
+    ui.billingRangeLabel('2026-12-28', '2027-01-03'),
+    'BILLING DECEMBER 28, 2026 - JANUARY 3, 2027'
+  );
+  assert.equal(ui.billingRangeLabel('', '2026-07-06'), '');
+});

@@ -20,7 +20,7 @@ The AngeLoyal Order Management System (OMS) relies on a structured collection of
 | 12 | Route Type Map | Config | Administrative Setup (Self-Seeding) |
 | 13 | Customer Group Colors | Config | Administrative Setup (Self-Seeding) |
 | 14 | Freight Rates | Billing | DOE Rate Matrix (Effective-Dated) |
-| 15 | Fuel Prices | Billing | Append-Only Price History |
+| 15 | Fuel Prices | Billing | Weekly Price History |
 | 16 | Billing Charge Types | Billing | Administrative Setup (Self-Seeding) |
 | 17 | Billing Lines | Billing | Core Billing Ledger |
 
@@ -338,14 +338,15 @@ The band index is `clamp(ceil((price − 30) / 5), 1, 25)`. A price at or below 
 
 ### **Sheet 15: Fuel Prices**
 
-Append-only history of the Quezon City diesel "Common Price" published weekly by the DOE for NCR. The DOE posts a PDF only, so the price is entered by hand.
+History of the Quezon City diesel "Common Price" published weekly by the DOE for NCR. The DOE posts a PDF only, so the price is entered by hand.
+
+The DOE posts on a Monday and each posting runs Tuesday to the following Monday, so an Effective Date is a Tuesday. A non-Tuesday date is accepted after a confirmation, because a mid-week special adjustment does happen. A row can be corrected or removed from the Billing Matrix panel; the Audit Log carries the trail of what changed.
 
 | Column | Type | Notes |
 | :---- | :---- | :---- |
 | ID | Number | Auto-incrementing primary key |
-| Effective Date | Date | First date this price applies |
+| Effective Date | Date | First date this price applies — normally a Tuesday |
 | Diesel Price | Number | Peso price per liter, e.g. `67.00` |
-| Source Note | String | Free-form provenance, e.g. the DOE posting title; Nullable |
 | Added By | String | Email address of the user who entered the price |
 | Added At | DateTime | Creation timestamp |
 
@@ -468,6 +469,8 @@ The global ledger recording all administrative, operational, and data state modi
 * FREIGHT\_RATE\_IMPORT — A rate block was seeded from a rates workbook (Table \= Freight Rates, New Value \= "ORIGIN → n rows effective M/d/yyyy")
 * FREIGHT\_RATE\_EDIT — A single rate cell was changed in the Billing Matrix panel
 * FUEL\_PRICE\_ADD — A weekly DOE diesel price was entered (New Value \= "price effective M/d/yyyy")
+* FUEL\_PRICE\_EDIT — A recorded diesel price or its effective date was corrected
+* FUEL\_PRICE\_DELETE — A recorded diesel price was removed (Old Value \= "price effective M/d/yyyy")
 * BILLING\_CHARGE\_TYPE\_CREATE — New manual money column added to the billing output
 * BILLING\_CHARGE\_TYPE\_EDIT — Updates to a manual money column (label, order, Active/Inactive toggling)
 * BILLING\_LINE\_CREATE — A billable waybill entered the billing ledger

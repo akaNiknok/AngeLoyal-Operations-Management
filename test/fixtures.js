@@ -50,7 +50,7 @@ const HEADERS = {
     Array.from({ length: 25 }, (_, i) => `${30 + 5 * i}.01-${35 + 5 * i}`),
   ),
 
-  'Fuel Prices': ['ID', 'Effective Date', 'Diesel Price', 'Source Note', 'Added By', 'Added At'],
+  'Fuel Prices': ['ID', 'Effective Date', 'Diesel Price', 'Added By', 'Added At'],
 
   'Billing Charge Types': ['ID', 'Label', 'Sort Order', 'Active'],
 

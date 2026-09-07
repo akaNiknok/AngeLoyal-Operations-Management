@@ -181,7 +181,6 @@ test('addFuelPrice records the price and reports the band it lands in', () => {
   const res = api.addFuelPrice({
     effectiveDate: '7/1/2026',
     dieselPrice: 67,
-    sourceNote: 'DOE NCR Jul 1-7 2026',
   });
 
   assert.equal(res.success, true);
@@ -211,6 +210,58 @@ test('addFuelPrice refuses a missing date and a price that is not positive', () 
   assert.match(api.addFuelPrice({ dieselPrice: 67 }).error, /Effective date/);
   assert.match(api.addFuelPrice({ effectiveDate: '7/1/2026', dieselPrice: 0 }).error, /greater than zero/);
   assert.match(api.addFuelPrice({ effectiveDate: '7/1/2026', dieselPrice: 'x' }).error, /greater than zero/);
+});
+
+test('updateFuelPrice corrects the price and re-reports the band', () => {
+  const { api } = asAdmin(base());
+  const id = api.addFuelPrice({ effectiveDate: '7/7/2026', dieselPrice: 67 }).fuelPrice.id;
+
+  const res = api.updateFuelPrice(id, { effectiveDate: '7/14/2026', dieselPrice: 72 });
+  assert.equal(res.success, true);
+  assert.equal(res.fuelPrice.band, '70.01-75');
+
+  const prices = api.getFuelPrices();
+  assert.equal(prices.length, 1);
+  assert.equal(prices[0].effectiveDate, '7/14/2026');
+  assert.equal(prices[0].dieselPrice, 72);
+});
+
+test('updateFuelPrice can change one field alone and validates both', () => {
+  const { api } = asAdmin(base());
+  const id = api.addFuelPrice({ effectiveDate: '7/7/2026', dieselPrice: 67 }).fuelPrice.id;
+
+  assert.equal(api.updateFuelPrice(id, { dieselPrice: 68 }).success, true);
+  assert.equal(api.getFuelPrices()[0].effectiveDate, '7/7/2026');
+  assert.equal(api.getFuelPrices()[0].dieselPrice, 68);
+
+  assert.match(api.updateFuelPrice(id, { dieselPrice: 0 }).error, /greater than zero/);
+  assert.match(api.updateFuelPrice(id, { effectiveDate: 'soon' }).error, /Effective date/);
+  assert.match(api.updateFuelPrice(id, {}).error, /Nothing to change/);
+  assert.match(api.updateFuelPrice(9999, { dieselPrice: 70 }).error, /not found/);
+});
+
+test('deleteFuelPrice removes only that week and audits what it dropped', () => {
+  const { api, ss } = asAdmin(base());
+  const keep = api.addFuelPrice({ effectiveDate: '7/7/2026', dieselPrice: 67 }).fuelPrice.id;
+  const drop = api.addFuelPrice({ effectiveDate: '7/14/2026', dieselPrice: 72 }).fuelPrice.id;
+
+  assert.equal(api.deleteFuelPrice(drop).success, true);
+  assert.deepEqual(api.getFuelPrices().map((p) => p.id), [keep]);
+  assert.match(api.deleteFuelPrice(drop).error, /not found/);
+
+  const actions = dump(ss, 'Audit Log').rows
+    .map((r) => rowObject(HEADERS['Audit Log'], r).Action);
+  assert.ok(actions.includes('FUEL_PRICE_DELETE'));
+});
+
+test('editing and removing a fuel price need EDIT_FREIGHT_RATES', () => {
+  const sheets = base();
+  const { api } = makeEnv({ sheets, userEmail: EMAIL.Admin });
+  const id = api.addFuelPrice({ effectiveDate: '7/7/2026', dieselPrice: 67 }).fuelPrice.id;
+
+  const viewer = makeEnv({ sheets, userEmail: EMAIL.Viewer }).api;
+  assert.throws(() => viewer.updateFuelPrice(id, { dieselPrice: 70 }), /Access denied/);
+  assert.throws(() => viewer.deleteFuelPrice(id), /Access denied/);
 });
 
 // ── The date lock ─────────────────────────────────────────────

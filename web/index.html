@@ -575,16 +575,14 @@
                             <label class="field-label" for="import-origin"
                                 >Origin warehouse</label
                             >
-                            <!-- Free text with suggestions: the list comes from
-                                 the rate matrix, but a new warehouse must be
-                                 importable before anyone seeds its rates. -->
-                            <input
-                                type="text"
+                            <!-- The list comes from the rate matrix. The last
+                                 option types in a new warehouse, because one
+                                 must be importable before anyone seeds its
+                                 rates. -->
+                            <select
                                 id="import-origin"
-                                list="import-origin-options"
-                                placeholder="e.g. TANZA"
-                            />
-                            <datalist id="import-origin-options"></datalist>
+                                onchange="onImportOriginChange()"
+                            ></select>
                         </div>
                         <div id="import-file-info" style="display: none">
                             <div class="field-label">Selected file</div>
@@ -965,6 +963,15 @@
                         placeholder="Billing #"
                         style="width: 120px"
                     />
+                    <!-- The DATE: line of the printed billing. It is the
+                         submission date, not the trip range, so it is typed
+                         rather than derived. -->
+                    <input
+                        type="date"
+                        id="bl-doc-date"
+                        title="The DATE: line on the printed billing"
+                        style="width: 150px"
+                    />
                     <button
                         class="btn btn-primary btn-sm"
                         onclick="stampBillingNumber()"
@@ -1014,6 +1021,25 @@
                         oninput="renderRateMatrix()"
                         style="width: 160px"
                     />
+                    <select
+                        id="bm-type"
+                        class="cell-select"
+                        onchange="renderRateMatrix()"
+                        style="width: 110px"
+                    >
+                        <option value="">All types</option>
+                    </select>
+                    <label
+                        class="tb-label"
+                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                    >
+                        <input
+                            type="checkbox"
+                            id="bm-focus-band"
+                            onchange="renderRateMatrix()"
+                        />
+                        Current band only
+                    </label>
                     <span class="tb-label" id="bm-count"></span>
                     <div class="tb-spacer"></div>
                     <span class="tb-label" id="bm-band-hint"></span>
@@ -1032,6 +1058,13 @@
                                 <span class="settings-section-title"
                                     >DOE diesel price</span
                                 >
+                                <a
+                                    class="tb-label"
+                                    href="https://doe.gov.ph/data-and-prices/liquid-fuels/retail-pump-prices/ncr-pump-prices"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    >DOE NCR pump prices ↗</a
+                                >
                                 <div class="tb-spacer"></div>
                                 <input
                                     type="date"
@@ -1046,12 +1079,6 @@
                                     placeholder="67.00"
                                     style="width: 90px"
                                 />
-                                <input
-                                    type="text"
-                                    id="fp-note"
-                                    placeholder="DOE posting"
-                                    style="width: 180px"
-                                />
                                 <button
                                     class="btn btn-primary btn-sm"
                                     onclick="submitFuelPrice()"
@@ -1059,20 +1086,25 @@
                                     + Add price
                                 </button>
                             </div>
+                            <div id="fp-reminder"></div>
                             <p class="settings-section-hint">
                                 The Quezon City diesel "Common Price" from the
-                                DOE weekly NCR posting. A billing prices from
-                                the newest entry on or before its billing date,
-                                so add each week's price before you bill it.
+                                DOE weekly NCR posting. The DOE posts on a
+                                Monday and the price runs Tuesday to the
+                                following Monday, so the effective date is
+                                always a <strong>Tuesday</strong>. A billing
+                                prices from the newest entry on or before its
+                                billing date, so add each week's price before
+                                you bill it.
                             </p>
                             <table class="data-table">
                                 <thead>
                                     <tr>
-                                        <th style="width: 110px">Effective</th>
+                                        <th style="width: 160px">Effective</th>
                                         <th style="width: 90px">Price</th>
                                         <th style="width: 110px">Band</th>
-                                        <th>Source</th>
                                         <th style="width: 180px">Added by</th>
+                                        <th style="width: 120px"></th>
                                     </tr>
                                 </thead>
                                 <tbody id="fuel-prices-tbody"></tbody>
@@ -1851,7 +1883,7 @@
                     </div>
                     <div class="form-row">
                         <label class="form-label">Sheets to import</label>
-                        <div id="sr-sheets"></div>
+                        <div id="sr-sheets" class="form-check-list"></div>
                     </div>
                 </div>
                 <div class="modal-footer">

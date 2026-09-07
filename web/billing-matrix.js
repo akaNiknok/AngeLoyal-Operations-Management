@@ -26,15 +26,48 @@
                 return FUEL_BANDS[bandIndexForPrice(price) - 1];
             }
 
+            // The DOE posts NCR pump prices on a Monday and each posting runs
+            // Tuesday to the following Monday, so an effective date is always a
+            // Tuesday. Verified against the DOE's own postings, which are all
+            // titled Tuesday-to-Monday ("September 1 to 7 2026").
+            const DOE_PRICE_URL =
+                "https://doe.gov.ph/data-and-prices/liquid-fuels/retail-pump-prices/ncr-pump-prices";
+
+            function isTuesdayIso(iso) {
+                return !!iso && new Date(iso + "T00:00:00").getDay() === 2;
+            }
+
+            /** The Tuesday on or before `iso` (today when omitted), as ISO. */
+            function latestTuesdayIso(iso) {
+                const d = iso ? new Date(iso + "T00:00:00") : new Date();
+                d.setDate(d.getDate() - ((d.getDay() + 5) % 7)); // Tue (2) → 0
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            }
+
+            /** M/d/yyyy → yyyy-mm-dd, the format a date input wants. */
+            function mdyToIso(mdy) {
+                const [m, d, y] = String(mdy || "").split("/");
+                if (!y) return "";
+                return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+            }
+
             // ── Panel entry ───────────────────────────────────────────
 
             function openBillingMatrix() {
                 const sel = document.getElementById("bm-origin");
                 const keep = sel.value;
-                sel.innerHTML = (origins || [])
-                    .map((o) => `<option value="${esc(o)}">${esc(o)}</option>`)
-                    .join("");
-                if (keep && origins.includes(keep)) sel.value = keep;
+                // "All origins" reads the whole matrix and groups it by
+                // warehouse — the same area name prices differently per origin,
+                // and comparing them side by side is the point.
+                sel.innerHTML =
+                    '<option value="">All origins</option>' +
+                    (origins || [])
+                        .map((o) => `<option value="${esc(o)}">${esc(o)}</option>`)
+                        .join("");
+                sel.value = keep && origins.includes(keep) ? keep : (origins[0] || "");
+
+                const fp = document.getElementById("fp-date");
+                if (!fp.value) fp.value = latestTuesdayIso();
 
                 refreshFuelPrices();
                 if (sel.value) loadRateMatrix();
@@ -51,16 +84,12 @@
 
             function loadRateMatrix() {
                 const origin = document.getElementById("bm-origin").value;
-                if (!origin) {
-                    rateMatrix = [];
-                    renderRateMatrix();
-                    return;
-                }
                 setLoading("Loading rates…");
                 call("getFreightRates", origin).then((list) => {
                     hideLoading();
                     rateMatrix = list || [];
                     populateEffectiveDates();
+                    populateTruckTypes();
                     renderRateMatrix();
                 }, (e) => {
                     hideLoading();
@@ -80,22 +109,64 @@
                 if (keep && dates.includes(keep)) sel.value = keep;
             }
 
+            function populateTruckTypes() {
+                const sel = document.getElementById("bm-type");
+                const keep = sel.value;
+                const types = [...new Set(rateMatrix.map((r) => r.truckType))]
+                    .filter(Boolean)
+                    .sort();
+                sel.innerHTML =
+                    '<option value="">All types</option>' +
+                    types
+                        .map((t) => `<option value="${esc(t)}">${esc(t)}</option>`)
+                        .join("");
+                if (types.includes(keep)) sel.value = keep;
+            }
+
             // ── Fuel prices ───────────────────────────────────────────
 
             function renderFuelPrices() {
                 const tbody = document.getElementById("fuel-prices-tbody");
                 if (!tbody) return;
+                const canEditRates = currentUser.role === "Admin";
+
                 tbody.innerHTML = fuelPrices
-                    .map(
-                        (p) => `<tr>
-  <td>${esc(p.effectiveDate)}</td>
+                    .map((p) => {
+                        const offCycle = !isTuesdayIso(mdyToIso(p.effectiveDate));
+                        return `<tr>
+  <td>${esc(p.effectiveDate)}${offCycle ? ' <span class="tb-label" title="The DOE week starts on a Tuesday">not a Tuesday</span>' : ""}</td>
   <td style="font-family:'DM Mono',monospace">${Number(p.dieselPrice).toFixed(2)}</td>
   <td style="font-family:'DM Mono',monospace;color:var(--muted)">${esc(bandLabelForPrice(p.dieselPrice))}</td>
-  <td>${esc(p.sourceNote) || "—"}</td>
   <td style="color:var(--muted);font-size:11px">${esc(p.addedBy)}</td>
-</tr>`,
-                    )
+  <td>${
+      canEditRates
+          ? `<button class="btn btn-ghost btn-sm" onclick="editFuelPrice(${p.id})">Edit</button>
+             <button class="btn btn-ghost btn-sm" onclick="removeFuelPrice(${p.id})">Remove</button>`
+          : ""
+  }</td>
+</tr>`;
+                    })
                     .join("");
+
+                renderFuelReminder();
+            }
+
+            // Warns when the current DOE week has no price yet. A billing dated
+            // this week would otherwise silently index on last week's band.
+            function renderFuelReminder() {
+                const host = document.getElementById("fp-reminder");
+                if (!host) return;
+                const due = latestTuesdayIso();
+                const have = fuelPrices.some(
+                    (p) => mdyToIso(p.effectiveDate) === due,
+                );
+                host.innerHTML = have
+                    ? ""
+                    : `<div class="settings-section-hint" style="padding:8px 12px;background:var(--amber-bg);border-radius:var(--radius-sm);margin-bottom:8px">
+  <strong>No price yet for the week of ${esc(isoToMDY(due))}.</strong>
+  The DOE posted it the Monday before. Add it before you bill this week —
+  <a href="${DOE_PRICE_URL}" target="_blank" rel="noopener noreferrer">open the DOE NCR posting ↗</a>
+</div>`;
             }
 
             function submitFuelPrice() {
@@ -109,26 +180,93 @@
                     showToast("Enter the diesel price.", "warning");
                     return;
                 }
+                // A DOE week always starts on a Tuesday, but a mid-week special
+                // adjustment does happen — so confirm rather than refuse.
+                if (
+                    !isTuesdayIso(dateVal) &&
+                    !confirm(
+                        `${isoToMDY(dateVal)} is not a Tuesday. A DOE price week runs Tuesday to the following Monday. Save it anyway?`,
+                    )
+                )
+                    return;
 
                 call("addFuelPrice", {
                     effectiveDate: isoToMDY(dateVal),
                     dieselPrice: Number(priceVal),
-                    sourceNote: document.getElementById("fp-note").value.trim(),
                 }).then((r) => {
                     if (!r.success) {
                         showToast(r.error, "error");
                         return;
                     }
                     fuelPrices.unshift(r.fuelPrice);
-                    fuelPrices.sort((a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
+                    sortFuelPrices();
                     document.getElementById("fp-price").value = "";
-                    document.getElementById("fp-note").value = "";
                     renderFuelPrices();
                     renderRateMatrix();
                     showToast(
                         `Price saved — band ${r.fuelPrice.band}.`,
                         "success",
                     );
+                }, toastError);
+            }
+
+            function sortFuelPrices() {
+                fuelPrices.sort(
+                    (a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate),
+                );
+            }
+
+            function editFuelPrice(priceId) {
+                const p = fuelPrices.find((x) => x.id === priceId);
+                if (!p) return;
+
+                const dateIn = prompt(
+                    "Effective date (M/d/yyyy) — a DOE week starts on a Tuesday",
+                    p.effectiveDate,
+                );
+                if (dateIn === null) return;
+                const priceIn = prompt("Diesel price", String(p.dieselPrice));
+                if (priceIn === null) return;
+                if (!(Number(priceIn) > 0)) {
+                    showToast("Enter the diesel price.", "warning");
+                    return;
+                }
+
+                call("updateFuelPrice", priceId, {
+                    effectiveDate: dateIn.trim(),
+                    dieselPrice: Number(priceIn),
+                }).then((r) => {
+                    if (!r.success) {
+                        showToast(r.error, "error");
+                        return;
+                    }
+                    Object.assign(p, r.fuelPrice);
+                    sortFuelPrices();
+                    renderFuelPrices();
+                    renderRateMatrix();
+                    showToast(`Price updated — band ${r.fuelPrice.band}.`, "success");
+                }, toastError);
+            }
+
+            function removeFuelPrice(priceId) {
+                const p = fuelPrices.find((x) => x.id === priceId);
+                if (!p) return;
+                if (
+                    !confirm(
+                        `Remove the ${Number(p.dieselPrice).toFixed(2)} price effective ${p.effectiveDate}? A billing already stamped with a billing number keeps the rate it was priced at.`,
+                    )
+                )
+                    return;
+
+                call("deleteFuelPrice", priceId).then((r) => {
+                    if (!r.success) {
+                        showToast(r.error, "error");
+                        return;
+                    }
+                    fuelPrices = fuelPrices.filter((x) => x.id !== priceId);
+                    renderFuelPrices();
+                    renderRateMatrix();
+                    showToast("Price removed.", "success");
                 }, toastError);
             }
 
@@ -140,6 +278,8 @@
                 if (!thead || !tbody) return;
 
                 const effective = document.getElementById("bm-effective").value;
+                const truckType = document.getElementById("bm-type").value;
+                const allOrigins = !document.getElementById("bm-origin").value;
                 const search = document
                     .getElementById("bm-search")
                     .value.trim()
@@ -155,34 +295,84 @@
                     ? `Current band ${liveBand}`
                     : "No diesel price recorded yet";
 
+                // "Current band only" drops the 24 columns nobody is pricing
+                // from today. It is the difference between one screen and six.
+                const focus =
+                    document.getElementById("bm-focus-band").checked && liveBand;
+                const cols = focus ? [liveBand] : FUEL_BANDS;
+
                 const rows = rateMatrix
                     .filter((r) => !effective || r.effectiveDate === effective)
-                    .filter((r) => !search || r.area.toUpperCase().includes(search));
+                    .filter((r) => !truckType || r.truckType === truckType)
+                    .filter((r) => !search || r.area.toUpperCase().includes(search))
+                    .sort(
+                        (a, b) =>
+                            a.origin.localeCompare(b.origin) ||
+                            a.area.localeCompare(b.area) ||
+                            a.truckType.localeCompare(b.truckType),
+                    );
 
                 document.getElementById("bm-count").textContent =
                     `${rows.length} rates`;
 
                 thead.innerHTML =
-                    `<tr><th style="width:150px">Area</th><th style="width:60px">Type</th>` +
-                    FUEL_BANDS.map(
-                        (b) =>
-                            `<th style="width:70px${b === liveBand ? ";background:var(--blue-bg)" : ""}">${esc(b)}</th>`,
-                    ).join("") +
+                    `<tr><th class="rm-pin" style="width:150px">Area</th><th class="rm-pin rm-pin-2" style="width:60px">Type</th>` +
+                    cols
+                        .map(
+                            (b) =>
+                                `<th style="width:70px${b === liveBand ? ";background:var(--blue-bg)" : ""}">${esc(b)}</th>`,
+                        )
+                        .join("") +
                     `</tr>`;
+
+                // Rows come out grouped: a heading row per origin when the
+                // filter is "All origins", and alternating shading per area so
+                // one area's truck types read as one block.
+                const span = cols.length + 2;
+                let lastOrigin = null;
+                let lastArea = null;
+                let alt = false;
 
                 tbody.innerHTML = rows
                     .map((r) => {
-                        const cells = FUEL_BANDS.map((b) => {
-                            const v = r.bands[b];
-                            const shown = v === null || v === undefined ? "" : v;
-                            const hl = b === liveBand ? "background:var(--blue-bg)" : "";
-                            return isAdmin
-                                ? `<td style="${hl}"><input class="cell-input" style="width:64px;text-align:right" value="${esc(shown)}" onchange="saveRateCell(${r.id},'${b}',this.value)"></td>`
-                                : `<td style="${hl};text-align:right;font-family:'DM Mono',monospace">${esc(shown) || "—"}</td>`;
-                        }).join("");
-                        return `<tr><td>${esc(r.area)}</td><td>${esc(r.truckType)}</td>${cells}</tr>`;
+                        let head = "";
+                        if (allOrigins && r.origin !== lastOrigin) {
+                            lastOrigin = r.origin;
+                            lastArea = null;
+                            alt = false;
+                            head = `<tr class="rm-origin-head"><td colspan="${span}"><span>${esc(r.origin)}</span></td></tr>`;
+                        }
+                        if (r.area !== lastArea) {
+                            lastArea = r.area;
+                            alt = !alt;
+                        }
+
+                        const cells = cols
+                            .map((b) => {
+                                const v = r.bands[b];
+                                const shown = v === null || v === undefined ? "" : v;
+                                const hl =
+                                    b === liveBand ? "background:var(--blue-bg)" : "";
+                                return isAdmin
+                                    ? `<td style="${hl}"><input class="cell-input" style="width:64px;text-align:right" value="${esc(shown)}" onchange="saveRateCell(${r.id},'${b}',this.value)"></td>`
+                                    : `<td style="${hl};text-align:right;font-family:'DM Mono',monospace">${esc(shown) || "—"}</td>`;
+                            })
+                            .join("");
+
+                        return `${head}<tr${alt ? ' class="rm-alt"' : ""}><td class="rm-pin">${esc(r.area)}</td><td class="rm-pin rm-pin-2">${esc(r.truckType)}</td>${cells}</tr>`;
                     })
                     .join("");
+
+                // The Type column pins beside Area, so its offset is the width
+                // Area actually rendered at, not the width the markup asked for.
+                const table = document.getElementById("rate-matrix-table");
+                const first = thead.querySelector("th");
+                if (table && first) {
+                    table.style.setProperty(
+                        "--rm-pin-2-left",
+                        first.offsetWidth + "px",
+                    );
+                }
             }
 
             function saveRateCell(rateId, band, value) {
@@ -284,7 +474,7 @@
                     document.getElementById("sr-sheets").innerHTML = sheets
                         .map(
                             (s, i) =>
-                                `<label style="display:flex;align-items:center;gap:6px;padding:2px 0">
+                                `<label>
   <input type="checkbox" id="sr-sheet-${i}" checked>
   <strong>${esc(s.name)}</strong>
   <span class="tb-label">${s.rows.length} rates</span>

@@ -192,10 +192,21 @@
                 doc.open();
                 doc.write(html);
                 doc.close();
-                setTimeout(() => {
-                    frame.contentWindow.focus();
-                    frame.contentWindow.print();
-                }, 150);
+                // Wait for any <img> to decode. Printing before the letterhead
+                // loads drops it from the PDF, and the failure is silent.
+                const images = [...doc.images].map(
+                    (img) =>
+                        img.complete ||
+                        new Promise((r) => {
+                            img.onload = img.onerror = r;
+                        }),
+                );
+                Promise.all(images).then(() =>
+                    setTimeout(() => {
+                        frame.contentWindow.focus();
+                        frame.contentWindow.print();
+                    }, 150),
+                );
             }
 
             // Rasterizes the same print HTML to a downloadable .jpg. Renders

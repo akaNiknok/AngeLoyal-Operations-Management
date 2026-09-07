@@ -202,6 +202,8 @@ const RPC_ALLOWED = {
   importFreightRates: 'w',
   updateFreightRate: 'w',
   addFuelPrice: 'w',
+  updateFuelPrice: 'w',
+  deleteFuelPrice: 'w',
   clearAllData: 'w',
 };
 

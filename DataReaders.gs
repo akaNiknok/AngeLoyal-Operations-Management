@@ -564,11 +564,11 @@ function getFreightRateOrigins() {
 
 /**
  * Returns the DOE diesel price history, newest effective date first.
- * @returns {Object[]} Array of { id, effectiveDate, dieselPrice, sourceNote, addedBy, addedAt }
+ * @returns {Object[]} Array of { id, effectiveDate, dieselPrice, addedBy, addedAt }
  */
 function getFuelPrices() {
   const sheet   = _getOrCreateSheet(SHEET_FUEL_PRICES,
-    ['ID', 'Effective Date', 'Diesel Price', 'Source Note', 'Added By', 'Added At']);
+    ['ID', 'Effective Date', 'Diesel Price', 'Added By', 'Added At']);
   const rows    = sheet.getDataRange().getValues();
   const headers = rows[0].map(h => h.toString().trim());
 
@@ -579,7 +579,6 @@ function getFuelPrices() {
       id:            id,
       effectiveDate: _formatDate(_readDateCell(_val(row, headers, 'Effective Date'))),
       dieselPrice:   _numOrNull(_val(row, headers, 'Diesel Price')),
-      sourceNote:    String(_val(row, headers, 'Source Note') || ''),
       addedBy:       String(_val(row, headers, 'Added By') || ''),
       addedAt:       _valDateTime(row, headers, 'Added At'),
     };
