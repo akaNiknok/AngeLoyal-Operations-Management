@@ -520,6 +520,7 @@ function _createCarryoverTrip(originalRow, headers, originalTripId, statusReason
   const tier           = _val(originalRow, headers, 'Tier');
 
   const sheet   = _getSheet(SHEET_TRIPS);
+  _ensureTripColumns(sheet);
   const nextId  = _nextRowId(sheet);
   const email   = _getCurrentUserEmail();
   const now     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
@@ -694,6 +695,28 @@ function _renameTruckBillingCategory(oldName, newName) {
   if (changed) {
     sheet.getRange(2, colIdx + 1, colValues.length, 1).setValues(colValues);
   }
+}
+
+
+/**
+ * Adds any Trips column this build writes but an older Sheet does not have
+ * yet, and returns the header row.
+ *
+ * Every trip writer appends a fixed-width array, so a Sheet that predates a
+ * column would either take the value in the wrong place or reject the range
+ * outright. Same self-migration the Waybill Prefixes sheet does for
+ * Sequence Width — see _reserveWaybillSequence.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @returns {string[]} headers, including any column just added
+ */
+function _ensureTripColumns(sheet) {
+  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .getValues()[0].map(h => h.toString().trim());
+  ['Convoy Group', 'Sort Order', 'Origin'].forEach(col => {
+    headers = _ensureColumn(sheet, headers, col);
+  });
+  return headers;
 }
 
 

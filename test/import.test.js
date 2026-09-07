@@ -78,6 +78,21 @@ test('importRouteFile stamps the origin warehouse on every trip it writes', () =
   assert.ok(trips.every((t) => t['Sort Order'] === ''));
 });
 
+test('importRouteFile adds the Origin column to a Sheet that predates it', () => {
+  // A live Sheet from before billing stops at Sort Order. The writers append a
+  // fixed-width row, so the column has to appear before the first write.
+  const legacy = HEADERS.Trips.slice(0, HEADERS.Trips.indexOf('Origin'));
+  const { api, ss } = asDispatcher(importSheets({ Trips: [legacy] }));
+
+  const res = api.importRouteFile('6/16/2026', ROWS, 'LINGUNAN');
+  assert.equal(res.success, true);
+
+  const { headers, rows } = dump(ss, 'Trips');
+  assert.ok(headers.includes('Origin'), 'Origin column was added');
+  const trips = rows.map((r) => rowObject(headers, r));
+  assert.ok(trips.every((t) => t.Origin === 'LINGUNAN'));
+});
+
 test('importRouteFile leaves Origin blank when none is given', () => {
   const { api, ss } = asDispatcher(importSheets());
   api.importRouteFile('6/16/2026', ROWS);

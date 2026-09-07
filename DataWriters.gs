@@ -34,6 +34,7 @@ function createTrip(tripData) {
 
     // 3. Write trip row
     const sheet   = _getSheet(SHEET_TRIPS);
+    _ensureTripColumns(sheet);
     const nextId  = _nextRowId(sheet);
     const now     = new Date();
     const email   = _getCurrentUserEmail();
@@ -611,6 +612,7 @@ function importRouteFile(tripDate, rowData, origin) {
 
     // --- Next IDs for the sheets we'll append to ---
     const tripsSheet = _getSheet(SHEET_TRIPS);
+    _ensureTripColumns(tripsSheet);
     const auditSheet = _getSheet(SHEET_AUDIT);
     let nextTripId  = _nextRowId(tripsSheet);
     let nextAuditId = _nextRowId(auditSheet);
