@@ -172,6 +172,7 @@ const RPC_ALLOWED = {
   updateSuggestedWaybill: 'w',
   importRouteFile: 'w',
   deleteImportedTrip: 'w',
+  bulkDeleteTrips: 'w',
   markDayScheduled: 'w',
   setTripConvoyGroup: 'w',
   updateDefaultAssignment: 'w',

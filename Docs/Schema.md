@@ -257,6 +257,7 @@ When a trip status transitions to `Foul Trip - For Redeliver`, `Redeliver`, or `
 * Parent Trip ID \= Links back to the original trip's ID
 * Source \= Carry-over
 * Trip Status \= Scheduled, or Prepping for a `Backlog` carry-over (it still needs a crew, and gets no suggested waybill)
+* Waybill \= the parent trip's waybill number with `-R` or `-FT` appended, not a new number (see Redeliver and Foul Trip Numbering under Sheet 10\)
 
 ### **Sheet 9: Route Frequency Log**
 
@@ -302,6 +303,14 @@ Tracks system-generated billing numbers. Once a record is finalized by operation
 3. Dispatch staff review the layout inside the UI and retain the option to manually alter the number string.  
 4. If changed, the application verifies the registry; if the manually entered string matches an existing record marked Confirmed, the system rejects the input with a validation error.  
 5. Upon confirmation, the parameters shift to Status \= Confirmed and Locked \= TRUE, while updating the master index tracking entry inside Waybill Prefixes.
+
+#### **Redeliver and Foul Trip Numbering**
+
+A carry-over waybill does **not** take a new number. Rebisco requires the redelivered load to keep the original: waybill AY-10761 redelivered is AY-10761-R, and foul is AY-10761-FT. The carry-over row therefore copies the parent waybill's Prefix ID, Sequence Number and number base, appends the suffix, and leaves Last Sequence Number untouched — the sequence was already spent when the parent was issued.
+
+Two rows then hold the same Sequence Number for one prefix (AY-10761 and AY-10761-R). This is correct. The system reads the highest Sequence Number in the ledger, which still reports 10761, so the next Regular waybill is 10762.
+
+A carry-over of a carry-over keeps one suffix: the system strips a trailing -R or -FT off the parent number before it appends the new one, so the number stays AY-10761-R and never grows to AY-10761-R-R.
 
 ## **Group 5: Audit**
 

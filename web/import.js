@@ -555,7 +555,17 @@
                             showToast("Import failed: " + r.errors[0], "error");
                             return;
                         }
-                        const msg = `Imported ${r.imported} drops in Prepping.${r.skipped > 0 ? " " + r.skipped + " skipped." : ""}`;
+                        // Duplicates get their own sentence: "skipped" alone
+                        // reads as a parse problem, but a re-import is the
+                        // system refusing to write the same route file twice.
+                        const dup = r.duplicates || 0;
+                        const other = (r.skipped || 0) - dup;
+                        const msg =
+                            `Imported ${r.imported} drops in Prepping.` +
+                            (dup > 0
+                                ? ` ${dup} already on this date — not imported again.`
+                                : "") +
+                            (other > 0 ? ` ${other} skipped.` : "");
                         showToast(msg, r.skipped > 0 ? "warning" : "success");
                         if (r.errors.length)
                             console.warn("Import errors:", r.errors);

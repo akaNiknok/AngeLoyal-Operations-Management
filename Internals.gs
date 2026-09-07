@@ -195,8 +195,22 @@ function _reserveWaybillSequence(prefixId, newSeqNumber, width) {
 
 /**
  * Creates a Suggested waybill row for a trip.
- * Does NOT confirm or lock it, but DOES reserve the number: the prefix's
- * Last Sequence Number advances so the next suggestion can't collide.
+ * Does NOT confirm or lock it.
+ *
+ * A NEW number is minted (and the prefix's Last Sequence Number reserved, so
+ * the next suggestion can't collide) — except on the carry-over path.
+ *
+ * A carry-over passes `parentWaybillId`, and Rebisco requires the redelivered
+ * load to keep the ORIGINAL number: waybill 1001 redelivered is 1001-R, never
+ * the next free number with -R stapled on. So when a parent is given, the row
+ * reuses the parent's prefix, sequence and number base, and reserves nothing —
+ * the sequence was already spent when the parent was issued. `-R` / `-FT` is
+ * stripped off the parent's number first, so redelivering a redeliver stays
+ * 1001-R instead of growing 1001-R-R.
+ *
+ * Two rows then share one Sequence Number for the prefix (1001 and 1001-R).
+ * That is intended: _highestIssuedSequence still reports 1001, so the next
+ * Regular waybill is 1002.
  *
  * @param {number} tripId
  * @param {number} prefixId
@@ -210,28 +224,40 @@ function _createSuggestedWaybill(tripId, prefixId, foNumber, waybillType, parent
     const sheet     = _getSheet(SHEET_WAYBILLS);
     const wbRows    = sheet.getDataRange().getValues();
     const wbHeaders = wbRows[0].map(h => h.toString().trim());
-    const pref      = _requireWaybillPrefix(prefixId);
-
-    const nextSeq = Math.max(
-      pref.lastSequenceNumber || 0,
-      _highestIssuedSequence(prefixId, wbRows, wbHeaders)) + 1;
 
     let suffix = '';
     if (waybillType === 'Redeliver')  suffix = '-R';
     if (waybillType === 'Foul Trip')  suffix = '-FT';
 
-    const waybillNumber = _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth, suffix);
+    const parent = parentWaybillId
+      ? wbRows.slice(1).find(r =>
+          Number(_numOrNull(_val(r, wbHeaders, 'ID'))) === Number(parentWaybillId))
+      : null;
 
-    // Reserve before minting: the old order appended the waybill first and
-    // swallowed a failed bump, which is exactly how duplicates got out.
-    _reserveWaybillSequence(prefixId, nextSeq, pref.sequenceWidth);
+    let seq, waybillNumber, usePrefixId;
+    if (parent) {
+      usePrefixId   = _numOrNull(_val(parent, wbHeaders, 'Prefix ID'));
+      seq           = _numOrNull(_val(parent, wbHeaders, 'Sequence Number'));
+      waybillNumber = _baseWaybillNumber(_val(parent, wbHeaders, 'Waybill Number')) + suffix;
+    } else {
+      const pref    = _requireWaybillPrefix(prefixId);
+      usePrefixId   = prefixId;
+      seq           = Math.max(
+        pref.lastSequenceNumber || 0,
+        _highestIssuedSequence(prefixId, wbRows, wbHeaders)) + 1;
+      waybillNumber = _waybillNumberString(pref.prefix, seq, pref.sequenceWidth, suffix);
+
+      // Reserve before minting: the old order appended the waybill first and
+      // swallowed a failed bump, which is exactly how duplicates got out.
+      _reserveWaybillSequence(prefixId, seq, pref.sequenceWidth);
+    }
 
     const nextId = _nextRowIdFromRows(wbRows);
     sheet.appendRow([
       nextId,
       waybillNumber,
-      prefixId,
-      nextSeq,
+      usePrefixId,
+      seq,
       tripId,
       foNumber,
       waybillType,
