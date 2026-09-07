@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.7.1",
+      "date": "2026-09-07",
+      "title": "Correct redeliver numbers, safe re-imports",
+      "body": "### Fixes\n\n- **A redeliver or a foul trip now keeps the original waybill number.** A redeliver of waybill AL-40 is AL-40-R. Before, the app gave the carry-over trip the next free number, such as AL-41-R.\n- **The app does not import the same route file twice.** If an import fails and you try again, the app brings in only the freight orders (FO) that the date does not have yet. Before, a second attempt put another copy of every row on the dispatch board.\n\n### What is new\n\n- **You can delete several rows in one action.** Select the rows on the dispatch board. Click **✕ Delete** in the toolbar. The app deletes each selected trip that has no confirmed waybill. It keeps the trips that have one, and tells you how many it kept.\n\n### Check your data\n\nThe app does not change a waybill number that it gave before this version. Look at the carry-over trips on your board. Correct a wrong -R or -FT number by hand before you confirm it."
+    },
+    {
       "version": "v1.7.0",
       "date": "2026-08-30",
       "title": "Manage the user accounts in the app",
