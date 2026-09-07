@@ -65,6 +65,27 @@ test('importRouteFile imports every row as Prepping with no waybills yet', () =>
   assert.equal(dump(ss, 'Waybills').rows.length, 0);
 });
 
+test('importRouteFile stamps the origin warehouse on every trip it writes', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  api.importRouteFile('6/16/2026', ROWS, 'TANZA');
+
+  const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
+  assert.ok(trips.length > 0);
+  assert.ok(trips.every((t) => t.Origin === 'TANZA'));
+  // Sort Order sits between Convoy Group and Origin and must stay blank —
+  // the board sets it by dragging, and a shifted array would put the
+  // warehouse name in it.
+  assert.ok(trips.every((t) => t['Sort Order'] === ''));
+});
+
+test('importRouteFile leaves Origin blank when none is given', () => {
+  const { api, ss } = asDispatcher(importSheets());
+  api.importRouteFile('6/16/2026', ROWS);
+
+  const trips = dump(ss, 'Trips').rows.map((r) => rowObject(HEADERS.Trips, r));
+  assert.ok(trips.every((t) => t.Origin === ''));
+});
+
 test('importRouteFile seeds new outlets once and dedupes case-insensitively', () => {
   const { api, ss } = asDispatcher(importSheets());
   api.importRouteFile('6/16/2026', ROWS);

@@ -528,6 +528,17 @@
                 document.getElementById("btn-run-import").disabled = !include;
             }
 
+            // Fills the origin datalist from the warehouses the rate matrix
+            // already carries. It only suggests — the input stays free text so
+            // a new warehouse can be imported before anyone seeds its rates.
+            function populateOriginOptions() {
+                const list = document.getElementById("import-origin-options");
+                if (!list) return;
+                list.innerHTML = (origins || [])
+                    .map((o) => `<option value="${esc(o)}"></option>`)
+                    .join("");
+            }
+
             function runImport() {
                 if (!canEdit()) {
                     showToast("Your role cannot import trips.", "warning");
@@ -547,8 +558,27 @@
                     return;
                 }
 
+                // One route file is one warehouse. Billing reads the origin back
+                // to pick the right sheet of the rate matrix, so a blank one
+                // leaves every trip in the file unpriceable.
+                const originVal = document
+                    .getElementById("import-origin")
+                    .value.trim();
+                if (!originVal) {
+                    showToast(
+                        "Enter the origin warehouse — billing needs it to find the rate.",
+                        "warning",
+                    );
+                    return;
+                }
+
                 setLoading(`Importing ${rowsToImport.length} rows…`);
-                call("importRouteFile", isoToMDY(dateVal), rowsToImport).then(
+                call(
+                    "importRouteFile",
+                    isoToMDY(dateVal),
+                    rowsToImport,
+                    originVal,
+                ).then(
                     (r) => {
                         hideLoading();
                         if (!r.success) {

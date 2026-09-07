@@ -134,7 +134,8 @@
                 color: var(--text);
             }
             .nav-btn.admin-only,
-            .nav-btn.dispatcher-only {
+            .nav-btn.dispatcher-only,
+            .nav-btn.payroll-only {
                 display: none;
             }
 

@@ -103,6 +103,20 @@
                         Waybill Prefixes
                     </button>
                     <button
+                        class="nav-btn payroll-only"
+                        id="nav-billing"
+                        onclick="switchPanel('billing')"
+                    >
+                        Billing
+                    </button>
+                    <button
+                        class="nav-btn payroll-only"
+                        id="nav-billing-matrix"
+                        onclick="switchPanel('billing-matrix')"
+                    >
+                        Billing Matrix
+                    </button>
+                    <button
                         class="nav-btn admin-only"
                         id="nav-settings"
                         onclick="switchPanel('settings')"
@@ -557,6 +571,21 @@
                             >
                             <input type="date" id="import-date" />
                         </div>
+                        <div>
+                            <label class="field-label" for="import-origin"
+                                >Origin warehouse</label
+                            >
+                            <!-- Free text with suggestions: the list comes from
+                                 the rate matrix, but a new warehouse must be
+                                 importable before anyone seeds its rates. -->
+                            <input
+                                type="text"
+                                id="import-origin"
+                                list="import-origin-options"
+                                placeholder="e.g. TANZA"
+                            />
+                            <datalist id="import-origin-options"></datalist>
+                        </div>
                         <div id="import-file-info" style="display: none">
                             <div class="field-label">Selected file</div>
                             <div
@@ -891,6 +920,185 @@
                             </thead>
                             <tbody id="waybill-prefixes-tbody"></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: BILLING — one row per billable waybill over a date
+       range, priced from the rate matrix; mirrors the Rebisco
+       billing output workbook
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-billing">
+                <div class="toolbar">
+                    <input type="date" id="bl-from" onchange="loadBilling()" />
+                    <span class="tb-label">to</span>
+                    <input type="date" id="bl-to" onchange="loadBilling()" />
+                    <select
+                        id="bl-status"
+                        class="cell-select"
+                        onchange="renderBilling()"
+                        style="width: 120px"
+                    >
+                        <option value="unbilled">Not billed</option>
+                        <option value="billed">Billed</option>
+                        <option value="deferred">Deferred</option>
+                        <option value="all">All</option>
+                    </select>
+                    <select
+                        id="bl-origin"
+                        class="cell-select"
+                        onchange="renderBilling()"
+                        style="width: 140px"
+                    ></select>
+                    <select
+                        id="bl-prefix"
+                        class="cell-select"
+                        onchange="renderBilling()"
+                        style="width: 140px"
+                    ></select>
+                    <span class="tb-label" id="bl-count"></span>
+                    <div class="tb-spacer"></div>
+                    <input
+                        type="text"
+                        id="bl-number"
+                        placeholder="Billing #"
+                        style="width: 120px"
+                    />
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="stampBillingNumber()"
+                    >
+                        Stamp billing #
+                    </button>
+                    <button class="btn btn-ghost btn-sm" onclick="printBilling()">
+                        Print / Save as PDF
+                    </button>
+                </div>
+                <div class="admin-scroll">
+                    <div id="bl-warnings"></div>
+                    <div style="overflow-x: auto">
+                        <table class="data-table" id="billing-table">
+                            <thead id="billing-thead"></thead>
+                            <tbody id="billing-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="billing-footer" style="padding: 12px"></div>
+                </div>
+            </div>
+
+            <!-- ══════════════════════════════════════
+       PANEL: BILLING MATRIX — the DOE freight rate matrix per
+       origin warehouse, plus the weekly diesel price history
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-billing-matrix">
+                <div class="toolbar">
+                    <span class="tb-label">Origin</span>
+                    <select
+                        id="bm-origin"
+                        class="cell-select"
+                        onchange="loadRateMatrix()"
+                        style="width: 160px"
+                    ></select>
+                    <span class="tb-label">Effective</span>
+                    <select
+                        id="bm-effective"
+                        class="cell-select"
+                        onchange="renderRateMatrix()"
+                        style="width: 130px"
+                    ></select>
+                    <input
+                        type="text"
+                        id="bm-search"
+                        placeholder="Search area…"
+                        oninput="renderRateMatrix()"
+                        style="width: 160px"
+                    />
+                    <span class="tb-label" id="bm-count"></span>
+                    <div class="tb-spacer"></div>
+                    <span class="tb-label" id="bm-band-hint"></span>
+                    <button
+                        class="btn btn-primary btn-sm admin-only"
+                        onclick="openSeedRatesModal()"
+                    >
+                        Seed from .xlsx
+                    </button>
+                </div>
+                <div class="admin-scroll">
+                    <div class="settings-inner">
+                        <!-- Fuel prices -->
+                        <div class="settings-section" style="margin-bottom: 18px">
+                            <div class="settings-section-head">
+                                <span class="settings-section-title"
+                                    >DOE diesel price</span
+                                >
+                                <div class="tb-spacer"></div>
+                                <input
+                                    type="date"
+                                    id="fp-date"
+                                    style="width: 150px"
+                                />
+                                <input
+                                    type="number"
+                                    id="fp-price"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="67.00"
+                                    style="width: 90px"
+                                />
+                                <input
+                                    type="text"
+                                    id="fp-note"
+                                    placeholder="DOE posting"
+                                    style="width: 180px"
+                                />
+                                <button
+                                    class="btn btn-primary btn-sm"
+                                    onclick="submitFuelPrice()"
+                                >
+                                    + Add price
+                                </button>
+                            </div>
+                            <p class="settings-section-hint">
+                                The Quezon City diesel "Common Price" from the
+                                DOE weekly NCR posting. A billing prices from
+                                the newest entry on or before its billing date,
+                                so add each week's price before you bill it.
+                            </p>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 110px">Effective</th>
+                                        <th style="width: 90px">Price</th>
+                                        <th style="width: 110px">Band</th>
+                                        <th>Source</th>
+                                        <th style="width: 180px">Added by</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fuel-prices-tbody"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- Rate matrix -->
+                        <div class="settings-section">
+                            <div class="settings-section-head">
+                                <span class="settings-section-title"
+                                    >Freight rates</span
+                                >
+                            </div>
+                            <p class="settings-section-hint">
+                                One row per area and truck type; one column per
+                                diesel price band. Editing a cell changes the
+                                rate from now on — a billing already computed
+                                keeps the rate it was priced at.
+                            </p>
+                            <div style="overflow-x: auto">
+                                <table class="data-table" id="rate-matrix-table">
+                                    <thead id="rate-matrix-thead"></thead>
+                                    <tbody id="rate-matrix-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1607,6 +1815,64 @@
             </div>
         </div>
 
+        <div class="modal-backdrop" id="modal-seed-rates">
+            <div class="modal">
+                <div class="modal-head">
+                    <span class="modal-head-title">Seed rates from .xlsx</span>
+                    <button
+                        class="modal-close"
+                        onclick="closeModal('modal-seed-rates')"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <label class="form-label">Rates workbook</label>
+                        <input
+                            type="file"
+                            id="sr-file"
+                            accept=".xlsx"
+                            onchange="onSeedRatesFile(event)"
+                        />
+                        <p class="settings-section-hint">
+                            One sheet per origin warehouse. Row 3 holds the band
+                            midpoints, and each row below it is an area and a
+                            truck type.
+                        </p>
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Effective date</label>
+                        <input type="date" id="sr-date" />
+                        <p class="settings-section-hint">
+                            The first date these rates apply. Seeding the same
+                            origin and date again replaces that block.
+                        </p>
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Sheets to import</label>
+                        <div id="sr-sheets"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button
+                        class="btn btn-ghost"
+                        onclick="closeModal('modal-seed-rates')"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        class="btn btn-primary"
+                        id="sr-submit"
+                        onclick="submitSeedRates()"
+                        disabled
+                    >
+                        Import rates
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="modal-backdrop" id="modal-add-route-type-map">
             <div class="modal">
                 <div class="modal-head">
@@ -1744,6 +2010,8 @@
         <script src="import.js"></script>
         <script src="roster.js"></script>
         <script src="masters.js"></script>
+        <script src="billing.js"></script>
+        <script src="billing-matrix.js"></script>
         <script src="whatsnew.js"></script>
 
         <!-- Google Identity Services. `async` still delays window.load, so

@@ -36,6 +36,11 @@ function getBootData() {
     billingCategories:  getBillingCategories(),
     routeTypeMap:       getRouteTypeMap(),
     customerGroupColors: getCustomerGroupColors(),
+    billingChargeTypes: getBillingChargeTypes(),
+    // Just the warehouse names, not the 1,500-row rate matrix — the Import
+    // panel offers them as origin suggestions. The matrix itself is fetched by
+    // the Billing Matrix panel, one origin at a time.
+    origins:            getFreightRateOrigins(),
   };
 }
 
@@ -354,6 +359,7 @@ function getTrips(dateFrom, dateTo) {
       addedAt:             _valDateTime(row, headers, 'Added At'),
       convoyGroup:         String(_val(row, headers, 'Convoy Group') || ''),
       sortOrder:           _numOrNull(_val(row, headers, 'Sort Order')),
+      origin:              _val(row, headers, 'Origin') || '',
     };
   }).filter(t => t !== null);
 }
@@ -475,4 +481,220 @@ function getRouteFrequencyForDriver(driverId, windowDays) {
     count:      count,
     outletName: (outlets[oid] || {}).outletName || '',
   }));
+}
+
+
+// ============================================================
+//  DATA READERS — Billing
+// ============================================================
+
+/** Header row of the Freight Rates sheet: keys, then the 25 band columns. */
+function _freightRateHeaders() {
+  const bands = [];
+  for (let i = 1; i <= FUEL_BAND_COUNT; i++) bands.push(_fuelBandLabel(i));
+  return ['ID', 'Origin', 'Area', 'Truck Type', 'Effective Date'].concat(bands);
+}
+
+/**
+ * Returns the freight rate matrix. Each row carries its 25 price bands under
+ * `bands`, keyed by the band label ('65.01-70'), so a caller indexes once and
+ * then reads a rate without touching the sheet again.
+ *
+ * Pass `origin` to read one warehouse only — the Billing Matrix panel edits one
+ * sheet at a time and does not need the other two.
+ *
+ * ponytail: the whole matrix is about 1,500 rows and is read in full for each
+ * billing request. Move it into CacheService if that read ever gets slow.
+ *
+ * @param {string} [origin]  Case-insensitive warehouse filter.
+ * @returns {Object[]} Array of { id, origin, area, truckType, effectiveDate, bands }
+ */
+function getFreightRates(origin) {
+  const sheet   = _getOrCreateSheet(SHEET_FREIGHT_RATES, _freightRateHeaders());
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+  const want    = origin ? _normArea(origin) : '';
+
+  const bandLabels = [];
+  for (let i = 1; i <= FUEL_BAND_COUNT; i++) bandLabels.push(_fuelBandLabel(i));
+
+  return rows.slice(1).map(row => {
+    const id = _numOrNull(_val(row, headers, 'ID'));
+    if (id === null) return null;
+    const rowOrigin = String(_val(row, headers, 'Origin')).trim();
+    if (want && _normArea(rowOrigin) !== want) return null;
+
+    const bands = {};
+    bandLabels.forEach(label => {
+      bands[label] = _numOrNull(_val(row, headers, label));
+    });
+
+    return {
+      id:            id,
+      origin:        rowOrigin,
+      area:          String(_val(row, headers, 'Area')).trim(),
+      truckType:     String(_val(row, headers, 'Truck Type')).trim(),
+      effectiveDate: _formatDate(_readDateCell(_val(row, headers, 'Effective Date'))),
+      bands:         bands,
+    };
+  }).filter(r => r !== null);
+}
+
+/**
+ * Returns the distinct warehouse names the rate matrix carries, sorted. The
+ * Import panel offers these as suggestions when the dispatcher picks the origin
+ * of a route file.
+ *
+ * @returns {string[]}
+ */
+function getFreightRateOrigins() {
+  const sheet   = _getOrCreateSheet(SHEET_FREIGHT_RATES, _freightRateHeaders());
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+  const colIdx  = headers.indexOf('Origin');
+  if (colIdx === -1) return [];
+
+  const seen = {};
+  rows.slice(1).forEach(row => {
+    const v = String(row[colIdx] || '').trim();
+    if (v) seen[_normArea(v)] = v;
+  });
+  return Object.keys(seen).map(k => seen[k]).sort();
+}
+
+/**
+ * Returns the DOE diesel price history, newest effective date first.
+ * @returns {Object[]} Array of { id, effectiveDate, dieselPrice, sourceNote, addedBy, addedAt }
+ */
+function getFuelPrices() {
+  const sheet   = _getOrCreateSheet(SHEET_FUEL_PRICES,
+    ['ID', 'Effective Date', 'Diesel Price', 'Source Note', 'Added By', 'Added At']);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+
+  return rows.slice(1).map(row => {
+    const id = _numOrNull(_val(row, headers, 'ID'));
+    if (id === null) return null;
+    return {
+      id:            id,
+      effectiveDate: _formatDate(_readDateCell(_val(row, headers, 'Effective Date'))),
+      dieselPrice:   _numOrNull(_val(row, headers, 'Diesel Price')),
+      sourceNote:    String(_val(row, headers, 'Source Note') || ''),
+      addedBy:       String(_val(row, headers, 'Added By') || ''),
+      addedAt:       _valDateTime(row, headers, 'Added At'),
+    };
+  }).filter(r => r !== null)
+    .sort((a, b) => _parseDate(b.effectiveDate) - _parseDate(a.effectiveDate));
+}
+
+/** Default manual money columns, seeded the first time the sheet is created. */
+const BILLING_CHARGE_TYPE_DEFAULTS = [
+  'Parking Fee/Toll Fees',
+  'Packing Tape',
+  'Bad Orders @5.00 / Bx',
+];
+
+/**
+ * Returns the manual money columns of the billing output, in display order.
+ * Self-bootstraps with the three columns the paper billing already carries.
+ *
+ * @returns {Object[]} Array of { id, label, sortOrder, active }
+ */
+function getBillingChargeTypes() {
+  const seed   = BILLING_CHARGE_TYPE_DEFAULTS.map((label, i) => [i + 1, label, (i + 1) * 10, true]);
+  const sheet  = _getOrCreateSheet(SHEET_BILLING_CHARGE_TYPES,
+    ['ID', 'Label', 'Sort Order', 'Active'], seed);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+
+  return rows.slice(1).map(row => {
+    const id = _numOrNull(_val(row, headers, 'ID'));
+    if (id === null) return null;
+    return {
+      id:        id,
+      label:     String(_val(row, headers, 'Label')).trim(),
+      sortOrder: _numOrNull(_val(row, headers, 'Sort Order')),
+      active:    _val(row, headers, 'Active') !== false,
+    };
+  }).filter(r => r !== null)
+    .sort((a, b) => (a.sortOrder === null ? Infinity : a.sortOrder) -
+                    (b.sortOrder === null ? Infinity : b.sortOrder));
+}
+
+/** Header row of the Billing Lines sheet. Mirrors Docs/Schema.md Sheet 17. */
+const BILLING_LINE_HEADERS = [
+  'ID', 'Waybill Number', 'Waybill ID', 'Trip Date', 'Billing Date', 'Origin',
+  'Plate Number', 'FO Number', 'Truck Type', 'Area', 'Drops', 'Cartons',
+  'Diesel Price', 'Rate Band', 'Hauling Rate', 'Mano', 'Drop Fee',
+  'Manual Charges', 'Total', 'Billing Number', 'Status', 'Overrides', 'Notes',
+  'Added By', 'Added At', 'Updated By', 'Updated At',
+];
+
+/**
+ * Maps one Billing Lines row to the client shape. The two JSON cells are
+ * parsed here so no caller has to know they are strings on the sheet.
+ *
+ * @param {Array} row
+ * @param {Array} headers
+ * @returns {Object|null} null when the row has no ID
+ */
+function _billingLineFromRow(row, headers) {
+  const id = _numOrNull(_val(row, headers, 'ID'));
+  if (id === null) return null;
+  return {
+    id:             id,
+    waybillNumber:  String(_val(row, headers, 'Waybill Number') || ''),
+    waybillId:      _numOrNull(_val(row, headers, 'Waybill ID')),
+    tripDate:       _formatDate(_readDateCell(_val(row, headers, 'Trip Date'))),
+    billingDate:    _formatDate(_readDateCell(_val(row, headers, 'Billing Date'))),
+    origin:         String(_val(row, headers, 'Origin') || ''),
+    plateNumber:    String(_val(row, headers, 'Plate Number') || ''),
+    foNumber:       String(_val(row, headers, 'FO Number') || ''),
+    truckType:      String(_val(row, headers, 'Truck Type') || ''),
+    area:           String(_val(row, headers, 'Area') || ''),
+    drops:          _numOrNull(_val(row, headers, 'Drops')),
+    cartons:        _numOrNull(_val(row, headers, 'Cartons')),
+    dieselPrice:    _numOrNull(_val(row, headers, 'Diesel Price')),
+    rateBand:       String(_val(row, headers, 'Rate Band') || ''),
+    haulingRate:    _numOrNull(_val(row, headers, 'Hauling Rate')) || 0,
+    mano:           _numOrNull(_val(row, headers, 'Mano')) || 0,
+    dropFee:        _numOrNull(_val(row, headers, 'Drop Fee')) || 0,
+    manualCharges:  _parseJsonCell(_val(row, headers, 'Manual Charges'), {}),
+    total:          _numOrNull(_val(row, headers, 'Total')) || 0,
+    billingNumber:  String(_val(row, headers, 'Billing Number') || ''),
+    status:         String(_val(row, headers, 'Status') || 'Not Billed'),
+    overrides:      _parseJsonCell(_val(row, headers, 'Overrides'), []),
+    notes:          String(_val(row, headers, 'Notes') || ''),
+    addedBy:        String(_val(row, headers, 'Added By') || ''),
+    addedAt:        _valDateTime(row, headers, 'Added At'),
+    updatedBy:      String(_val(row, headers, 'Updated By') || ''),
+    updatedAt:      _valDateTime(row, headers, 'Updated At'),
+  };
+}
+
+/**
+ * Returns the VAT and withholding footer of a billing, from the sum of the
+ * lines' Total. Every Total is VAT inclusive, so the VAT is backed out of the
+ * gross and the 2% withholding applies to the net.
+ *
+ * @param {Object[]} lines
+ * @returns {{ lineCount: number, totalVatInc: number, lessVat: number,
+ *             netOfVat: number, addVat: number, withholding: number, amountDue: number }}
+ */
+function _billingTotals(lines) {
+  let totalVatInc = 0;
+  (lines || []).forEach(l => { totalVatInc += Number(l.total) || 0; });
+
+  const lessVat  = (totalVatInc / (1 + VAT_RATE)) * VAT_RATE;
+  const netOfVat = totalVatInc - lessVat;
+
+  return {
+    lineCount:   (lines || []).length,
+    totalVatInc: totalVatInc,
+    lessVat:     lessVat,
+    netOfVat:    netOfVat,
+    addVat:      netOfVat * VAT_RATE,
+    withholding: netOfVat * WITHHOLDING_RATE,
+    amountDue:   totalVatInc - netOfVat * WITHHOLDING_RATE,
+  };
 }

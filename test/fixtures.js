@@ -24,7 +24,7 @@ const HEADERS = {
     'Truck ID', 'Driver ID', 'Helper IDs', 'Truck Billing Category',
     'Trip Status', 'Parent Trip ID', 'Source', 'Tier', 'Remarks',
     'Status Changed By', 'Status Changed At', 'Added By', 'Added At',
-    'Convoy Group', 'Sort Order',
+    'Convoy Group', 'Sort Order', 'Origin',
   ],
 
   Waybills: [
@@ -43,6 +43,24 @@ const HEADERS = {
   ],
 
   'Route Frequency Log': ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID'],
+
+  // 25 diesel-price bands, 5 pesos wide, from 30.01-35 to 150.01-155.
+  // Kept in step with _fuelBandLabel() in Internals.gs.
+  'Freight Rates': ['ID', 'Origin', 'Area', 'Truck Type', 'Effective Date'].concat(
+    Array.from({ length: 25 }, (_, i) => `${30 + 5 * i}.01-${35 + 5 * i}`),
+  ),
+
+  'Fuel Prices': ['ID', 'Effective Date', 'Diesel Price', 'Source Note', 'Added By', 'Added At'],
+
+  'Billing Charge Types': ['ID', 'Label', 'Sort Order', 'Active'],
+
+  'Billing Lines': [
+    'ID', 'Waybill Number', 'Waybill ID', 'Trip Date', 'Billing Date', 'Origin',
+    'Plate Number', 'FO Number', 'Truck Type', 'Area', 'Drops', 'Cartons',
+    'Diesel Price', 'Rate Band', 'Hauling Rate', 'Mano', 'Drop Fee',
+    'Manual Charges', 'Total', 'Billing Number', 'Status', 'Overrides', 'Notes',
+    'Added By', 'Added At', 'Updated By', 'Updated At',
+  ],
 };
 
 /** A sheet seeded with just its header row. */

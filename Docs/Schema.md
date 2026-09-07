@@ -19,6 +19,10 @@ The AngeLoyal Order Management System (OMS) relies on a structured collection of
 | 11 | Audit Log | Audit | System-Wide Activity Journal |
 | 12 | Route Type Map | Config | Administrative Setup (Self-Seeding) |
 | 13 | Customer Group Colors | Config | Administrative Setup (Self-Seeding) |
+| 14 | Freight Rates | Billing | DOE Rate Matrix (Effective-Dated) |
+| 15 | Fuel Prices | Billing | Append-Only Price History |
+| 16 | Billing Charge Types | Billing | Administrative Setup (Self-Seeding) |
+| 17 | Billing Lines | Billing | Core Billing Ledger |
 
 ## **Group 1: Config Sheets**
 
@@ -231,6 +235,7 @@ The core transactional table of the system. Each row tracks an individual delive
 | Added At | DateTime | Creation timestamp |
 | Convoy Group | String | Token grouping trips whose trucks must travel together (convoys / split loads); unique within a Trip Date; Nullable (blank = not in a convoy) |
 | Sort Order | Number | Manual display/route order within a Trip Date, set by dragging rows on the dispatch board; Nullable (blank sorts last) |
+| Origin | String | The Rebisco warehouse the load departs from (e.g. `TANZA`, `LINGUNAN`, `3M MARILAO`). Chosen once per route file at import and stamped on every trip in it. Selects which sheet of the Freight Rates matrix prices this trip; Nullable for manual entries |
 
 #### **Status & Carry-Over Workflow**
 
@@ -312,7 +317,111 @@ Two rows then hold the same Sequence Number for one prefix (AY-10761 and AY-1076
 
 A carry-over of a carry-over keeps one suffix: the system strips a trailing -R or -FT off the parent number before it appends the new one, so the number stays AY-10761-R and never grows to AY-10761-R-R.
 
-## **Group 5: Audit**
+## **Group 5: Billing**
+
+### **Sheet 14: Freight Rates**
+
+The DOE rate matrix. One row holds every price band for a single origin, area and truck type. A rate revision appends a new block with a later Effective Date; the lookup takes the newest Effective Date on or before the trip's Billing Date, so a past billing never re-prices.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Origin | String | The Rebisco warehouse this rate sheet belongs to (e.g., `TANZA`) |
+| Area | String | Destination city or municipality (e.g., `Calamba`). Matched case- and punctuation-insensitively |
+| Truck Type | String | Billing category the rate applies to: `6W`, `4W`, `L300` |
+| Effective Date | Date | First date this rate block applies |
+| 30.01-35 … 150.01-155 | Number | 25 diesel-price band columns, each 5 pesos wide. The header string is the band range; the source workbook labels the same column by its midpoint (32.5 … 152.5) |
+
+#### **Band Indexing**
+
+The band index is `clamp(ceil((price − 30) / 5), 1, 25)`. A price at or below ₱30.00 clamps to the first band and a price above ₱155.00 clamps to the last, so a rate lookup can never fall off the matrix.
+
+### **Sheet 15: Fuel Prices**
+
+Append-only history of the Quezon City diesel "Common Price" published weekly by the DOE for NCR. The DOE posts a PDF only, so the price is entered by hand.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Effective Date | Date | First date this price applies |
+| Diesel Price | Number | Peso price per liter, e.g. `67.00` |
+| Source Note | String | Free-form provenance, e.g. the DOE posting title; Nullable |
+| Added By | String | Email address of the user who entered the price |
+| Added At | DateTime | Creation timestamp |
+
+### **Sheet 16: Billing Charge Types**
+
+The manually entered money columns on the billing output. Adding a row adds a column to the Billing panel; deactivating one removes it without touching history.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Label | String | Column heading as it prints, e.g. `Parking Fee/Toll Fees` |
+| Sort Order | Number | Left-to-right column order; Nullable (blank sorts last) |
+| Active | Boolean | Inactive types stay out of new billings but keep old amounts readable |
+
+#### **Initial seed:**
+
+* Parking Fee/Toll Fees
+* Packing Tape
+* Bad Orders @5.00 / Bx
+
+### **Sheet 17: Billing Lines**
+
+One row for each billable waybill. The row is created the first time a billing range is opened and holds every value the printed billing shows, so the output is reproducible after rates, fees or trip records change.
+
+| Column | Type | Notes |
+| :---- | :---- | :---- |
+| ID | Number | Auto-incrementing primary key |
+| Waybill Number | String | The billable unit. Matches Waybills.Waybill Number |
+| Waybill ID | Number | Foreign Key → Waybills.ID of the first row of the load |
+| Trip Date | Date | The day the load was delivered. This is the DATE the billing prints |
+| Billing Date | Date | The original operational date. Selects the fuel price and the rate block |
+| Origin | String | Snapshot of Trips.Origin; selects the Freight Rates sheet |
+| Plate Number | String | Snapshot of the dispatched truck's plate |
+| FO Number | String | Client Freight Order identifier |
+| Truck Type | String | Snapshot of Trips.Truck Billing Category |
+| Area | String | The drop that priced the load — the highest-rate area of the load, not the first |
+| Drops | Number | Count of trip rows under this waybill |
+| Cartons | Number | Sum of Quantity over those trip rows |
+| Diesel Price | Number | Snapshot of the price that selected the band |
+| Rate Band | String | Snapshot of the band column used, e.g. `65.01-70` |
+| Hauling Rate | Number | The matrix rate for Origin, Area, Truck Type and band |
+| Mano | Number | One MANO\_FEE for each full 100 cartons at one store, summed over drops |
+| Drop Fee | Number | DROP\_FEE when the load has 3 or more drops, otherwise 0 |
+| Manual Charges | String | JSON object keyed by Billing Charge Types.ID, e.g. `{"1":250,"3":75}`; Nullable |
+| Total | Number | Hauling Rate \+ Mano \+ Drop Fee \+ every manual charge. Computed by the server and never client-editable |
+| Billing Number | String | The Rebisco billing document this line was submitted on; Nullable until billed |
+| Status | String | `Not Billed`, `Billed`, or `Deferred` |
+| Overrides | String | JSON array of the computed fields the user typed over, e.g. `["haulingRate"]`. A recompute skips these; Nullable |
+| Notes | String | Free-form commentary; Nullable |
+| Added By | String | Email address of the user whose session created the line |
+| Added At | DateTime | Creation timestamp |
+| Updated By | String | Email address of the user who last edited the line; Nullable |
+| Updated At | DateTime | Timestamp of the latest edit; Nullable |
+
+#### **Line Eligibility**
+
+A waybill becomes a billing line when it is Confirmed (Locked \= TRUE) and its trips are Delivered. A line set to Deferred drops out of the current billing and stays eligible for a later one.
+
+#### **Split-Load Area Rule**
+
+A load with drops in more than one area bills at the **highest** rate among those drops, and prints that drop's area. Rebisco pays the farthest point of the route, not the first.
+
+#### **Billing Totals**
+
+The footer derives from the sum of the Total column, which is VAT inclusive:
+
+```
+totalVatInc = sum of Total
+lessVat     = totalVatInc / 1.12 × 12%
+netOfVat    = totalVatInc − lessVat
+addVat      = netOfVat × 12%
+withholding = netOfVat × 2%
+amountDue   = totalVatInc − withholding
+```
+
+## **Group 6: Audit**
 
 ### **Sheet 11: Audit Log**
 
@@ -356,6 +465,15 @@ The global ledger recording all administrative, operational, and data state modi
 * USER\_CREATE — New account added to the Users access list
 * USER\_EDIT — Administrative updates to a user account (email, display name, role, Active/Inactive toggling)
 * LOGIN — A verified Google sign-in opened a session (Table = Users, New Value = the account's email)
+* FREIGHT\_RATE\_IMPORT — A rate block was seeded from a rates workbook (Table \= Freight Rates, New Value \= "ORIGIN → n rows effective M/d/yyyy")
+* FREIGHT\_RATE\_EDIT — A single rate cell was changed in the Billing Matrix panel
+* FUEL\_PRICE\_ADD — A weekly DOE diesel price was entered (New Value \= "price effective M/d/yyyy")
+* BILLING\_CHARGE\_TYPE\_CREATE — New manual money column added to the billing output
+* BILLING\_CHARGE\_TYPE\_EDIT — Updates to a manual money column (label, order, Active/Inactive toggling)
+* BILLING\_LINE\_CREATE — A billable waybill entered the billing ledger
+* BILLING\_LINE\_EDIT — Manual charges, an override, or notes were changed on a billing line
+* BILLING\_LINE\_STATUS\_CHANGE — A line was deferred to a later billing or brought back
+* BILLING\_NUMBER\_SET — A Rebisco billing number was stamped on a set of lines (New Value \= "BILLING# → n lines")
 * DATA\_CLEAR — An Admin wiped every transactional row of this environment from the Admin panel (Table blank, New Value = the list of cleared sheets). Written *after* the wipe, so it is the first row of the fresh Audit Log.
 
 ## **Structural Implementation Conventions**
