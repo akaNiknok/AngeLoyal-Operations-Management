@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.7.2",
+      "date": "2026-09-08",
+      "title": "Waybill numbers stay as you type them",
+      "body": "### Fixes\n\n- **A waybill number that you type now stays on its own load.** Before, the app put your number on every other load that had the same number. When you opened the day again, many rows showed one number.\n- **The board saves the waybill numbers faster.** You can type the numbers down the column and not wait after each row. The app sends them together.\n\n### Check your data\n\nThe app does not correct a waybill number from before this version. Open each day that shows a wrong number. Type the correct number on each row again. Your number stays now."
+    },
+    {
       "version": "v1.7.1",
       "date": "2026-09-07",
       "title": "Correct redeliver numbers, safe re-imports",
