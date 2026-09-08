@@ -812,6 +812,23 @@ function _indexRates(rates, onDate) {
 }
 
 /**
+ * _indexRates, memoized on the billing date. The index is the same for every
+ * load of a day, so a range of hundreds of waybills builds one index per date
+ * instead of one per waybill.
+ *
+ * @param {Object[]} rates
+ * @param {Date}     onDate
+ * @param {Object}   [cache]  Caller-owned map, safe to omit.
+ * @returns {Object} Map of 'ORIGIN|AREA|TYPE' -> rate row.
+ */
+function _cachedRateIndex(rates, onDate, cache) {
+  if (!cache) return _indexRates(rates, onDate);
+  const key = onDate ? String(onDate.getTime()) : '0';
+  if (!cache[key]) cache[key] = _indexRates(rates, onDate);
+  return cache[key];
+}
+
+/**
  * Looks one rate out of an index built by _indexRates.
  * Returns null when the combination has no rate — an unknown area, a truck
  * type the matrix does not carry, or an origin nobody has seeded yet.

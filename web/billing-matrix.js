@@ -69,13 +69,17 @@
                 const fp = document.getElementById("fp-date");
                 if (!fp.value) fp.value = latestTuesdayIso();
 
-                refreshFuelPrices();
-                if (sel.value) loadRateMatrix();
-                else renderRateMatrix();
+                // The prices load first: "Current band only" needs the live
+                // band to know which column to keep, and rendering all 25
+                // bands over the whole matrix first is the slow path.
+                refreshFuelPrices().then(() => {
+                    if (sel.value) loadRateMatrix();
+                    else renderRateMatrix();
+                });
             }
 
             function refreshFuelPrices() {
-                call("getFuelPrices").then((list) => {
+                return call("getFuelPrices").then((list) => {
                     fuelPrices = list || [];
                     renderFuelPrices();
                     renderRateMatrix(); // the band hint depends on the price

@@ -1958,9 +1958,30 @@ function updateFreightRate(rateId, bandLabel, value) {
     }
     const newVal = raw === '' ? '' : Number(raw);
 
-    const ctx = _openRow(SHEET_FREIGHT_RATES, rateId, 'Freight rate');
-    const old = _val(ctx.row, ctx.headers, label);
-    _writeRowFields(ctx.sheet, ctx.row, ctx.rowIdx, ctx.headers, { [label]: newVal });
+    // One cell of a 1,500-row, 30-column matrix. Reading the whole sheet to
+    // reach it made tabbing along a row cost a full matrix scan per keystroke,
+    // and the read is held under the script lock.
+    // ponytail: still one locked round trip per cell. Batch the edits into an
+    // updateFreightRates(edits[]) if a whole-row entry pass still drags.
+    const sheet   = _getSheet(SHEET_FREIGHT_RATES);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(h => h.toString().trim());
+    const idCol   = headers.indexOf('ID') + 1;
+    const bandCol = headers.indexOf(label) + 1;
+    if (idCol === 0)   throw new Error(`Column "ID" not found in sheet "${SHEET_FREIGHT_RATES}".`);
+    if (bandCol === 0) throw new Error(`Column "${label}" not found in sheet "${SHEET_FREIGHT_RATES}".`);
+
+    const lastRow = sheet.getLastRow();
+    const ids     = lastRow > 1 ? sheet.getRange(2, idCol, lastRow - 1, 1).getValues() : [];
+    let rowNum    = -1;
+    for (let i = 0; i < ids.length; i++) {
+      if (Number(ids[i][0]) === Number(rateId)) { rowNum = i + 2; break; }
+    }
+    if (rowNum === -1) throw new Error(`Freight rate ID ${rateId} not found.`);
+
+    const row = sheet.getRange(rowNum, 1, 1, headers.length).getValues()[0];
+    const old = _val(row, headers, label);
+    sheet.getRange(rowNum, bandCol).setValue(newVal);
 
     _auditLog('FREIGHT_RATE_EDIT', SHEET_FREIGHT_RATES, rateId,
       JSON.stringify({ band: label, value: old }),
@@ -1969,9 +1990,9 @@ function updateFreightRate(rateId, bandLabel, value) {
     return {
       rate: {
         id:        rateId,
-        origin:    String(_val(ctx.row, ctx.headers, 'Origin')).trim(),
-        area:      String(_val(ctx.row, ctx.headers, 'Area')).trim(),
-        truckType: String(_val(ctx.row, ctx.headers, 'Truck Type')).trim(),
+        origin:    String(_val(row, headers, 'Origin')).trim(),
+        area:      String(_val(row, headers, 'Area')).trim(),
+        truckType: String(_val(row, headers, 'Truck Type')).trim(),
         band:      label,
         value:     newVal,
       },
@@ -2258,9 +2279,12 @@ function _billableWaybillGroups(from, to) {
  * @param {Object[]} rates    From getFreightRates().
  * @param {Object[]} prices   From getFuelPrices().
  * @param {Object} trucksById
+ * @param {Object} [indexCache]  Rate indexes already built, keyed by billing
+ *   date. Building one walks every rate row, and a week of loads shares six
+ *   dates between hundreds of waybills — pass a cache and it is built once.
  * @returns {Object} the computed fields, plus `warning`
  */
-function _priceWaybillGroup(group, rates, prices, trucksById) {
+function _priceWaybillGroup(group, rates, prices, trucksById, indexCache) {
   // Trip Date is the day the load was delivered and is what the billing
   // prints. Billing Date is the original operational day and is what selects
   // the price — a carry-over keeps the fuel band of the day it was ordered.
@@ -2278,7 +2302,7 @@ function _priceWaybillGroup(group, rates, prices, trucksById) {
         haulingRate: 0, mano: 0, dropFee: 0,
         warning: `No diesel price recorded on or before ${first.billingDate || first.tripDate}.`,
       }
-    : _computeBillingLine(group.trips, _indexRates(rates, billingDate), band);
+    : _computeBillingLine(group.trips, _cachedRateIndex(rates, billingDate, indexCache), band);
 
   return Object.assign(computed, {
     waybillNumber: group.waybillNumber,
@@ -2319,9 +2343,17 @@ function getBillingLines(from, to) {
     const headers   = rows[0].map(h => h.toString().trim());
 
     const groups     = _billableWaybillGroups(from, to);
-    const rates      = getFreightRates();
+    // Only the warehouses these loads left from. The matrix carries every
+    // origin and a week's billing prices out of one or two of them.
+    const originSet  = {};
+    groups.forEach(g => {
+      const o = g.trips[0] && g.trips[0].origin;
+      if (o) originSet[o] = true;
+    });
+    const rates      = getFreightRates(Object.keys(originSet));
     const prices     = getFuelPrices();
     const trucksById = _indexById(getTrucks());
+    const rateCache  = {};   // one rate index per billing date, not per waybill
 
     const email = _getCurrentUserEmail();
     const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
@@ -2335,11 +2367,18 @@ function getBillingLines(from, to) {
 
     const newRows  = [];
     const newAudit = [];
+    const dirty    = [];   // row indexes updated in place, written as one block
+    const warnByNumber = {};
     let nextId     = _nextRowId(sheet);
 
     groups.forEach(g => {
-      const priced   = _priceWaybillGroup(g, rates, prices, trucksById);
+      const priced   = _priceWaybillGroup(g, rates, prices, trucksById, rateCache);
       const existing = byNumber[g.waybillNumber];
+
+      // The warnings describe the rate matrix as it stands now, which is what
+      // the user can act on, so they are carried out of the pricing pass
+      // rather than stored on the row.
+      if (priced.warning) warnByNumber[g.waybillNumber] = priced.warning;
 
       if (existing === undefined) {
         const total = priced.haulingRate + priced.mano + priced.dropFee;
@@ -2381,32 +2420,35 @@ function getBillingLines(from, to) {
         (updates['Drop Fee']     !== undefined ? updates['Drop Fee']     : (_numOrNull(_val(row, headers, 'Drop Fee')) || 0)) +
         _sumManualCharges(manual);
 
-      _writeRowFields(sheet, row, existing, headers, updates);
+      // Updated in memory here and flushed below in one write. A refresh of a
+      // week touches hundreds of rows, and one setValues per row is hundreds
+      // of Sheets round trips inside the script lock.
+      Object.keys(updates).forEach(colName => {
+        const colIdx = _colIdx(headers, colName);
+        if (colIdx === -1) throw new Error(`Column "${colName}" not found in sheet "${SHEET_BILLING_LINES}".`);
+        row[colIdx] = updates[colName];
+      });
+      dirty.push(existing);
     });
+
+    _flushDirtyRows(sheet, rows, dirty);
 
     if (newRows.length) {
       _appendRows(sheet, newRows);
       newAudit.forEach(a => _auditLog(a[0], SHEET_BILLING_LINES, a[1], a[2], a[3]));
     }
 
-    // Re-read so the appends and the field writes both land in the answer.
-    const finalRows    = sheet.getDataRange().getValues();
-    const finalHeaders = finalRows[0].map(h => h.toString().trim());
-    const wanted       = {};
+    // `rows` already carries the updates and `newRows` the appends, so the
+    // answer is built in memory. Re-reading the sheet here cost a full scan of
+    // every billing line ever written, on every refresh.
+    const wanted = {};
     groups.forEach(g => { wanted[g.waybillNumber] = true; });
 
-    const lines = finalRows.slice(1)
-      .map(r => _billingLineFromRow(r, finalHeaders))
+    const lines = rows.slice(1).concat(newRows)
+      .map(r => _billingLineFromRow(r, headers))
       .filter(l => l !== null && wanted[l.waybillNumber])
       .sort((a, b) => a.waybillNumber < b.waybillNumber ? -1 : (a.waybillNumber > b.waybillNumber ? 1 : 0));
 
-    // The warnings are recomputed rather than stored: they describe the rate
-    // matrix as it stands now, which is what the user can act on.
-    const warnByNumber = {};
-    groups.forEach(g => {
-      const w = _priceWaybillGroup(g, rates, prices, trucksById).warning;
-      if (w) warnByNumber[g.waybillNumber] = w;
-    });
     lines.forEach(l => { l.warning = warnByNumber[l.waybillNumber] || ''; });
 
     return {

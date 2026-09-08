@@ -12,6 +12,19 @@
             // would otherwise make a row jump out from under the cursor.
             let billingOrder = [];
             let billingSelected = new Set();
+            // id -> line, rebuilt only when a load replaces billingLines. An
+            // edit assigns into the line objects the map already points at, so
+            // it stays true between loads.
+            let billingById = {};
+            let billingByIdOf = null;
+
+            function billingIndex() {
+                if (billingByIdOf !== billingLines) {
+                    billingByIdOf = billingLines;
+                    billingById = indexById(billingLines);
+                }
+                return billingById;
+            }
 
             const PESO = (n) =>
                 Number(n || 0).toLocaleString("en-PH", {
@@ -103,7 +116,8 @@
                 const status = document.getElementById("bl-status").value;
                 const origin = document.getElementById("bl-origin").value;
                 const prefix = document.getElementById("bl-prefix").value;
-                const byId = indexById(billingLines);
+
+                const byId = billingIndex();
 
                 return billingOrder
                     .map((id) => byId[id])
@@ -149,27 +163,35 @@
   <th style="width:70px"></th>
 </tr>`;
 
-                tbody.innerHTML = rows
-                    .map((l) => {
-                        const locked = l.status === "Billed";
-                        const money = (field) =>
-                            locked
-                                ? `<td style="text-align:right;font-family:'DM Mono',monospace">${PESO(l[field])}</td>`
-                                : `<td style="text-align:right"><input class="cell-input" style="width:84px;text-align:right"
+                tbody.innerHTML = rows.map(billingRowHtml).join("");
+
+                renderBillingWarnings(rows);
+                renderBillingFooter(rows);
+            }
+
+            // One row of the table. Held apart from renderBilling so a saved
+            // edit can replace its own row instead of the whole body.
+            function billingRowHtml(l) {
+                const locked = l.status === "Billed";
+                const money = (field) =>
+                    locked
+                        ? `<td style="text-align:right;font-family:'DM Mono',monospace">${PESO(l[field])}</td>`
+                        : `<td style="text-align:right"><input class="cell-input" style="width:84px;text-align:right"
+   data-field="${field}"
    title="${l.overrides.includes(field) ? "Typed over — clear the cell to recompute" : "Computed"}"
    value="${l[field] === 0 ? "" : l[field]}"
-   onchange="saveBillingAmount(${l.id},'${field}',this.value)">${l.overrides.includes(field) ? '<span title="Typed over">✎</span>' : ""}</td>`;
+   onchange="saveBillingAmount(${l.id},'${field}',this.value)"><span class="bl-ovr" title="Typed over">${l.overrides.includes(field) ? "✎" : ""}</span></td>`;
 
-                        const charges = billingChargeCols
-                            .map((c) => {
-                                const v = l.manualCharges[String(c.id)];
-                                return locked
-                                    ? `<td style="text-align:right;font-family:'DM Mono',monospace">${v ? PESO(v) : "—"}</td>`
-                                    : `<td style="text-align:right"><input class="cell-input" style="width:76px;text-align:right" value="${v === undefined ? "" : v}" onchange="saveBillingCharge(${l.id},${c.id},this.value)"></td>`;
-                            })
-                            .join("");
+                const charges = billingChargeCols
+                    .map((c) => {
+                        const v = l.manualCharges[String(c.id)];
+                        return locked
+                            ? `<td style="text-align:right;font-family:'DM Mono',monospace">${v ? PESO(v) : "—"}</td>`
+                            : `<td style="text-align:right"><input class="cell-input" style="width:76px;text-align:right" data-charge="${c.id}" value="${v === undefined ? "" : v}" onchange="saveBillingCharge(${l.id},${c.id},this.value)"></td>`;
+                    })
+                    .join("");
 
-                        return `<tr${l.warning ? ' style="background:var(--amber-bg)"' : ""}>
+                return `<tr data-line="${l.id}"${l.warning ? ' style="background:var(--amber-bg)"' : ""}>
   <td><input type="checkbox" ${billingSelected.has(l.id) ? "checked" : ""} onchange="toggleBillingRow(${l.id},this.checked)"></td>
   <td>${esc(l.tripDate)}</td>
   <td>${esc(l.plateNumber) || "—"}</td>
@@ -181,18 +203,51 @@
   ${money("mano")}
   ${money("dropFee")}
   ${money("haulingRate")}
-  <td style="text-align:right;font-family:'DM Mono',monospace"><strong>${PESO(l.total)}</strong></td>
+  <td class="bl-total" style="text-align:right;font-family:'DM Mono',monospace"><strong>${PESO(l.total)}</strong></td>
   <td>${
       locked
           ? `<span class="tb-label">${esc(l.billingNumber)}</span>`
           : `<button class="btn btn-ghost btn-sm" onclick="toggleBillingDefer(${l.id})">${l.status === "Deferred" ? "Restore" : "Defer"}</button>`
   }</td>
 </tr>`;
-                    })
-                    .join("");
+            }
 
-                renderBillingWarnings(rows);
-                renderBillingFooter(rows);
+            // Refreshes what one saved edit changes: the row's own cells and
+            // the footer. A full renderBilling() here rebuilds every row on
+            // screen and pulls the cell out from under the cursor while the
+            // user tabs along the row.
+            function patchBillingRow(line) {
+                const tr = document.querySelector(
+                    `#billing-tbody tr[data-line="${line.id}"]`,
+                );
+                if (!tr) {
+                    renderBilling();
+                    return;
+                }
+                const total = tr.querySelector(".bl-total");
+                if (total) total.innerHTML = `<strong>${PESO(line.total)}</strong>`;
+
+                tr.querySelectorAll("input.cell-input").forEach((inp) => {
+                    if (inp === document.activeElement) return; // still typing
+                    const field = inp.dataset.field;
+                    if (field) {
+                        inp.value = line[field] === 0 ? "" : line[field];
+                        const on = line.overrides.includes(field);
+                        inp.title = on
+                            ? "Typed over — clear the cell to recompute"
+                            : "Computed";
+                        const mark = inp.nextElementSibling;
+                        if (mark) mark.textContent = on ? "✎" : "";
+                        return;
+                    }
+                    const cid = inp.dataset.charge;
+                    if (cid) {
+                        const v = line.manualCharges[String(cid)];
+                        inp.value = v === undefined ? "" : v;
+                    }
+                });
+
+                renderBillingFooter(visibleBillingLines());
             }
 
             function renderBillingWarnings(rows) {
@@ -251,7 +306,7 @@
                 bgSave("saveBillingLine", [lineId, { [field]: next }], {
                     onOk: (r) => {
                         if (r.line) Object.assign(line, r.line);
-                        renderBilling();
+                        patchBillingRow(line);
                     },
                     revert: () => {
                         line[field] = old.value;
@@ -283,7 +338,7 @@
                 bgSave("saveBillingLine", [lineId, { manualCharges: next }], {
                     onOk: (r) => {
                         if (r.line) Object.assign(line, r.line);
-                        renderBilling();
+                        patchBillingRow(line);
                     },
                     revert: () => {
                         line.manualCharges = old.charges;

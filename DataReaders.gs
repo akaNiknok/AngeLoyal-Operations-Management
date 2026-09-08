@@ -501,19 +501,26 @@ function _freightRateHeaders() {
  * then reads a rate without touching the sheet again.
  *
  * Pass `origin` to read one warehouse only — the Billing Matrix panel edits one
- * sheet at a time and does not need the other two.
+ * sheet at a time and does not need the other two. Pass an array to read a
+ * set: a billing range covers the one or two warehouses its loads left from,
+ * never the whole matrix.
  *
- * ponytail: the whole matrix is about 1,500 rows and is read in full for each
- * billing request. Move it into CacheService if that read ever gets slow.
+ * ponytail: the whole matrix is about 1,500 rows and is still read in full
+ * before it is filtered. Move it into CacheService if that read ever gets slow.
  *
- * @param {string} [origin]  Case-insensitive warehouse filter.
+ * @param {string|string[]} [origin]  Case-insensitive warehouse filter.
  * @returns {Object[]} Array of { id, origin, area, truckType, effectiveDate, bands }
  */
 function getFreightRates(origin) {
   const sheet   = _getOrCreateSheet(SHEET_FREIGHT_RATES, _freightRateHeaders());
   const rows    = sheet.getDataRange().getValues();
   const headers = rows[0].map(h => h.toString().trim());
-  const want    = origin ? _normArea(origin) : '';
+
+  const want = {};
+  let filtered = false;
+  (Array.isArray(origin) ? origin : [origin]).forEach(o => {
+    if (o) { want[_normArea(o)] = true; filtered = true; }
+  });
 
   const bandLabels = [];
   for (let i = 1; i <= FUEL_BAND_COUNT; i++) bandLabels.push(_fuelBandLabel(i));
@@ -522,7 +529,7 @@ function getFreightRates(origin) {
     const id = _numOrNull(_val(row, headers, 'ID'));
     if (id === null) return null;
     const rowOrigin = String(_val(row, headers, 'Origin')).trim();
-    if (want && _normArea(rowOrigin) !== want) return null;
+    if (filtered && !want[_normArea(rowOrigin)]) return null;
 
     const bands = {};
     bandLabels.forEach(label => {

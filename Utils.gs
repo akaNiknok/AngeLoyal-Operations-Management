@@ -52,24 +52,51 @@ function _getOrCreateSheet(name, headers, seedRows) {
  * @returns {string[]} The headers array, including colName.
  */
 function _ensureColumn(sheet, headers, colName) {
-  if (headers.indexOf(colName) === -1) {
+  if (_colIdx(headers, colName) === -1) {
     sheet.getRange(1, headers.length + 1).setValue(colName);
     headers.push(colName);
+    headers.__idx = null;   // the memo below no longer describes this array
   }
   return headers;
 }
 
 /**
- * Gets the value at a named column header position in a row.
- * Returns '' if the column doesn't exist or the value is null/undefined.
+ * Returns the column index of a header name, or -1. The lookup is memoized on
+ * the headers array itself: reading one sheet row costs a name lookup per
+ * field, and scanning the header row every time made a 1,500-row read cost
+ * hundreds of thousands of string comparisons.
  *
- * @param {Array}  row
+ * `_ensureColumn` is the only thing that grows a headers array, and it clears
+ * the memo when it does.
+ *
  * @param {Array}  headers
  * @param {string} colName
+ * @returns {number} 0-based column index, or -1
+ */
+function _colIdx(headers, colName) {
+  let map = headers.__idx;
+  if (!map) {
+    map = {};
+    // Backwards, so a sheet with a duplicated header answers the first
+    // column — the same one indexOf would have found.
+    for (let i = headers.length - 1; i >= 0; i--) map[headers[i]] = i;
+    headers.__idx = map;
+  }
+  const idx = map[colName];
+  return idx === undefined ? -1 : idx;
+}
+
+/**
+ * Safely reads a cell value from a row by column name.
+ * Returns '' when the column is missing or the cell is blank.
+ *
+ * @param {Array}    row
+ * @param {string[]} headers
+ * @param {string}   colName
  * @returns {*}
  */
 function _val(row, headers, colName) {
-  const idx = headers.indexOf(colName);
+  const idx = _colIdx(headers, colName);
   if (idx === -1) return '';
   const v = row[idx];
   return (v === null || v === undefined) ? '' : v;
@@ -261,7 +288,7 @@ function _appendRows(sheet, rows2D) {
  * @returns {number}  0-based index into rows array (rows[0] = header, rows[1] = first data row)
  */
 function _findRowById(rows, headers, id) {
-  const idIdx = headers.indexOf('ID');
+  const idIdx = _colIdx(headers, 'ID');
   if (idIdx === -1) return -1;
   for (let i = 1; i < rows.length; i++) {
     if (Number(rows[i][idIdx]) === Number(id)) return i;
@@ -282,7 +309,7 @@ function _findRowById(rows, headers, id) {
  */
 function _writeRowFields(sheet, row, rowIdx, headers, updates) {
   Object.keys(updates).forEach(colName => {
-    const colIdx = headers.indexOf(colName);
+    const colIdx = _colIdx(headers, colName);
     if (colIdx === -1) throw new Error(`Column "${colName}" not found in sheet "${sheet.getName()}".`);
     row[colIdx] = updates[colName];
   });
@@ -293,6 +320,46 @@ function _writeRowFields(sheet, row, rowIdx, headers, updates) {
     if (row[i] === undefined) row[i] = '';
   }
   sheet.getRange(rowIdx + 1, 1, 1, row.length).setValues([row]);
+}
+
+/**
+ * Writes back rows a caller changed in the array it read from the sheet.
+ * Consecutive indexes go out as one setValues, so a refresh that touches a
+ * contiguous block of rows costs one Sheets call instead of one per row.
+ *
+ * Only safe under the script lock, which is where every writer runs: the rows
+ * are written back as they were read, so an untouched row inside a run is a
+ * no-op write and a concurrent edit would be lost.
+ *
+ * @param {Sheet}   sheet
+ * @param {Array[]} rows      The full getValues() array, header at index 0.
+ * @param {number[]} rowIdxs  0-based indexes into `rows`. May repeat or be unsorted.
+ */
+function _flushDirtyRows(sheet, rows, rowIdxs) {
+  if (!rowIdxs || !rowIdxs.length) return;
+  const width = rows[0].length;
+  const sorted = rowIdxs.slice().sort((a, b) => a - b);
+
+  let start = sorted[0];
+  let prev  = sorted[0];
+  const flush = () => {
+    const block = [];
+    for (let i = start; i <= prev; i++) {
+      const r = rows[i].slice(0, width);
+      // setValues rejects undefined, which a freshly-migrated row can hold
+      // past its last written column.
+      for (let c = 0; c < width; c++) if (r[c] === undefined) r[c] = '';
+      block.push(r);
+    }
+    sheet.getRange(start + 1, 1, block.length, width).setValues(block);
+  };
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev || sorted[i] === prev + 1) { prev = sorted[i]; continue; }
+    flush();
+    start = prev = sorted[i];
+  }
+  flush();
 }
 
 /**

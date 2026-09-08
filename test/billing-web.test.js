@@ -169,6 +169,49 @@ test('a re-render after an edit does not resort the rows', () => {
   assert.deepEqual(Array.from(ui.__order()), before);
 });
 
+// patchBillingRow finds a row and its cells by these hooks. If the markup
+// drifts, the patch silently falls back to re-rendering the whole table and
+// the panel gets slow again with nothing failing — so pin them here.
+test('a rendered row carries the hooks a single-row patch needs', () => {
+  const { ui } = loadBilling();
+  const html = ui.billingRowHtml(
+    line({ id: 7, mano: 120, overrides: ['mano'], manualCharges: { 3: 45 } })
+  );
+
+  assert.match(html, /<tr data-line="7"/);
+  assert.match(html, /class="bl-total"/);
+  assert.match(html, /data-field="mano"/);
+  assert.match(html, /data-field="dropFee"/);
+  assert.match(html, /data-field="haulingRate"/);
+  // The override marker is a sibling span the patch rewrites, present either way.
+  assert.match(html, /class="bl-ovr"[^>]*>✎</);
+});
+
+test('a billed row is text, so it exposes no editable hooks to patch', () => {
+  const { ui } = loadBilling();
+  const html = ui.billingRowHtml(line({ id: 8, status: 'Billed', billingNumber: 'B-1' }));
+
+  assert.match(html, /<tr data-line="8"/);
+  assert.match(html, /class="bl-total"/);
+  assert.ok(!/data-field=/.test(html));
+});
+
+test('a second load does not read rows through the first load\'s index', () => {
+  const { ui } = loadBilling();
+  ui.__setLines([line({ id: 1, waybillNumber: 'AY-11801' })]);
+  assert.equal(ui.visibleBillingLines().length, 1);
+
+  ui.__setLines([
+    line({ id: 4, waybillNumber: 'GL-2001' }),
+    line({ id: 5, waybillNumber: 'GL-2002' }),
+  ]);
+
+  assert.deepEqual(
+    Array.from(ui.visibleBillingLines().map((l) => l.waybillNumber)),
+    ['GL-2001', 'GL-2002']
+  );
+});
+
 // ── The rate matrix bands ─────────────────────────────────────
 
 test('the client and the server name the price bands identically', () => {

@@ -362,3 +362,48 @@ test('billing columns are open to Payroll but closed to a Viewer', () => {
   const viewer = makeEnv({ sheets, userEmail: EMAIL.Viewer });
   assert.throws(() => viewer.api.createBillingChargeType({ label: 'Nope' }), /Access denied/);
 });
+
+// ── The rate index cache ──────────────────────────────────────
+
+test('_cachedRateIndex reuses one index per date and still locks by date', () => {
+  const { api } = asAdmin(base());
+  const rates = [
+    { id: 1, origin: 'TANZA', area: 'CALAMBA', truckType: '4W',
+      effectiveDate: '1/1/2026', bands: { '65.01-70': 100 } },
+    { id: 2, origin: 'TANZA', area: 'CALAMBA', truckType: '4W',
+      effectiveDate: '6/1/2026', bands: { '65.01-70': 200 } },
+  ];
+  const cache = {};
+  const may = new Date(2026, 4, 1);
+  const july = new Date(2026, 6, 1);
+
+  const a = api._cachedRateIndex(rates, may, cache);
+  const b = api._cachedRateIndex(rates, may, cache);
+  assert.equal(a, b, 'the same date must hand back the same index object');
+
+  // A later date sees the newer block — the cache must not blur the date lock.
+  const c = api._cachedRateIndex(rates, july, cache);
+  assert.notEqual(c, a);
+  assert.equal(api._rateFor(a, 'TANZA', 'CALAMBA', '4W', 8), 100);
+  assert.equal(api._rateFor(c, 'TANZA', 'CALAMBA', '4W', 8), 200);
+
+  // No cache passed is still a plain _indexRates call.
+  assert.equal(api._rateFor(api._cachedRateIndex(rates, july), 'TANZA', 'CALAMBA', '4W', 8), 200);
+});
+
+test('getFreightRates takes a set of origins, and no filter still means all', () => {
+  const { api } = asAdmin(base());
+  api.importFreightRates('TANZA', '1/1/2026', [rateRow('CALAMBA', '4W', { '65.01-70': 100 })]);
+  api.importFreightRates('VILLASIS', '1/1/2026', [rateRow('URDANETA', '4W', { '65.01-70': 200 })]);
+  api.importFreightRates('CEBU', '1/1/2026', [rateRow('MANDAUE', '4W', { '65.01-70': 300 })]);
+
+  const names = (r) => r.map((x) => x.origin).sort();
+
+  assert.deepEqual(names(api.getFreightRates(['TANZA', 'CEBU'])), ['CEBU', 'TANZA']);
+  assert.deepEqual(names(api.getFreightRates('VILLASIS')), ['VILLASIS'], 'a plain string still works');
+  assert.deepEqual(names(api.getFreightRates()), ['CEBU', 'TANZA', 'VILLASIS']);
+  assert.deepEqual(names(api.getFreightRates([])), ['CEBU', 'TANZA', 'VILLASIS'],
+    'an empty set is no filter, not an empty answer');
+  // The filter normalizes the same way the rate lookup does.
+  assert.deepEqual(names(api.getFreightRates(['  tanza '])), ['TANZA']);
+});

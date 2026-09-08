@@ -6,7 +6,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { makeEnv } = require('./harness');
+const { makeEnv, dump } = require('./harness');
 
 const { api } = makeEnv();
 
@@ -127,4 +127,85 @@ test('_indexById builds an id -> object map and skips null ids', () => {
   assert.equal(idx[2].name, 'b');
   assert.equal(Object.keys(idx).length, 2);
   assert.equal(api._indexById(null) && Object.keys(api._indexById(null)).length, 0);
+});
+
+// ── _flushDirtyRows ───────────────────────────────────────────
+
+/** A sheet of numbered rows, so a stray write is obvious in the dump. */
+function gridEnv() {
+  const rows = [['ID', 'Name']];
+  for (let i = 1; i <= 6; i++) rows.push([i, 'row' + i]);
+  return makeEnv({ sheets: { Grid: rows } });
+}
+
+test('_flushDirtyRows writes scattered rows back and leaves the rest alone', () => {
+  const { api, ss } = gridEnv();
+  const sheet = ss.getSheetByName('Grid');
+  const rows = sheet.getDataRange().getValues();
+
+  rows[1][1] = 'edited1';
+  rows[4][1] = 'edited4';
+  rows[5][1] = 'edited5';
+  api._flushDirtyRows(sheet, rows, [4, 1, 5]);   // unsorted, two runs
+
+  const out = dump(ss, 'Grid').rows.map((r) => r[1]);
+  assert.deepEqual(out, ['edited1', 'row2', 'row3', 'edited4', 'edited5', 'row6']);
+});
+
+test('_flushDirtyRows tolerates a repeated index and an empty list', () => {
+  const { api, ss } = gridEnv();
+  const sheet = ss.getSheetByName('Grid');
+  const rows = sheet.getDataRange().getValues();
+
+  api._flushDirtyRows(sheet, rows, []);
+  assert.equal(dump(ss, 'Grid').rows[2][1], 'row3');
+
+  rows[3][1] = 'edited3';
+  api._flushDirtyRows(sheet, rows, [3, 3]);
+  assert.equal(dump(ss, 'Grid').rows[2][1], 'edited3');
+});
+
+test('_flushDirtyRows fills a hole a migrated row left behind', () => {
+  const { api, ss } = makeEnv({ sheets: { Grid: [['ID', 'Name', 'Added'], [1, 'a', 'x']] } });
+  const sheet = ss.getSheetByName('Grid');
+  const rows = sheet.getDataRange().getValues();
+
+  rows[1][1] = 'b';
+  rows[1][2] = undefined;   // setValues rejects this
+  api._flushDirtyRows(sheet, rows, [1]);
+
+  assert.deepEqual(dump(ss, 'Grid').rows[0], [1, 'b', '']);
+});
+
+// ── _colIdx (the header lookup memo) ──────────────────────────
+
+test('_colIdx answers the same column indexOf would, missing name included', () => {
+  const headers = ['ID', 'Name', 'Area'];
+  assert.equal(api._colIdx(headers, 'ID'), 0);
+  assert.equal(api._colIdx(headers, 'Area'), 2);
+  assert.equal(api._colIdx(headers, 'Nope'), -1);
+  assert.equal(api._colIdx(headers, 'Area'), 2, 'the memoized answer must match the first');
+});
+
+test('_colIdx picks the first of a duplicated header, as indexOf does', () => {
+  const headers = ['ID', 'Area', 'Name', 'Area'];
+  assert.equal(api._colIdx(headers, 'Area'), headers.indexOf('Area'));
+});
+
+// The memo lives on the headers array, so the one thing that grows that array
+// has to clear it — otherwise a self-migrating sheet reads its new column as
+// missing for the rest of the request.
+test('_ensureColumn clears the memo, so the new column is readable at once', () => {
+  const { api: a, ss } = makeEnv({ sheets: { Grid: [['ID', 'Name'], [1, 'a']] } });
+  const sheet = ss.getSheetByName('Grid');
+  const rows = sheet.getDataRange().getValues();
+  let headers = rows[0].map((h) => h.toString().trim());
+
+  assert.equal(a._val(rows[1], headers, 'Active'), '');   // seeds the memo
+
+  headers = a._ensureColumn(sheet, headers, 'Active');
+  assert.equal(a._colIdx(headers, 'Active'), 2);
+
+  a._writeRowFields(sheet, rows[1], 1, headers, { Active: true });
+  assert.deepEqual(dump(ss, 'Grid').rows[0], [1, 'a', true]);
 });
