@@ -278,6 +278,34 @@ function _appendRows(sheet, rows2D) {
 }
 
 /**
+ * Writes back a set of already-mutated rows, one setValues() per contiguous
+ * run instead of one per row. A day's waybills are appended together, so the
+ * rows a batch touches are normally one run — 1 API call, not N.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array[]} rows      The full sheet values, rows already updated in place.
+ * @param {number[]} rowIdxs  0-based indexes into `rows` to write.
+ */
+function _writeRowRuns(sheet, rows, rowIdxs) {
+  const sorted = rowIdxs.slice().sort((a, b) => a - b);
+  const width  = rows[0].length;
+  let start = 0;
+  while (start < sorted.length) {
+    let end = start;
+    while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end++;
+    const run = sorted.slice(start, end + 1).map(i => {
+      const row = rows[i];
+      // setValues rejects undefined — a row from a freshly-migrated sheet can
+      // be short of the header width (see _writeRowFields).
+      for (let c = 0; c < width; c++) if (row[c] === undefined) row[c] = '';
+      return row.slice(0, width);
+    });
+    sheet.getRange(sorted[start] + 1, 1, run.length, width).setValues(run);
+    start = end + 1;
+  }
+}
+
+/**
  * Finds the (1-based) row index of a row with a matching ID value.
  * Returns -1 if not found.
  * rowIdx returned is 0-based into the rows array; add 1 for sheet row number.
