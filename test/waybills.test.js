@@ -9,6 +9,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { makeEnv, dump, rowObject } = require('./harness');
+const { loadWeb, plain } = require('./webharness');
 const { HEADERS, usersSheet } = require('./fixtures');
 
 function baseSheets({ lastSeq = 5 } = {}) {
@@ -337,6 +338,27 @@ test('updateSuggestedWaybill renames every stop of a multi-stop load', () => {
   assert.deepEqual(after.map((w) => w.Locked), [false, false, false]);
 });
 
+// Regression: renaming one load must not drag another load that happens to
+// hold the same number. Two FOs on 13098 (a state the old value-only match
+// created), rename one → only its rows move.
+test('updateSuggestedWaybill leaves another load that shares the number alone', () => {
+  const sheets = baseSheets({ lastSeq: 5 });
+  sheets.Waybills.push(
+    [1, '13098', 1, 13098, 101, 'FO-A', 'Regular', '', 'Suggested', false, '', ''],
+    [2, '13098', 1, 13098, 102, 'FO-A', 'Regular', '', 'Suggested', false, '', ''],
+    [3, '13098', 1, 13098, 103, 'FO-B', 'Regular', '', 'Suggested', false, '', ''],
+  );
+  const { api, ss } = asAdmin(sheets);
+
+  const res = api.updateSuggestedWaybill(1, '13094');
+  assert.equal(res.success, true);
+  assert.equal(res.updated, 2); // both stops of FO-A, not FO-B
+
+  const after = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['13094', '13094', '13098']);
+  assert.deepEqual(after.map((w) => Number(w['Sequence Number'])), [13094, 13094, 13098]);
+});
+
 test('updateSuggestedWaybill refuses a number already confirmed elsewhere', () => {
   const { api } = asAdmin(baseSheets({ lastSeq: 5 }));
   const { id } = api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
@@ -371,6 +393,161 @@ test('updateSuggestedWaybill is gated by CONFIRM_WAYBILL permission', () => {
   const env = makeEnv({ sheets, userEmail: 'viewer@angeloyal.com' });
   sheets.Waybills.push([1, 'AL-6', 1, 6, 101, 'FO-1', 'Regular', '', 'Suggested', false, '', '']);
   assert.throws(() => env.api.updateSuggestedWaybill(1, 'AL-7'), /Access denied/);
+});
+
+// ---- updateSuggestedWaybills: the batch a renumbered column sends ----
+test('updateSuggestedWaybills applies every edit in one pass', () => {
+  const sheets = baseSheets({ lastSeq: 5 });
+  sheets.Waybills.push(
+    [1, 'AL-6', 1, 6, 101, 'FO-A', 'Regular', '', 'Suggested', false, '', ''],
+    [2, 'AL-6', 1, 6, 102, 'FO-A', 'Regular', '', 'Suggested', false, '', ''],
+    [3, 'AL-7', 1, 7, 103, 'FO-B', 'Regular', '', 'Suggested', false, '', ''],
+  );
+  const { api, ss } = asAdmin(sheets);
+
+  const res = api.updateSuggestedWaybills([
+    { waybillId: 1, number: 'AL-20' },
+    { waybillId: 3, number: 'AL-21' },
+  ]);
+  assert.equal(res.success, true);
+  assert.deepEqual(plain(res.results).map((r) => r.updated), [2, 1]); // FO-A has two stops
+
+  const after = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['AL-20', 'AL-20', 'AL-21']);
+  // The booklet counter is written once, at the batch's highest number.
+  const pref = dump(ss, 'Waybill Prefixes').rows[0];
+  assert.equal(Number(pref[3]), 21);
+});
+
+test('updateSuggestedWaybills lets the good edits land when one is rejected', () => {
+  const sheets = baseSheets({ lastSeq: 5 });
+  sheets.Waybills.push(
+    [1, 'AL-6', 1, 6, 101, 'FO-A', 'Regular', '', 'Suggested', false, '', ''],
+    [2, 'AL-9', 1, 9, 102, 'FO-B', 'Regular', '', 'Confirmed', true, 'a@b.c', ''],
+    [3, 'AL-7', 1, 7, 103, 'FO-C', 'Regular', '', 'Suggested', false, '', ''],
+  );
+  const { api, ss } = asAdmin(sheets);
+
+  const res = api.updateSuggestedWaybills([
+    { waybillId: 1, number: 'AL-9' },   // clashes with a confirmed number
+    { waybillId: 2, number: 'AL-30' },  // locked
+    { waybillId: 3, number: 'AL-31' },  // fine
+    { waybillId: 99, number: 'AL-32' }, // no such row
+  ]);
+
+  assert.deepEqual(plain(res.results).map((r) => r.success), [false, false, true, false]);
+  assert.match(res.results[0].error, /already confirmed/);
+  assert.match(res.results[1].error, /locked/);
+  assert.match(res.results[3].error, /not found/);
+
+  const after = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['AL-6', 'AL-9', 'AL-31']);
+});
+
+test('updateSuggestedWaybills sees an earlier edit of the same batch', () => {
+  const sheets = baseSheets({ lastSeq: 5 });
+  sheets.Waybills.push(
+    [1, 'AL-6', 1, 6, 101, 'FO-A', 'Regular', '', 'Suggested', false, '', ''],
+    [2, 'AL-6', 1, 6, 102, 'FO-A', 'Regular', '', 'Suggested', false, '', ''],
+  );
+  const { api, ss } = asAdmin(sheets);
+
+  // Same load renamed twice in one batch — the second wins for both stops.
+  api.updateSuggestedWaybills([
+    { waybillId: 1, number: 'AL-20' },
+    { waybillId: 2, number: 'AL-21' },
+  ]);
+  const after = dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r));
+  assert.deepEqual(after.map((w) => w['Waybill Number']), ['AL-21', 'AL-21']);
+});
+
+// ---- the board coalesces the edits instead of firing one call each ----
+function boardWithTrips() {
+  const { sandbox } = loadWeb(
+    ['core.js', 'dispatch.js'],
+    {},
+    `
+    currentUser = { email: 'a@b.c', displayName: 'A', role: 'Admin' };
+    dispatchData = { trips: [
+      { id: 1, foNumber: 'FO-A', suggestedWaybillId: 11, waybillSuggested: 'AL-1' },
+      { id: 2, foNumber: 'FO-B', suggestedWaybillId: 12, waybillSuggested: 'AL-2' },
+      { id: 3, foNumber: 'FO-C', suggestedWaybillId: 13, waybillSuggested: 'AL-3' },
+    ] };
+    globalThis.__calls = [];
+    globalThis.renderDispatch = () => {};
+    globalThis.showToast = () => {};
+    globalThis.call = (fn, ...args) => {
+      globalThis.__calls.push({ fn, args });
+      return new Promise((res) => { globalThis.__settle = res; });
+    };
+    globalThis.__trips = () => dispatchData.trips;
+    `,
+  );
+  return sandbox;
+}
+
+const tick = () => new Promise((r) => setImmediate(r));
+
+test('a lone waybill edit goes out immediately', () => {
+  const ui = boardWithTrips();
+  ui.saveSuggestedWaybill(1, 'AL-90');
+
+  assert.equal(ui.__calls.length, 1);
+  assert.equal(ui.__calls[0].fn, 'updateSuggestedWaybills');
+  assert.deepEqual(plain(ui.__calls[0].args[0]), [{ waybillId: 11, number: 'AL-90' }]);
+  assert.equal(ui.__trips()[0].waybillSuggested, 'AL-90'); // optimistic
+});
+
+test('edits typed while a save is in flight ride home in one batch', async () => {
+  const ui = boardWithTrips();
+  ui.saveSuggestedWaybill(1, 'AL-90');
+  ui.saveSuggestedWaybill(2, 'AL-91');
+  ui.saveSuggestedWaybill(3, 'AL-92');
+  assert.equal(ui.__calls.length, 1); // still just the first
+
+  ui.__settle({
+    success: true,
+    results: [{ waybillId: 11, success: true, waybillNumber: 'AL-90', updated: 1 }],
+  });
+  await tick();
+
+  assert.equal(ui.__calls.length, 2);
+  assert.deepEqual(plain(ui.__calls[1].args[0]), [
+    { waybillId: 12, number: 'AL-91' },
+    { waybillId: 13, number: 'AL-92' },
+  ]);
+});
+
+test('re-editing the same waybill before it is sent keeps only the last number', async () => {
+  const ui = boardWithTrips();
+  ui.saveSuggestedWaybill(1, 'AL-90'); // in flight
+  ui.saveSuggestedWaybill(2, 'AL-91');
+  ui.saveSuggestedWaybill(2, 'AL-95'); // corrected before the batch goes
+
+  ui.__settle({ success: true,
+    results: [{ waybillId: 11, success: true, waybillNumber: 'AL-90', updated: 1 }] });
+  await tick();
+
+  assert.deepEqual(plain(ui.__calls[1].args[0]), [{ waybillId: 12, number: 'AL-95' }]);
+});
+
+test('a rejected edit rolls back only its own rows', async () => {
+  const ui = boardWithTrips();
+  ui.saveSuggestedWaybill(1, 'AL-90');
+  ui.saveSuggestedWaybill(2, 'AL-91');
+  ui.__settle({ success: true,
+    results: [{ waybillId: 11, success: true, waybillNumber: 'AL-90', updated: 1 }] });
+  await tick();
+
+  ui.__settle({
+    success: true,
+    results: [{ waybillId: 12, success: false, error: 'already confirmed and in use' }],
+  });
+  await tick();
+
+  const trips = ui.__trips();
+  assert.equal(trips[0].waybillSuggested, 'AL-90'); // kept
+  assert.equal(trips[1].waybillSuggested, 'AL-2');  // rolled back
 });
 
 // --- helper: find a waybill row by id and return [headers, row] for rowObject ---

@@ -170,6 +170,7 @@ const RPC_ALLOWED = {
   reorderTrips: 'w',
   confirmWaybill: 'w',
   updateSuggestedWaybill: 'w',
+  updateSuggestedWaybills: 'w',
   importRouteFile: 'w',
   deleteImportedTrip: 'w',
   bulkDeleteTrips: 'w',

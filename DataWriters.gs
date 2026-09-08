@@ -324,18 +324,9 @@ function confirmWaybill(waybillId, customNumber) {
     const prefixId   = _numOrNull(_val(row, headers, 'Prefix ID'));
     let seqNumber    = _numOrNull(_val(row, headers, 'Sequence Number'));
 
-    // Every unlocked row of THIS waybill (same number + prefix + sequence).
-    // An already-locked sibling is left alone rather than re-confirmed.
-    const groupIdxs = [];
-    for (let i = 1; i < rows.length; i++) {
-      if (_val(rows[i], headers, 'Waybill Number') === origNumber
-          && _numOrNull(_val(rows[i], headers, 'Prefix ID')) === prefixId
-          && _numOrNull(_val(rows[i], headers, 'Sequence Number')) === seqNumber
-          && !_isTrue(_val(rows[i], headers, 'Locked'))) {
-        groupIdxs.push(i);
-      }
-    }
-    if (groupIdxs.indexOf(rowIdx) === -1) groupIdxs.push(rowIdx);
+    // Every unlocked row of THIS load. An already-locked sibling is left alone
+    // rather than re-confirmed.
+    const groupIdxs = _waybillGroupIdxs(rows, headers, rowIdx);
 
     // If dispatcher provided a custom number, validate and parse it
     if (customNumber && customNumber !== finalNumber) {
@@ -359,21 +350,32 @@ function confirmWaybill(waybillId, customNumber) {
         origNumber, finalNumber);
     }
 
-    // Lock every row of the waybill — batched write per row, 6 fields each
-    const email = _getCurrentUserEmail();
-    const now   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
-    groupIdxs.forEach(i => {
-      _writeRowFields(sheet, rows[i], i, headers, {
-        'Waybill Number':  finalNumber,
-        'Sequence Number': seqNumber,
-        'Status':          'Confirmed',
-        'Locked':          true,
-        'Confirmed By':    email,
-        'Confirmed At':    now,
+    // Lock every row of the waybill — one write per contiguous run of stops,
+    // one append for the whole audit trail.
+    const email   = _getCurrentUserEmail();
+    const now     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+    const lockFields = {
+      'Waybill Number':  finalNumber,
+      'Sequence Number': seqNumber,
+      'Status':          'Confirmed',
+      'Locked':          true,
+      'Confirmed By':    email,
+      'Confirmed At':    now,
+    };
+    const audits = groupIdxs.map(i => {
+      Object.keys(lockFields).forEach(col => {
+        const c = headers.indexOf(col);
+        if (c === -1) throw new Error(`Column "${col}" not found in sheet "${SHEET_WAYBILLS}".`);
+        rows[i][c] = lockFields[col];
       });
-      _auditLog('WAYBILL_CONFIRM', SHEET_WAYBILLS,
-        _numOrNull(_val(rows[i], headers, 'ID')), 'Suggested', finalNumber);
+      return {
+        action: 'WAYBILL_CONFIRM', table: SHEET_WAYBILLS,
+        rowId: _numOrNull(_val(rows[i], headers, 'ID')),
+        oldValue: 'Suggested', newValue: finalNumber,
+      };
     });
+    _writeRowRuns(sheet, rows, groupIdxs);
+    _auditLogBatch(audits);
 
     // Update Last Sequence Number in Waybill Prefixes
     if (prefixId && seqNumber) {
@@ -388,85 +390,126 @@ function confirmWaybill(waybillId, customNumber) {
 
 
 /**
- * Renames a still-Suggested waybill (and every unlocked stop that shares its
- * number) WITHOUT confirming it — the pre-confirmation edit a dispatcher needs
- * when a load's booklet series differs from the auto-suggested one. Locked
- * (confirmed) waybills are immutable and rejected here; use confirmWaybill to
- * lock. Mirrors confirmWaybill's number parsing + duplicate guard, minus the
- * lock and Confirmed By/At stamps, so the row stays editable.
+ * Renames still-Suggested waybills (and every unlocked stop that shares each
+ * one's number) WITHOUT confirming them — the pre-confirmation edit a
+ * dispatcher needs when a load's booklet series differs from the auto-suggested
+ * one. Locked (confirmed) waybills are immutable and rejected here; use
+ * confirmWaybill to lock. Mirrors confirmWaybill's number parsing + duplicate
+ * guard, minus the lock and Confirmed By/At stamps, so the row stays editable.
+ *
+ * Batched because a dispatcher renumbers a whole column by hand: every edit
+ * used to be its own request, and each one paid a round trip, a Users read, a
+ * full ledger read, a booklet-counter read and a script-lock wait — in series,
+ * because writers queue. One request now pays that once. Edits apply to the
+ * in-memory ledger in order, so a later edit sees an earlier one.
+ *
+ * One bad edit does not sink the batch: it reports its own error and the rest
+ * still land.
+ *
+ * @param {Array<{waybillId: number, number: string}>} edits
+ * @returns {{ success: boolean, results: Array<{waybillId: number, success: boolean,
+ *             waybillNumber?: string, updated?: number, error?: string }> }}
+ */
+function updateSuggestedWaybills(edits) {
+  _requirePermission('CONFIRM_WAYBILL');
+
+  const list = edits || [];
+  if (list.length === 0) return { success: true, results: [] };
+
+  const sheet   = _getSheet(SHEET_WAYBILLS);
+  const rows    = sheet.getDataRange().getValues();
+  const headers = rows[0].map(h => h.toString().trim());
+
+  const results  = [];
+  const audits   = [];
+  const dirty    = {};        // rowIdx -> true, deduped across edits
+  const maxSeq   = {};        // prefixId -> highest sequence this batch issued
+
+  list.forEach(edit => {
+    const waybillId = edit && edit.waybillId;
+    try {
+      const rowIdx = _findRowById(rows, headers, waybillId);
+      if (rowIdx === -1) throw new Error(`Waybill ID ${waybillId} not found.`);
+
+      const row = rows[rowIdx];
+      if (_isTrue(_val(row, headers, 'Locked'))) {
+        throw new Error(`Waybill ${_val(row, headers, 'Waybill Number')} is already confirmed and locked.`);
+      }
+
+      const finalNumber = (edit.number == null ? '' : edit.number).toString().trim();
+      if (!finalNumber) throw new Error('Waybill number cannot be blank.');
+
+      const origNumber = _val(row, headers, 'Waybill Number');
+      const prefixId   = _numOrNull(_val(row, headers, 'Prefix ID'));
+      const origSeq    = _numOrNull(_val(row, headers, 'Sequence Number'));
+
+      // Every unlocked row of THIS load — one load's stops share the number and
+      // must be renamed together. A stop of ANOTHER load must not move.
+      const groupIdxs = _waybillGroupIdxs(rows, headers, rowIdx);
+
+      if (finalNumber === origNumber) {
+        results.push({ waybillId, success: true, waybillNumber: origNumber, updated: 0 });
+        return;
+      }
+
+      // A confirmed waybill already owns this number → refuse (matches confirm).
+      // Suggested siblings sharing a number are legitimate and not duplicates.
+      const clash = rows.slice(1).some((r, i) => {
+        if (groupIdxs.indexOf(i + 1) !== -1) return false;
+        return _val(r, headers, 'Waybill Number') === finalNumber
+            && _isTrue(_val(r, headers, 'Locked'));
+      });
+      if (clash) throw new Error(`Waybill number "${finalNumber}" is already confirmed and in use.`);
+
+      // Parse the sequence from the custom number (numeric tail), like confirm.
+      const match  = finalNumber.match(/(\d+)(?:-[A-Z]+)?$/);
+      const seqNum = match ? Number(match[1]) : origSeq;
+
+      const numIdx = headers.indexOf('Waybill Number');
+      const seqIdx = headers.indexOf('Sequence Number');
+      groupIdxs.forEach(i => {
+        rows[i][numIdx] = finalNumber;
+        rows[i][seqIdx] = seqNum;
+        dirty[i] = true;
+      });
+      audits.push({
+        action: 'WAYBILL_OVERRIDE', table: SHEET_WAYBILLS,
+        rowId: waybillId, oldValue: origNumber, newValue: finalNumber,
+      });
+      if (prefixId && seqNum && seqNum > (maxSeq[prefixId] || 0)) maxSeq[prefixId] = seqNum;
+
+      results.push({ waybillId, success: true, waybillNumber: finalNumber, updated: groupIdxs.length });
+    } catch (e) {
+      results.push({ waybillId: waybillId, success: false, error: e.message });
+    }
+  });
+
+  const dirtyIdxs = Object.keys(dirty).map(Number);
+  if (dirtyIdxs.length) _writeRowRuns(sheet, rows, dirtyIdxs);
+  _auditLogBatch(audits);
+
+  // Keep the booklet counter ahead of an edit that raises the number, so a
+  // later suggestion can't re-issue it. Only advances (see the helper), so the
+  // batch's highest number per booklet is the only one worth writing.
+  Object.keys(maxSeq).forEach(prefixId => _updateWaybillPrefixSequence(Number(prefixId), maxSeq[prefixId]));
+
+  return { success: true, results: results };
+}
+
+/**
+ * One-edit form of `updateSuggestedWaybills`. The board sends the batch now, but
+ * `.gs` and `web/` deploy separately (clasp vs wrangler), so a page cached from
+ * before the batch landed still calls this name.
  *
  * @param {number} waybillId
  * @param {string} newNumber
  * @returns {{ success: boolean, waybillNumber: string, updated: number } | { success: false, error: string }}
  */
 function updateSuggestedWaybill(waybillId, newNumber) {
-  _requirePermission('CONFIRM_WAYBILL');
-  try {
-    const sheet   = _getSheet(SHEET_WAYBILLS);
-    const rows    = sheet.getDataRange().getValues();
-    const headers = rows[0].map(h => h.toString().trim());
-
-    const rowIdx = _findRowById(rows, headers, waybillId);
-    if (rowIdx === -1) throw new Error(`Waybill ID ${waybillId} not found.`);
-
-    const row = rows[rowIdx];
-    if (_isTrue(_val(row, headers, 'Locked'))) {
-      throw new Error(`Waybill ${_val(row, headers, 'Waybill Number')} is already confirmed and locked.`);
-    }
-
-    const finalNumber = (newNumber == null ? '' : newNumber).toString().trim();
-    if (!finalNumber) throw new Error('Waybill number cannot be blank.');
-
-    const origNumber = _val(row, headers, 'Waybill Number');
-    const prefixId   = _numOrNull(_val(row, headers, 'Prefix ID'));
-    const origSeq    = _numOrNull(_val(row, headers, 'Sequence Number'));
-
-    // Every unlocked row of THIS waybill (same number + prefix + sequence) —
-    // one load's stops share the number and must be renamed together.
-    const groupIdxs = [];
-    for (let i = 1; i < rows.length; i++) {
-      if (_val(rows[i], headers, 'Waybill Number') === origNumber
-          && _numOrNull(_val(rows[i], headers, 'Prefix ID')) === prefixId
-          && _numOrNull(_val(rows[i], headers, 'Sequence Number')) === origSeq
-          && !_isTrue(_val(rows[i], headers, 'Locked'))) {
-        groupIdxs.push(i);
-      }
-    }
-    if (groupIdxs.indexOf(rowIdx) === -1) groupIdxs.push(rowIdx);
-
-    if (finalNumber === origNumber) {
-      return { success: true, waybillNumber: origNumber, updated: 0 };
-    }
-
-    // A confirmed waybill already owns this number → refuse (matches confirm).
-    // Suggested siblings sharing a number are legitimate and not duplicates.
-    const clash = rows.slice(1).some((r, i) => {
-      if (groupIdxs.indexOf(i + 1) !== -1) return false;
-      return _val(r, headers, 'Waybill Number') === finalNumber
-          && _isTrue(_val(r, headers, 'Locked'));
-    });
-    if (clash) throw new Error(`Waybill number "${finalNumber}" is already confirmed and in use.`);
-
-    // Parse the sequence from the custom number (numeric tail), like confirm.
-    const match  = finalNumber.match(/(\d+)(?:-[A-Z]+)?$/);
-    const seqNum = match ? Number(match[1]) : origSeq;
-
-    groupIdxs.forEach(i => {
-      _writeRowFields(sheet, rows[i], i, headers, {
-        'Waybill Number':  finalNumber,
-        'Sequence Number': seqNum,
-      });
-    });
-    _auditLog('WAYBILL_OVERRIDE', SHEET_WAYBILLS, waybillId, origNumber, finalNumber);
-
-    // Keep the booklet counter ahead of an edit that raises the number, so a
-    // later suggestion can't re-issue it. Only advances (see the helper).
-    if (prefixId && seqNum) _updateWaybillPrefixSequence(prefixId, seqNum);
-
-    return { success: true, waybillNumber: finalNumber, updated: groupIdxs.length };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  const r = updateSuggestedWaybills([{ waybillId: waybillId, number: newNumber }]).results[0];
+  return r.success
+    ? { success: true, waybillNumber: r.waybillNumber, updated: r.updated }
+    : { success: false, error: r.error };
 }
 
 

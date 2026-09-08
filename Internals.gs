@@ -43,6 +43,37 @@ function _auditLog(action, table, rowId, oldValue, newValue) {
 }
 
 
+/**
+ * Batched `_auditLog` — one append for many entries instead of one per entry.
+ * Same shape, same best-effort contract: a failure here never breaks a write.
+ *
+ * @param {Array<{action: string, table: string, rowId: *, oldValue: *, newValue: *}>} entries
+ */
+function _auditLogBatch(entries) {
+  if (!entries || entries.length === 0) return;
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_AUDIT);
+    if (!sheet) return;
+
+    let nextId   = _nextRowId(sheet);
+    const email  = _getCurrentUserEmail() || 'unknown';
+    const nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
+    _appendRows(sheet, entries.map(e => [
+      nextId++,
+      nowStr,
+      email,
+      e.action,
+      '',                        // Detail column (legacy — kept for compatibility)
+      e.table    || '',
+      e.rowId    || '',
+      e.oldValue !== undefined ? String(e.oldValue) : '',
+      e.newValue !== undefined ? String(e.newValue) : '',
+    ]));
+  } catch (_) {
+    // Audit is best-effort; never propagate errors
+  }
+}
+
 // ============================================================
 //  INTERNAL HELPERS — Data reset
 // ============================================================
@@ -118,6 +149,43 @@ function _withLock(fn) {
     try { SpreadsheetApp.flush(); } catch (_) {}
     lock.releaseLock();
   }
+}
+
+/**
+ * Every unlocked Waybills row that belongs to the SAME load as `rowIdx` —
+ * the rows a rename or a confirmation must move together, because one truck
+ * load's stops share one number.
+ *
+ * The load is keyed on FO Number as well as the number/prefix/sequence. The
+ * number alone is NOT an identity: it is exactly what a rename changes, and
+ * two unrelated loads can end up holding it. Without the FO guard, renaming
+ * one stop rewrote every other load that happened to share the number, so a
+ * day of hand-typed numbers collapsed onto whichever one was typed last.
+ *
+ * @param {Array[]} rows     Waybills rows, header included
+ * @param {Array}   headers
+ * @param {number}  rowIdx   Index of the handle row
+ * @returns {number[]} row indexes, always including `rowIdx`
+ */
+function _waybillGroupIdxs(rows, headers, rowIdx) {
+  const row    = rows[rowIdx];
+  const number = _val(row, headers, 'Waybill Number');
+  const prefix = _numOrNull(_val(row, headers, 'Prefix ID'));
+  const seq    = _numOrNull(_val(row, headers, 'Sequence Number'));
+  const fo     = String(_val(row, headers, 'FO Number') || '');
+
+  const idxs = [];
+  for (let i = 1; i < rows.length; i++) {
+    if (_val(rows[i], headers, 'Waybill Number') === number
+        && _numOrNull(_val(rows[i], headers, 'Prefix ID')) === prefix
+        && _numOrNull(_val(rows[i], headers, 'Sequence Number')) === seq
+        && String(_val(rows[i], headers, 'FO Number') || '') === fo
+        && !_isTrue(_val(rows[i], headers, 'Locked'))) {
+      idxs.push(i);
+    }
+  }
+  if (idxs.indexOf(rowIdx) === -1) idxs.push(rowIdx);
+  return idxs;
 }
 
 /**
@@ -329,16 +397,10 @@ function _suggestWaybillsForGroups(prefixId, groups) {
       _appendRows(sheet, newRows);
     }
 
-    // Audit is best-effort, like _auditLog — but batched.
-    try {
-      const auditSheet = _getSheet(SHEET_AUDIT);
-      let nextAuditId  = _nextRowId(auditSheet);
-      const email      = _getCurrentUserEmail() || 'unknown';
-      const nowStr     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy HH:mm:ss');
-      _appendRows(auditSheet, out.map(o =>
-        [nextAuditId++, nowStr, email, 'WAYBILL_SUGGEST', '', SHEET_WAYBILLS, o.waybillId, '', o.waybillNumber]
-      ));
-    } catch (_) {}
+    _auditLogBatch(out.map(o => ({
+      action: 'WAYBILL_SUGGEST', table: SHEET_WAYBILLS,
+      rowId: o.waybillId, oldValue: '', newValue: o.waybillNumber,
+    })));
 
     return out;
   });

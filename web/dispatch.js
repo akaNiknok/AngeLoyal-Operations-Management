@@ -1019,21 +1019,84 @@
                     trip: t,
                     waybillSuggested: t.waybillSuggested,
                 }));
-                const waybillId = trip.suggestedWaybillId;
                 targets.forEach((t) => (t.waybillSuggested = newNumber));
-                bgSave("updateSuggestedWaybill", [waybillId, newNumber], {
-                    onOk: (r) => {
-                        targets.forEach(
-                            (t) => (t.waybillSuggested = r.waybillNumber),
-                        );
-                    },
-                    revert: () => {
-                        olds.forEach(({ trip: t, ...prev }) =>
-                            Object.assign(t, prev),
-                        );
-                        renderDispatch();
-                    },
+                queueWaybillEdit({
+                    waybillId: trip.suggestedWaybillId,
+                    number: newNumber,
+                    targets,
+                    olds,
                 });
+            }
+
+            // Renumbering a column is the normal way this screen is used, and
+            // every writer queues behind the script lock — so N edits used to
+            // cost N round trips, in series. Send the first straight away
+            // (a lone edit keeps its old latency), then let everything typed
+            // while it is in flight ride home in one batch.
+            let wbPending = [];
+            let wbInFlight = false;
+
+            function queueWaybillEdit(entry) {
+                // Re-editing the same waybill before it is sent: only the last
+                // number matters.
+                wbPending = wbPending.filter(
+                    (q) => q.waybillId !== entry.waybillId,
+                );
+                wbPending.push(entry);
+                flushWaybillEdits();
+            }
+
+            function flushWaybillEdits() {
+                if (wbInFlight || wbPending.length === 0) return;
+                const batch = wbPending;
+                wbPending = [];
+                wbInFlight = true;
+
+                const undo = (entries) =>
+                    entries.forEach((q) =>
+                        q.olds.forEach(({ trip: t, ...prev }) =>
+                            Object.assign(t, prev),
+                        ),
+                    );
+                const done = () => {
+                    wbInFlight = false;
+                    flushWaybillEdits();
+                };
+
+                bgSave(
+                    "updateSuggestedWaybills",
+                    [batch.map((q) => ({ waybillId: q.waybillId, number: q.number }))],
+                    {
+                        onOk: (r) => {
+                            // Per-edit outcome: one rejected number does not
+                            // undo the others.
+                            const failed = [];
+                            (r.results || []).forEach((res, i) => {
+                                const q = batch[i];
+                                if (!q) return;
+                                if (res.success) {
+                                    q.targets.forEach(
+                                        (t) =>
+                                            (t.waybillSuggested = res.waybillNumber),
+                                    );
+                                } else {
+                                    failed.push(q);
+                                    showToast(res.error || "Save failed", "error");
+                                }
+                            });
+                            if (failed.length) {
+                                undo(failed);
+                                renderDispatch();
+                            }
+                            done();
+                        },
+                        revert: () => {
+                            undo(batch);
+                            renderDispatch();
+                            done();
+                        },
+                    },
+                );
             }
 
             function confirmWaybillInline(tripId) {
@@ -1068,6 +1131,10 @@
                     suggestedWaybillId: t.suggestedWaybillId,
                 }));
                 const waybillId = trip.suggestedWaybillId;
+                // confirmWaybill carries the number itself, so a queued rename
+                // of the same waybill is redundant — and would land after the
+                // lock and be refused.
+                wbPending = wbPending.filter((q) => q.waybillId !== waybillId);
                 targets.forEach((t) => {
                     t.waybillConfirmed = customNumber;
                     t.waybillSuggested = "";
