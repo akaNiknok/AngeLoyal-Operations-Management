@@ -1,6 +1,6 @@
 # D1 Migration Plan — Google Sheets → Cloudflare D1 (v2.0.0)
 
-Status: PHASE 0 BUILT (2026-09-17); the gate waits on the owner's sign-in check. Tick the boxes as work lands. A fresh session reads this file
+Status: PHASE 1 IN PROGRESS (2026-09-17). Tick the boxes as work lands. A fresh session reads this file
 and `HANDOFF.md`, not the codebase, to resume.
 
 ## 1. Decisions (settled, do not re-open)
@@ -117,7 +117,7 @@ CREATE TABLE outlets (
 -- One waybill row per LOAD (the trips sharing one number on one FO).
 -- trips.waybill_id replaces waybills.trip_id. fo_number and locked are gone:
 -- join trips for the FO, and locked ⇔ status = 'Confirmed'.
--- waybill_number is indexed, NOT unique: PROD holds 19 hand-typed numbers that
+-- waybill_number is indexed, NOT unique (owner accepted): PROD holds 19 hand-typed numbers that
 -- sit on two loads (e.g. 12985 on FO …620 and FO …689), and each load bills alone.
 CREATE TABLE waybills (
   id INTEGER PRIMARY KEY, waybill_number TEXT NOT NULL COLLATE NOCASE,
@@ -281,7 +281,7 @@ before the gate passes.
 - [x] `server/internals.js`: audit, `_normArea`, bands, `_rateFor`, `_computeBillingLine`, `nextBusinessDay`, `helperSlots`, the billing constants. Waybill suggestion and carry-over stay for the waybills worker.
 - [x] `web/config.js` → label by hostname + `OAUTH_CLIENT_ID`; `callBackend()` posts to `API_URL` (`/api`); `_headers` CSP `connect-src 'self' https://accounts.google.com`.
 - [x] Gate: `npm test` green (126 tests: readers, auth, api, rbac, db, transform, web suites); `npm run dev:web` boots with the local D1 seeded from the DEV snapshot and the dispatch board renders 9/17/2026 (44 drops) with no console errors.
-- [ ] Owner: sign in with Google on `http://localhost:8788` once (the origin is already authorized). The Phase 0 session was planted with `wrangler d1 execute --local`, because sign-in needs a real account.
+- [x] Owner: sign in with Google on `http://localhost:8788` once (the origin is already authorized). The Phase 0 session was planted with `wrangler d1 execute --local`, because sign-in needs a real account.
 
 ### Phase 1 — Port the writers (Opus orchestrates, 5 Sonnet workers in parallel)
 
@@ -290,13 +290,13 @@ Worktree isolation; the orchestrator merges each branch and runs `npm test`.
 
 | Worker | Module | Source functions | Tests to port |
 | :--- | :--- | :--- | :--- |
-| W1 | `writers/trips.js` + carry-over in `internals.js` | createTrip, saveTripChanges, bulkSetTripStatus, reorderTrips, markDayScheduled, setTripConvoyGroup, deleteImportedTrip, bulkDeleteTrips, `_carryOver*` | trips, carryover, trip-statuses, reorder, convoy, edits |
+| W1 | `writers/trips.js` + carry-over in `internals.js` | createTrip, saveTripChanges, bulkSetTripStatus, reorderTrips, markDayScheduled, setTripConvoyGroup, deleteImportedTrip, bulkDeleteTrips, `_carryOver*` | trips, carryover, prepping, reorder, convoy, edits |
 | W2 | `writers/waybills.js` + suggestion in `internals.js` | confirmWaybill, updateSuggestedWaybill(s), create/updateWaybillPrefix, `_suggestWaybills*`, `_normalizeSequenceInput` | waybills, prefixes |
 | W3 | `writers/import.js` | importRouteFile, outlet resolve-or-create | import, route-file |
-| W4 | `writers/masters.js` | outlets, trucks, employees, users, categories, route map, colors, updateDefaultAssignment, charge types, clearAllData | masters, admin-records, readers (roster part), devtools → delete |
+| W4 | `writers/masters.js` | outlets, trucks, employees, users, categories, route map, colors, updateDefaultAssignment, charge types, clearAllData | masters, devtools (port the `clearAllData` tests, delete the devDump/devClear/doGet ones) |
 | W5 | `writers/billing.js` | getBillingLines, saveBillingLine, setBillingLineStatus, setBillingNumber, importFreightRates, updateFreightRate, fuel prices, `_billableWaybillGroups`, `_priceWaybillGroup` | billing-lines, billing-rates, billing-web |
 
-W1 and W2 share the waybill 1:N rule; W2 lands first, then W1 rebases. W3
+The orchestrator pre-wires `server/writers/*.js` stubs into `FNS` and `test/harness.js`, and deletes `test/legacy/utils.test.js` (`test/db.test.js` covers it). W1 and W2 share the waybill 1:N rule; W2 lands first, then W1 rebases. W3
 depends on W2's suggestion helper: start W3 after W2 merges. W4 and W5 are
 independent and start with W2.
 
@@ -387,5 +387,5 @@ decisions and anything you could not port.
 | Cross-request state | `ctx.js` is the only holder of `db` and `email`; a test runs two `rpc` calls concurrently and asserts attribution. |
 | Data loss at cutover | Reconciliation report must pass; the archived Sheet stays; freeze window. |
 | Hotfix drift on `main` | Each `main` hotfix gets a `develop` issue; frontend fixes cherry-pick. |
-| Rate matrix ambiguity (found in Phase 0) | The DOE sheet names different towns identically ("Rosario" x3, "San Juan" x2) with no province column, so `_normArea` collapses them and the first row wins — v1 behaviour, kept. The owner decides whether the matrix gains a province column (then `area_key` includes it). Until then the transform report lists every dropped duplicate. |
-| PROD truck 98 | Three PROD trips point at a truck id that no longer exists. The transform clears the link and reports it; the owner re-adds the truck before the Phase 4 run or accepts blank plates on those trips. |
+| Rate matrix ambiguity (found in Phase 0; owner accepted v1 behaviour for now) | The DOE sheet names different towns identically ("Rosario" x3, "San Juan" x2) with no province column, so `_normArea` collapses them and the first row wins — v1 behaviour, kept. The owner decides whether the matrix gains a province column (then `area_key` includes it). Until then the transform report lists every dropped duplicate. |
+| PROD truck 98 (owner accepted as-is) | Three PROD trips point at a truck id that no longer exists. The transform clears the link and reports it; the owner re-adds the truck before the Phase 4 run or accepts blank plates on those trips. |

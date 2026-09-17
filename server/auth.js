@@ -14,6 +14,11 @@ import { runWith, clientId, fetchImpl } from './ctx.js';
 import { one, run, nowPH, toPHTimestamp } from './db.js';
 import { _auditLog } from './internals.js';
 import * as readers from './readers.js';
+import * as trips from './writers/trips.js';
+import * as waybills from './writers/waybills.js';
+import * as importer from './writers/import.js';
+import * as masters from './writers/masters.js';
+import * as billing from './writers/billing.js';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -112,9 +117,8 @@ export const RPC_ALLOWED = [
   'updateFuelPrice', 'deleteFuelPrice', 'clearAllData',
 ];
 
-// Every server function the gateway can dispatch. Phase 1: spread each
-// writers/*.js module here.
-const FNS = { ...readers, logout };
+// Every server function the gateway can dispatch.
+const FNS = { ...readers, ...trips, ...waybills, ...importer, ...masters, ...billing, logout };
 
 /**
  * Single entry point for all authenticated client calls. Throws

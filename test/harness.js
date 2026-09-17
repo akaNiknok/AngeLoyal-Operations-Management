@@ -32,6 +32,7 @@ const rbac = require('../server/rbac.js');
 const internals = require('../server/internals.js');
 const readers = require('../server/readers.js');
 const auth = require('../server/auth.js');
+const writers = ['trips', 'waybills', 'import', 'masters', 'billing'].map((m) => require(`../server/writers/${m}.js`));
 const { transform } = require('../server/migrate/transform.js');
 const { onRequestPost } = require('../functions/api.js');
 
@@ -165,7 +166,7 @@ function makeEnv(opts = {}) {
   };
 
   const api = {};
-  [ctx, dbmod, internals, rbac, readers, auth].forEach((mod) => {
+  [ctx, dbmod, internals, rbac, readers, auth, ...writers].forEach((mod) => {
     Object.entries(mod).forEach(([name, fn]) => {
       if (typeof fn === 'function') api[name] = (...args) => ctx.runWith(store, () => fn(...args));
     });
