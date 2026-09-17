@@ -141,3 +141,11 @@ test('sessions live 12 hours and expired rows are swept on the next sign-in', as
   await signIn(api, 'tok-admin');
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM sessions').get().n, 1, 'the dead session is gone');
 });
+
+test('every allow-listed name dispatches to a real function', async () => {
+  const mods = ['readers', 'writers/trips', 'writers/waybills', 'writers/import', 'writers/masters', 'writers/billing', 'auth']
+    .map((m) => require(`../server/${m}.js`));
+  const { RPC_ALLOWED } = require('../server/auth.js');
+  const missing = RPC_ALLOWED.filter((n) => !mods.some((m) => typeof m[n] === 'function'));
+  assert.deepEqual(missing, []);
+});

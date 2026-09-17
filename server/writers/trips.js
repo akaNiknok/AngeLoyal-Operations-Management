@@ -93,25 +93,26 @@ export async function _createCarryoverTrip(originalTripId, statusReason) {
   const email = currentEmail() || 'unknown';
   const now = nowPH();
 
-  const { last_row_id: newTripId } = await run(
+  // The trip and its crew land together: a carry-over without its helpers
+  // would put the wrong crew on tomorrow's board.
+  const [ins] = await batch([stmt(
     `INSERT INTO trips (
        trip_date, billing_date, fo_number, fo_split_suffix, outlet_id,
        quantity, cbm, restrictions, truck_id, driver_id, truck_billing_category,
        trip_status, parent_trip_id, source, tier, remarks,
        status_changed_by, status_changed_at, added_by, added_at,
        convoy_group, sort_order, origin
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
     nextDay, row.billing_date, row.fo_number || '', '', row.outlet_id,
     row.quantity, row.cbm, row.restrictions, row.truck_id, row.driver_id, row.truck_billing_category,
     isBacklog ? 'Prepping' : 'Scheduled', row.id, 'Carry-over', row.tier,
     `Carried over from Trip ${row.id} (${statusReason})`,
-    '', null, email, now, '', null, row.origin);
-
-  if (helperIds.length) {
-    await batch(helperSlots(helperIds).map((h) => stmt(
-      `INSERT INTO trip_helpers (trip_id, employee_id, slot) VALUES (?, ?, ?)`,
-      newTripId, h.employee_id, h.slot)));
-  }
+    '', null, email, now, '', null, row.origin),
+    ...helperSlots(helperIds).map((h) => stmt(
+      `INSERT INTO trip_helpers (trip_id, employee_id, slot) VALUES ((SELECT MAX(id) FROM trips), ?, ?)`,
+      h.employee_id, h.slot)),
+  ]);
+  const newTripId = ins.results[0].id;
 
   // Joins a sibling stop's already-Suggested row of the same type when one
   // exists (a merged load carrying over one stop at a time), else reserves

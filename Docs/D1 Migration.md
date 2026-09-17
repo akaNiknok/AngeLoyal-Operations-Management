@@ -1,6 +1,6 @@
 # D1 Migration Plan — Google Sheets → Cloudflare D1 (v2.0.0)
 
-Status: PHASE 1 IN PROGRESS (2026-09-17). Tick the boxes as work lands. A fresh session reads this file
+Status: PHASE 1 DONE (2026-09-17); Phase 2 next. Tick the boxes as work lands. A fresh session reads this file
 and `HANDOFF.md`, not the codebase, to resume.
 
 ## 1. Decisions (settled, do not re-open)
@@ -303,7 +303,7 @@ independent and start with W2.
 - [x] W2 waybills → merged, tests green (review fixed sequence allocation race and the FK-unsafe delete)
 - [x] W4 masters → merged
 - [x] W5 billing → merged (review fixed raw-area rate edits, atomic line save, concurrent line create)
-- [x] W1 trips → merged
+- [x] W1 trips → merged (review made the carry-over trip + helpers one batch)
 - [x] W3 import → merged (the delete tests moved to `test/legacy/delete-trips.test.js` for W1)
 - [x] Gate: full `npm test` green; `test/legacy/` empty and deleted.
 
