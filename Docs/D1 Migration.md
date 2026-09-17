@@ -300,9 +300,9 @@ The orchestrator pre-wires `server/writers/*.js` stubs into `FNS` and `test/harn
 depends on W2's suggestion helper: start W3 after W2 merges. W4 and W5 are
 independent and start with W2.
 
-- [ ] W2 waybills → merged, tests green
+- [x] W2 waybills → merged, tests green (review fixed sequence allocation race and the FK-unsafe delete)
 - [x] W4 masters → merged
-- [ ] W5 billing → merged
+- [x] W5 billing → merged (review fixed raw-area rate edits, atomic line save, concurrent line create)
 - [ ] W1 trips → merged
 - [x] W3 import → merged (the delete tests moved to `test/legacy/delete-trips.test.js` for W1)
 - [ ] Gate: full `npm test` green; `test/legacy/` empty and deleted.
