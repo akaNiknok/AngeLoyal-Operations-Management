@@ -1,14 +1,14 @@
 // ============================================================
-//  deleteImportedTrip and bulkDeleteTrips (split out of the legacy
-//  import suite for W1, the trips writer).
+//  deleteImportedTrip and bulkDeleteTrips (server/writers/trips.js,
+//  split out of the legacy import suite for W1, the trips writer).
+//  D1 adds real FKs the Sheet never had: a Suggested waybill is
+//  detached before the trip goes, and any carry-over child's
+//  parent_trip_id back-link is cleared first.
 // ============================================================
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
-const { makeEnv, dump, rowObject } = require('./harness');
+const { makeEnv, dump } = require('./harness');
 const { HEADERS, usersSheet, emptySheet, EMAIL } = require('./fixtures');
 
 function importSheets(extra = {}) {
@@ -39,15 +39,16 @@ function asDispatcher(sheets) {
   return makeEnv({ sheets, userEmail: EMAIL.Dispatcher });
 }
 
+function trip(id, fo) {
+  const f = { ID: id, 'FO Number': fo, 'Trip Date': '6/16/2026', 'Billing Date': '6/16/2026' };
+  return HEADERS.Trips.map((h) => (f[h] !== undefined ? f[h] : ''));
+}
 
 // ---------------- deleteImportedTrip ----------------
 
 function withTripAndWaybill(locked) {
   const sheets = importSheets({
-    Trips: [
-      HEADERS.Trips.slice(),
-      HEADERS.Trips.map((h) => (h === 'ID' ? 70 : h === 'FO Number' ? 'FO-700' : '')),
-    ],
+    Trips: [HEADERS.Trips.slice(), trip(70, 'FO-700')],
     Waybills: [
       HEADERS.Waybills.slice(),
       [80, 'AL-50', 1, 50, 70, 'FO-700', 'Regular', '', locked ? 'Confirmed' : 'Suggested', locked, '', ''],
@@ -56,27 +57,37 @@ function withTripAndWaybill(locked) {
   return asDispatcher(sheets);
 }
 
-test('deleteImportedTrip removes the trip and its suggested waybills', () => {
-  const { api, ss } = withTripAndWaybill(false);
-  const res = api.deleteImportedTrip(70);
+test('deleteImportedTrip removes the trip and its suggested waybills', async () => {
+  const { api, db } = withTripAndWaybill(false);
+  const res = await api.deleteImportedTrip(70);
   assert.equal(res.success, true);
-  assert.equal(dump(ss, 'Trips').rows.length, 0);
-  assert.equal(dump(ss, 'Waybills').rows.length, 0); // suggested waybill cleaned up
+  assert.equal(dump(db, 'trips').length, 0);
+  assert.equal(dump(db, 'waybills').length, 0); // suggested waybill cleaned up
 });
 
-test('deleteImportedTrip refuses to delete a trip with a confirmed waybill', () => {
-  const { api, ss } = withTripAndWaybill(true);
-  const res = api.deleteImportedTrip(70);
+test('deleteImportedTrip refuses to delete a trip with a confirmed waybill', async () => {
+  const { api, db } = withTripAndWaybill(true);
+  const res = await api.deleteImportedTrip(70);
   assert.equal(res.success, false);
   assert.match(res.error, /confirmed waybill/);
-  assert.equal(dump(ss, 'Trips').rows.length, 1); // untouched
+  assert.equal(dump(db, 'trips').length, 1); // untouched
+});
+
+test('deleteImportedTrip clears a carry-over child\'s parent link so the FK does not block', async () => {
+  const { api, db } = asDispatcher(importSheets({
+    Trips: [HEADERS.Trips.slice(), trip(70, 'FO-700')],
+  }));
+  const child = await api._createCarryoverTrip(70, 'Backlog');
+  assert.equal(dump(db, 'trips').find((t) => t.id === child).parent_trip_id, 70);
+
+  const res = await api.deleteImportedTrip(70);
+  assert.equal(res.success, true);
+  assert.equal(dump(db, 'trips').find((t) => t.id === child).parent_trip_id, null);
 });
 
 // ---------------- bulkDeleteTrips ----------------
 
 function withThreeTrips() {
-  const trip = (id, fo) =>
-    HEADERS.Trips.map((h) => (h === 'ID' ? id : h === 'FO Number' ? fo : ''));
   return asDispatcher(importSheets({
     Trips: [HEADERS.Trips.slice(), trip(70, 'FO-700'), trip(71, 'FO-701'), trip(72, 'FO-702')],
     Waybills: [
@@ -88,51 +99,42 @@ function withThreeTrips() {
   }));
 }
 
-test('bulkDeleteTrips removes every selected trip and its suggested waybills', () => {
-  const { api, ss } = withThreeTrips();
-  const res = api.bulkDeleteTrips([70, 72]);
+test('bulkDeleteTrips removes every selected trip and its suggested waybills', async () => {
+  const { api, db } = withThreeTrips();
+  const res = await api.bulkDeleteTrips([70, 72]);
 
   assert.equal(res.success, true);
   assert.equal(res.deleted, 2);
   assert.equal(res.blocked.length, 0);
-  const ids = dump(ss, 'Trips').rows.map((r) => Number(r[0]));
-  assert.deepEqual(ids, [71]);
+  assert.deepEqual(dump(db, 'trips').map((t) => t.id), [71]);
   // 70's suggested waybill went with it; 71's confirmed one stayed.
-  const wbIds = dump(ss, 'Waybills').rows.map((r) => Number(r[0]));
-  assert.deepEqual(wbIds, [81]);
+  assert.deepEqual(dump(db, 'waybills').map((w) => w.id), [81]);
 });
 
 // One refusal must not abort the rest — the dispatcher selected a block and
 // expects everything deletable in it to go.
-test('bulkDeleteTrips keeps a confirmed-waybill trip and still deletes the others', () => {
-  const { api, ss } = withThreeTrips();
-  const res = api.bulkDeleteTrips([70, 71, 72]);
+test('bulkDeleteTrips keeps a confirmed-waybill trip and still deletes the others', async () => {
+  const { api, db } = withThreeTrips();
+  const res = await api.bulkDeleteTrips([70, 71, 72]);
 
   assert.equal(res.success, true);
   assert.equal(res.deleted, 2);
   assert.equal(res.blocked.length, 1);
   assert.equal(res.blocked[0].tripId, 71);
   assert.match(res.blocked[0].error, /confirmed waybill/);
-  assert.deepEqual(dump(ss, 'Trips').rows.map((r) => Number(r[0])), [71]);
+  assert.deepEqual(dump(db, 'trips').map((t) => t.id), [71]);
 });
 
-test('bulkDeleteTrips rejects an empty selection', () => {
+test('bulkDeleteTrips rejects an empty selection', async () => {
   const { api } = withThreeTrips();
-  const res = api.bulkDeleteTrips([]);
+  const res = await api.bulkDeleteTrips([]);
   assert.equal(res.success, false);
   assert.match(res.error, /No trips selected/);
 });
 
-test('bulkDeleteTrips is gated by ADD_MANUAL_TRIP permission', () => {
-  const { api } = makeEnv({ sheets: withThreeTripsSheets(), userEmail: EMAIL.Viewer });
-  assert.throws(() => api.bulkDeleteTrips([70]), /permission/i);
-});
-
-function withThreeTripsSheets() {
-  const trip = (id, fo) =>
-    HEADERS.Trips.map((h) => (h === 'ID' ? id : h === 'FO Number' ? fo : ''));
-  return importSheets({
+test('bulkDeleteTrips is gated by ADD_MANUAL_TRIP permission', async () => {
+  const { api } = makeEnv({ sheets: importSheets({
     Trips: [HEADERS.Trips.slice(), trip(70, 'FO-700'), trip(71, 'FO-701'), trip(72, 'FO-702')],
-  });
-}
-
+  }), userEmail: EMAIL.Viewer });
+  await assert.rejects(() => api.bulkDeleteTrips([70]), /Access denied/);
+});
