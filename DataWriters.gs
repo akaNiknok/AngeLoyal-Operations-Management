@@ -129,6 +129,14 @@ function saveTripChanges(tripId, changes) {
     const oldTruckId  = _numOrNull(_val(row, headers, 'Truck ID'));
     const oldStatus   = _val(row, headers, 'Trip Status');
 
+    // Setting the status a trip already has is a no-op. A board that lost a
+    // save's response shows the old status, and the dispatcher sets it again:
+    // without this guard every repeat of Redeliver spawned another carry-over.
+    if (changes.tripStatus !== undefined && changes.tripStatus === oldStatus) {
+      changes = Object.assign({}, changes);
+      delete changes.tripStatus;
+    }
+
     const updates = {};
 
     if (changes.truckId !== undefined) {

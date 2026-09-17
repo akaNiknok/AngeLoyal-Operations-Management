@@ -97,6 +97,20 @@ test('bulkSetTripStatus sets status on every trip and fires carry-over per trip'
   });
 });
 
+test('setting the status a trip already has spawns no second carry-over', () => {
+  const { api, ss } = asDispatcher(baseSheets([tripRow({ ID: 1 })]));
+
+  assert.equal(api.saveTripChanges(1, { tripStatus: 'Redeliver' }).newTripId > 0, true);
+  const again = api.saveTripChanges(1, { tripStatus: 'Redeliver' });
+  assert.equal(again.success, true);
+  assert.equal(again.newTripId, null);
+  assert.equal(again.trip.tripStatus, 'Redeliver');
+
+  assert.equal(dump(ss, 'Trips').rows.length, 2); // the trip + ONE carry-over
+  const statusAudits = dump(ss, 'Audit Log').rows.filter((r) => r.includes('TRIP_STATUS_CHANGE'));
+  assert.equal(statusAudits.length, 1);
+});
+
 test('bulkSetTripStatus with a prefix reserves a distinct waybill number per load', () => {
   // Blank FO Numbers -> two separate loads -> two distinct reserved numbers.
   const sheets = baseSheets([tripRow({ ID: 1 }), tripRow({ ID: 2 })]);
