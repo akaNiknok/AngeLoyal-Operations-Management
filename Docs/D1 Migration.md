@@ -301,10 +301,10 @@ depends on W2's suggestion helper: start W3 after W2 merges. W4 and W5 are
 independent and start with W2.
 
 - [ ] W2 waybills → merged, tests green
-- [ ] W4 masters → merged
+- [x] W4 masters → merged
 - [ ] W5 billing → merged
 - [ ] W1 trips → merged
-- [ ] W3 import → merged
+- [x] W3 import → merged (the delete tests moved to `test/legacy/delete-trips.test.js` for W1)
 - [ ] Gate: full `npm test` green; `test/legacy/` empty and deleted.
 
 ### Phase 2 — Integrate and clean up (Opus, sequential)
