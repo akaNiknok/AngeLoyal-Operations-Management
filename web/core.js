@@ -164,8 +164,19 @@
                     },
                     (e) => {
                         setSyncing(false);
-                        showToast("Error: " + (e && e.message), "error");
                         if (opts.revert) opts.revert();
+                        // A dropped connection (fetch rejects with TypeError)
+                        // says nothing about the write: it may have landed.
+                        // Reload the board instead of trusting the revert.
+                        if (e instanceof TypeError) {
+                            showToast(
+                                "Connection lost during the save. Reloading to show what saved.",
+                                "error",
+                            );
+                            loadDispatch(true);
+                            return;
+                        }
+                        showToast("Error: " + (e && e.message), "error");
                     },
                 );
             }
