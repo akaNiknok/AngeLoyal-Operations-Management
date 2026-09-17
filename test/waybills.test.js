@@ -576,3 +576,38 @@ test('a rejected edit rolls back only its own rows', async () => {
   assert.equal(trips[0].waybillSuggested, 'AL-90'); // kept
   assert.equal(trips[1].waybillSuggested, 'AL-2');  // rolled back
 });
+
+// ---- review fixes: concurrency and the trips.waybill_id foreign key ----
+test('concurrent suggestions never mint the same number', async () => {
+  const { api, db } = asAdmin({
+    ...baseSheets({ lastSeq: 5 }),
+    Trips: [HEADERS.Trips.slice(), tripRow({ ID: 101 }), tripRow({ ID: 102 }), tripRow({ ID: 103 })],
+  });
+  const res = await Promise.all([
+    api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null),
+    api._createSuggestedWaybill(102, 1, 'FO-2', 'Regular', null),
+    api._suggestWaybillsForGroups(1, [{ foNumber: 'FO-3', tripIds: [103] }]),
+  ]);
+  const numbers = [res[0].waybillNumber, res[1].waybillNumber, res[2][0].waybillNumber].sort();
+  assert.deepEqual(numbers, ['AL-6', 'AL-7', 'AL-8']);
+  assert.equal(prefixRow(db).last_sequence_number, 8);
+  assert.equal(trip(db, 101).waybill_id, res[0].id);
+  assert.equal(trip(db, 102).waybill_id, res[1].id);
+});
+
+test('_deleteSuggestedWaybillsForTrip removes a single-stop load without an FK error', async () => {
+  const { api, db } = asAdmin({
+    ...baseSheets({ lastSeq: 5 }),
+    Trips: [HEADERS.Trips.slice(), tripRow({ ID: 101 }), tripRow({ ID: 102 })],
+  });
+  const one = await api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+  await api._suggestWaybillsForGroups(1, [{ foNumber: 'FO-2', tripIds: [102] }]);
+  await api.run('UPDATE trips SET waybill_id = ? WHERE id = 102', one.id); // 102 joins 101's load
+
+  await api._deleteSuggestedWaybillsForTrip(101);
+  assert.equal(trip(db, 101).waybill_id, null);
+  assert.ok(waybill(db, one.id), 'row stays while 102 still points at it');
+
+  await api._deleteSuggestedWaybillsForTrip(102);
+  assert.equal(waybill(db, one.id), undefined);
+});

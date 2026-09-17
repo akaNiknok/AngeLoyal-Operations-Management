@@ -77,7 +77,9 @@ class D1Database {
     this.raw.exec('BEGIN');
     try {
       const out = [];
-      for (const s of stmts) out.push(await s.all());
+      // Synchronous on purpose: an await here would let a concurrent batch
+      // interleave and open a nested transaction, which real D1 never does.
+      for (const s of stmts) out.push({ results: this.raw.prepare(s.sql).all(...s.args).map(plain), success: true, meta: {} });
       this.raw.exec('COMMIT');
       return out;
     } catch (e) {

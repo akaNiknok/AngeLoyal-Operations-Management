@@ -18,10 +18,9 @@
 //  share a number; only a live Confirmed number blocks a save).
 //
 //  Sequence reservation has no script lock (D1 serializes writes per
-//  database instead): `_reserveWaybillSequence` is one atomic
-//  UPDATE ... SET last_sequence_number = MAX(..., ?) ... RETURNING, so a
-//  concurrent reservation can only ever move the counter forward, never
-//  re-issue a number already handed out.
+//  database instead): `_reserveWaybillSequence` allocates the
+//  next number(s) inside one UPDATE ... RETURNING, so two concurrent
+//  suggestions can never compute the same number.
 // ============================================================
 
 import { currentEmail } from '../ctx.js';
@@ -101,40 +100,38 @@ export async function _highestIssuedSequence(prefixId) {
 }
 
 /**
- * Reserves a sequence number on a prefix with one atomic statement: the
- * counter only ever moves up (MAX), and RETURNING proves the reservation
- * landed before any waybill row is minted against it — a write that didn't
- * take can't hand out a number twice.
+ * Allocates `count` consecutive sequence numbers on a prefix in ONE statement
+ * and returns the first. The counter moves past max(counter, highest sequence
+ * already in waybills), so two concurrent requests can never compute the same
+ * number: the second one's UPDATE reads the first one's result (D1 serializes
+ * writes). The number is spent before any waybill row is minted against it.
  * @param {number} prefixId
- * @param {number} newSeqNumber
- * @param {number} width  Booklet pad width to persist alongside.
- * @throws {Error} if the counter did not end up at (at least) newSeqNumber.
+ * @param {number} [count=1]
+ * @returns {Promise<number>} The first allocated sequence number.
+ * @throws {Error} when the prefix does not exist.
  */
-export async function _reserveWaybillSequence(prefixId, newSeqNumber, width) {
-  const w = Number(width) || String(newSeqNumber).length;
+export async function _reserveWaybillSequence(prefixId, count) {
+  const n = Number(count) || 1;
   const row = await one(
-    `UPDATE waybill_prefixes SET last_sequence_number = MAX(last_sequence_number, ?), sequence_width = ?
-     WHERE id = ? RETURNING last_sequence_number`,
-    Number(newSeqNumber), w, Number(prefixId));
-  if (!row || Number(row.last_sequence_number) !== Number(newSeqNumber)) {
-    throw new Error(
-      `Could not reserve waybill sequence ${newSeqNumber} — the prefix counter still reads `
-      + `${row ? row.last_sequence_number : 'unknown'}.`);
-  }
+    `UPDATE waybill_prefixes SET last_sequence_number = MAX(last_sequence_number,
+       COALESCE((SELECT MAX(sequence_number) FROM waybills WHERE prefix_id = ?1), 0)) + ?2
+     WHERE id = ?1 RETURNING last_sequence_number`,
+    Number(prefixId), n);
+  if (!row) throw new Error(`Waybill prefix ID ${prefixId} not found.`);
+  return Number(row.last_sequence_number) - n + 1;
 }
 
 /**
- * Advances a prefix's Last Sequence Number, keeping its stored pad width.
- * Only moves forward — a lower number (an out-of-order confirm) is ignored.
+ * Advances a prefix's Last Sequence Number to at least `newSeqNumber` (a
+ * confirmed custom number). Only moves forward — a lower number (an
+ * out-of-order confirm) is ignored — and never throws on a concurrent move.
  * @param {number} prefixId
  * @param {number} newSeqNumber
  */
 export async function _updateWaybillPrefixSequence(prefixId, newSeqNumber) {
-  const pref = await one(
-    `SELECT last_sequence_number, sequence_width FROM waybill_prefixes WHERE id = ?`, Number(prefixId));
-  if (!pref) return;
-  if (Number(newSeqNumber) <= Number(pref.last_sequence_number)) return;
-  await _reserveWaybillSequence(prefixId, newSeqNumber, pref.sequence_width);
+  await run(
+    `UPDATE waybill_prefixes SET last_sequence_number = MAX(last_sequence_number, ?) WHERE id = ?`,
+    Number(newSeqNumber), Number(prefixId));
 }
 
 // ------------------------------------------------------------
@@ -174,18 +171,18 @@ export async function _createSuggestedWaybill(tripId, prefixId, foNumber, waybil
   } else {
     const pref = await _requireWaybillPrefix(prefixId);
     usePrefixId = prefixId;
-    seq = Math.max(pref.lastSequenceNumber || 0, await _highestIssuedSequence(prefixId)) + 1;
+    // Reserve before minting: the number is spent even if the insert fails.
+    seq = await _reserveWaybillSequence(prefixId, 1);
     waybillNumber = _waybillNumberString(pref.prefix, seq, pref.sequenceWidth, suffix);
-    // Reserve before minting: a failed reservation must abort, not mint a
-    // number it never secured.
-    await _reserveWaybillSequence(prefixId, seq, pref.sequenceWidth);
   }
 
-  const { last_row_id: id } = await run(
-    `INSERT INTO waybills (waybill_number, prefix_id, sequence_number, waybill_type, parent_waybill_id, status)
-     VALUES (?, ?, ?, ?, ?, 'Suggested')`,
-    waybillNumber, usePrefixId, seq, waybillType, parentWaybillId || null);
-  await run(`UPDATE trips SET waybill_id = ? WHERE id = ?`, id, Number(tripId));
+  const [ins] = await batch([
+    stmt(`INSERT INTO waybills (waybill_number, prefix_id, sequence_number, waybill_type, parent_waybill_id, status)
+          VALUES (?, ?, ?, ?, ?, 'Suggested') RETURNING id`,
+      waybillNumber, usePrefixId, seq, waybillType, parentWaybillId || null),
+    stmt(`UPDATE trips SET waybill_id = (SELECT MAX(id) FROM waybills) WHERE id = ?`, Number(tripId)),
+  ]);
+  const id = ins.results[0].id;
 
   await _auditLog('WAYBILL_SUGGEST', 'waybills', id, '', waybillNumber);
   return { id, waybillNumber };
@@ -204,17 +201,16 @@ export async function _createSuggestedWaybill(tripId, prefixId, foNumber, waybil
  */
 export async function _suggestWaybillsForGroups(prefixId, groups) {
   const pref = await _requireWaybillPrefix(prefixId);
-  let nextSeq = Math.max(pref.lastSequenceNumber || 0, await _highestIssuedSequence(prefixId));
+  const live = (groups || []).filter((g) => g.tripIds && g.tripIds.length);
+  if (!live.length) return [];
 
-  const batches = [];   // { seq, waybillNumber, tripIds }
-  (groups || []).forEach((g) => {
-    if (!g.tripIds || !g.tripIds.length) return;
-    nextSeq += 1;
-    batches.push({ seq: nextSeq, waybillNumber: _waybillNumberString(pref.prefix, nextSeq, pref.sequenceWidth), tripIds: g.tripIds });
-  });
-  if (!batches.length) return [];
-
-  await _reserveWaybillSequence(prefixId, nextSeq, pref.sequenceWidth);
+  // The whole span is allocated in one statement before any row is inserted.
+  const first = await _reserveWaybillSequence(prefixId, live.length);
+  const batches = live.map((g, i) => ({
+    seq: first + i,
+    waybillNumber: _waybillNumberString(pref.prefix, first + i, pref.sequenceWidth),
+    tripIds: g.tripIds,
+  }));
 
   const inserted = await batch(batches.map((b) => stmt(
     `INSERT INTO waybills (waybill_number, prefix_id, sequence_number, waybill_type, status)
@@ -303,13 +299,13 @@ export async function _deleteSuggestedWaybillsForTrip(tripId) {
   const wb = await one(`SELECT status FROM waybills WHERE id = ?`, trip.waybill_id);
   if (!wb || wb.status !== 'Suggested') return;
 
-  const siblings = await one(
-    `SELECT COUNT(*) AS c FROM trips WHERE waybill_id = ? AND id != ?`, trip.waybill_id, id);
-  if (siblings.c > 0) {
-    await run(`UPDATE trips SET waybill_id = NULL WHERE id = ?`, id);
-  } else {
-    await run(`DELETE FROM waybills WHERE id = ?`, trip.waybill_id);
-  }
+  // Detach first: trips.waybill_id is a foreign key, so the row can only go
+  // once no trip points at it.
+  await batch([
+    stmt(`UPDATE trips SET waybill_id = NULL WHERE id = ?`, id),
+    stmt(`DELETE FROM waybills WHERE id = ? AND status = 'Suggested'
+          AND NOT EXISTS (SELECT 1 FROM trips WHERE waybill_id = ?)`, trip.waybill_id, trip.waybill_id),
+  ]);
 }
 
 // ------------------------------------------------------------
