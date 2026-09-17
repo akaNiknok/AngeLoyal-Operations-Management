@@ -376,3 +376,29 @@ test('getFreightRates takes a set of origins, and no filter still means all', as
   // The filter normalizes the same way the rate lookup does.
   assert.deepEqual(names(await api.getFreightRates(['  tanza '])), ['TANZA']);
 });
+
+// ── Review fixes ─────────────────────────────────────────────
+
+test('updateFreightRate edits only its own town when two areas differ only by case', async () => {
+  const { api } = asAdmin(base());
+  await api.importFreightRates('TANZA', '7/1/2026', [
+    rateRow('San Juan', '6W', { '65.01-70': 6760 }),
+    rateRow('SAN JUAN', '6W', { '65.01-70': 16490 }),
+  ]);
+  const upper = (await api.getFreightRates('TANZA')).find((r) => r.area === 'SAN JUAN');
+  assert.equal((await api.updateFreightRate(upper.id, '65.01-70', 16500)).success, true);
+
+  const rows = await api.getFreightRates('TANZA');
+  assert.equal(rows.find((r) => r.area === 'San Juan').bands['65.01-70'], 6760);
+  assert.equal(rows.find((r) => r.area === 'SAN JUAN').bands['65.01-70'], 16500);
+});
+
+test('a second diesel price on the same effective date is refused with a readable error', async () => {
+  const { api } = asAdmin(base());
+  await api.addFuelPrice({ effectiveDate: '7/1/2026', dieselPrice: 67 });
+  const other = (await api.addFuelPrice({ effectiveDate: '7/8/2026', dieselPrice: 68 })).fuelPrice.id;
+
+  assert.match((await api.addFuelPrice({ effectiveDate: '7/1/2026', dieselPrice: 70 })).error, /already exists/);
+  assert.match((await api.updateFuelPrice(other, { effectiveDate: '7/1/2026' })).error, /already exists/);
+  assert.equal((await api.updateFuelPrice(other, { effectiveDate: '7/8/2026', dieselPrice: 69 })).success, true);
+});

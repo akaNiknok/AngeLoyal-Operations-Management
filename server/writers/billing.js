@@ -93,7 +93,7 @@ export async function importFreightRates(origin, effectiveDate, rows) {
 /**
  * Edits one rate cell from the Billing Matrix panel. `rateId` may be any row
  * of the (origin, area, truck type, effective date) block — it resolves the
- * whole block, then upserts or deletes just the one band's row.
+ * whole block on the RAW area ("San Juan" and "SAN JUAN" are two towns), then upserts or deletes just the one band's row.
  * @param {number} rateId
  * @param {string} bandLabel
  * @param {number|string} value  Blank clears the cell.
@@ -115,8 +115,8 @@ export async function updateFreightRate(rateId, bandLabel, value) {
 
     const bandRow = await one(
       `SELECT * FROM freight_rates
-       WHERE origin = ? AND area_key = ? AND truck_type = ? AND effective_date = ? AND band = ?`,
-      anyRow.origin, anyRow.area_key, anyRow.truck_type, anyRow.effective_date, bandIndex);
+       WHERE origin = ? AND area = ? AND truck_type = ? AND effective_date = ? AND band = ?`,
+      anyRow.origin, anyRow.area, anyRow.truck_type, anyRow.effective_date, bandIndex);
 
     const oldVal = bandRow ? bandRow.rate : null;
     const newVal = raw === '' ? '' : Number(raw);
@@ -156,6 +156,12 @@ export async function updateFreightRate(rateId, bandLabel, value) {
 //  Fuel prices
 // ============================================================
 
+/** One diesel price per effective date (fuel_prices.effective_date is UNIQUE). */
+async function _requireFreeFuelDate(effDate, skipId) {
+  const dup = await one(`SELECT id FROM fuel_prices WHERE effective_date = ? AND id IS NOT ?`, effDate, skipId);
+  if (dup) throw new Error(`A diesel price effective ${toClientDate(effDate)} already exists. Edit that one instead.`);
+}
+
 /** @param {{ effectiveDate: string, dieselPrice: number }} data */
 export async function addFuelPrice(data) {
   await requirePermission('EDIT_FREIGHT_RATES');
@@ -167,6 +173,8 @@ export async function addFuelPrice(data) {
     if (!isFinite(price) || price <= 0) {
       throw new Error('Enter the diesel price as a number greater than zero.');
     }
+
+    await _requireFreeFuelDate(effDate, null);
 
     const email = currentEmail() || 'unknown';
     const now = nowPH();
@@ -205,6 +213,7 @@ export async function updateFuelPrice(priceId, changes) {
     if (changes && changes.effectiveDate !== undefined) {
       const effDate = fromClientDate(changes.effectiveDate);
       if (!effDate) throw new Error('Effective date is required, in M/d/yyyy format.');
+      await _requireFreeFuelDate(effDate, row.id);
       fields.effective_date = effDate;
     }
     if (changes && changes.dieselPrice !== undefined) {
@@ -402,7 +411,7 @@ export async function getBillingLines(from, to) {
               area, drops, cartons, diesel_price, rate_band, hauling_rate, mano, drop_fee, total,
               status, added_by, added_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           RETURNING id`,
+           ON CONFLICT (waybill_id) DO NOTHING RETURNING id`,
           g.waybillId, fromClientDate(priced.tripDate), fromClientDate(priced.billingDate),
           priced.origin, priced.plateNumber, priced.foNumber, priced.truckType,
           priced.area, priced.drops, priced.cartons, dieselPrice, rateBandIdx,
@@ -434,18 +443,19 @@ export async function getBillingLines(from, to) {
         ...cols.map((c) => fields[c]), existing.id));
     });
 
-    let newIds = [];
+    // A concurrent refresh may have created a line first: its insert returns
+    // no row and is skipped, instead of failing the whole range on UNIQUE.
+    const created = [];
     if (insertStmts.length) {
-      const results = await batch(insertStmts);
-      newIds = results.map((r) => r.results[0].id);
+      (await batch(insertStmts)).forEach((r, i) => {
+        if (r.results.length) created.push({ id: r.results[0].id, number: insertMeta[i] });
+      });
     }
     if (updateStmts.length) await batch(updateStmts);
 
-    if (newIds.length) {
-      await _auditLogBatch(newIds.map((id, i) => ({
-        action: 'BILLING_LINE_CREATE', table: 'billing_lines', rowId: id, oldValue: '', newValue: insertMeta[i],
-      })));
-    }
+    await _auditLogBatch(created.map((c) => ({
+      action: 'BILLING_LINE_CREATE', table: 'billing_lines', rowId: c.id, oldValue: '', newValue: c.number,
+    })));
 
     const finalByWaybill = waybillIds.length ? await billingLinesByWaybill(waybillIds) : {};
     const lines = Object.values(finalByWaybill)
@@ -525,12 +535,13 @@ export async function saveBillingLine(lineId, changes) {
     fields.updated_at = nowPH();
 
     const cols = Object.keys(fields);
-    await run(
-      `UPDATE billing_lines SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
-      ...cols.map((c) => fields[c]), row.id);
-
-    // Manual charges are a set, not a diff — replace them atomically.
-    const chargeStmts = [stmt(`DELETE FROM billing_line_charges WHERE billing_line_id = ?`, row.id)];
+    // The amounts, the total and the charge set land together or not at all:
+    // a total that disagrees with its charges is a wrong invoice.
+    const chargeStmts = [
+      stmt(`UPDATE billing_lines SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
+        ...cols.map((c) => fields[c]), row.id),
+      stmt(`DELETE FROM billing_line_charges WHERE billing_line_id = ?`, row.id),
+    ];
     Object.keys(manual).forEach((chargeTypeId) => {
       chargeStmts.push(stmt(
         `INSERT INTO billing_line_charges (billing_line_id, charge_type_id, amount) VALUES (?, ?, ?)`,

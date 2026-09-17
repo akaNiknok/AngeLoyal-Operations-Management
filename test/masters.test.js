@@ -346,3 +346,11 @@ test('updateBillingChargeType renames without disturbing sort order', async () =
   assert.equal(res.billingChargeType.label, 'Toll Fees');
   assert.equal(res.billingChargeType.sortOrder, 5);
 });
+
+test('charge types: Payroll may add one, a Viewer may not', async () => {
+  const payroll = makeEnv({ sheets: base(), userEmail: EMAIL.Payroll });
+  assert.equal((await payroll.api.createBillingChargeType({ label: 'Ferry Fee' })).success, true);
+
+  const viewer = makeEnv({ sheets: base(), userEmail: EMAIL.Viewer });
+  await assert.rejects(viewer.api.createBillingChargeType({ label: 'Nope' }), /Access denied/);
+});
