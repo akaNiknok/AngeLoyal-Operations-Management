@@ -103,8 +103,6 @@ test('rpc only dispatches allow-listed functions', async () => {
   for (const fn of ['_resolveSession', 'getEmployees', 'currentUser', 'rowById', 'constructor']) {
     await assert.rejects(() => api.rpc(token, fn, []), /Unknown action/, fn);
   }
-  // Allow-listed but not yet ported (Phase 1) is still "unknown", never a crash.
-  await assert.rejects(() => api.rpc(token, 'createTrip', [{}]), /Unknown action/);
 });
 
 test('logout invalidates the session', async () => {

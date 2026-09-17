@@ -303,9 +303,9 @@ independent and start with W2.
 - [x] W2 waybills → merged, tests green (review fixed sequence allocation race and the FK-unsafe delete)
 - [x] W4 masters → merged
 - [x] W5 billing → merged (review fixed raw-area rate edits, atomic line save, concurrent line create)
-- [ ] W1 trips → merged
+- [x] W1 trips → merged
 - [x] W3 import → merged (the delete tests moved to `test/legacy/delete-trips.test.js` for W1)
-- [ ] Gate: full `npm test` green; `test/legacy/` empty and deleted.
+- [x] Gate: full `npm test` green; `test/legacy/` empty and deleted.
 
 ### Phase 2 — Integrate and clean up (Opus, sequential)
 
