@@ -87,8 +87,8 @@
             let sessionToken = storeGet("oms_session") || null;
 
             // ── SERVER GATEWAY ────────────────────────────────────────
-            // All authenticated backend calls POST to the Apps Script /exec
-            // endpoint, which dispatches through rpc(sessionToken, fn, args).
+            // All authenticated backend calls POST to /api (a Pages Function
+            // on this origin), which dispatches through rpc(sessionToken, fn, args).
             //
             // One authenticated call, resolving with whatever the rpc returned.
             // An expired session is handled here rather than at every call site:
@@ -119,19 +119,13 @@
                 );
             }
 
-            // One POST per call, to the /exec URL for this environment.
+            // One POST per call to /api, the Pages Function on this origin.
+            // Same origin, so no CORS: a plain string body is all it needs.
             //
-            // Deliberately header-free: any header beyond a CORS-safelisted
-            // Content-Type makes this a preflighted request, and Apps Script
-            // cannot serve OPTIONS — the call would die before it was sent. A
-            // bare string body defaults to text/plain, which is safelisted.
-            // CORS then works because /exec 302s to googleusercontent.com,
-            // which answers with Access-Control-Allow-Origin: *.
-            //
-            // doPost never throws, so a non-ok payload is a real app error;
-            // a rejected fetch is the network being down.
+            // The function never throws, so a non-ok payload is a real app
+            // error; a rejected fetch is the network being down.
             function callBackend(body) {
-                return fetch(EXEC_URL, {
+                return fetch(API_URL, {
                     method: "POST",
                     body: JSON.stringify(body),
                 })

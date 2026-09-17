@@ -1,30 +1,21 @@
 // ============================================================
-//  Code.gs — RBAC unit tests
+//  server/rbac.js — the role x permission matrix.
 //  The server is the real permission gate (the UI only hides
-//  controls). These tests lock the role x permission matrix and
-//  the unauthenticated / inactive-user paths.
+//  controls). These tests lock the matrix and the unauthenticated /
+//  inactive-user paths.
 // ============================================================
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { makeEnv } = require('./harness');
-const { usersSheet } = require('./fixtures');
+const { usersSheet, EMAIL } = require('./fixtures');
 
 function envAs(email) {
   return makeEnv({ sheets: { Users: usersSheet() }, userEmail: email });
 }
 
-const EMAIL = {
-  Admin: 'admin@angeloyal.com',
-  Dispatcher: 'dispatch@angeloyal.com',
-  Payroll: 'payroll@angeloyal.com',
-  Viewer: 'viewer@angeloyal.com',
-  Inactive: 'former@angeloyal.com',
-  Unknown: 'nobody@angeloyal.com',
-};
-
-// Expected permission matrix, mirrored from Code.gs PERMISSIONS.
-// If this drifts from the source, that is exactly the regression we want to catch.
+// Expected matrix, mirrored from server/rbac.js PERMISSIONS. A drift here is
+// exactly the regression to catch.
 const MATRIX = {
   VIEW_DISPATCH: ['Admin', 'Dispatcher', 'Payroll', 'Viewer'],
   ASSIGN_CREW: ['Admin', 'Dispatcher'],
@@ -32,60 +23,62 @@ const MATRIX = {
   FLAG_TRIP_STATUS: ['Admin', 'Dispatcher'],
   CONFIRM_WAYBILL: ['Admin', 'Dispatcher'],
   EDIT_MASTER_RECORDS: ['Admin'],
+  EDIT_WAYBILL_PREFIXES: ['Admin', 'Dispatcher'],
+  EDIT_USERS: ['Admin'],
   VIEW_AUDIT: ['Admin'],
   CLEAR_ALL_DATA: ['Admin'],
+  VIEW_BILLING: ['Admin', 'Payroll'],
+  EDIT_BILLING: ['Admin', 'Payroll'],
+  EDIT_FREIGHT_RATES: ['Admin'],
 };
 
 const ROLES = ['Admin', 'Dispatcher', 'Payroll', 'Viewer'];
 
-test('_hasPermission matches the documented role x permission matrix', () => {
+test('hasPermission matches the documented role x permission matrix', async () => {
   for (const role of ROLES) {
     const { api } = envAs(EMAIL[role]);
     for (const [perm, allowedRoles] of Object.entries(MATRIX)) {
       const expected = allowedRoles.includes(role);
-      assert.equal(
-        api._hasPermission(perm),
-        expected,
-        `${role} ${expected ? 'should' : 'should NOT'} have ${perm}`
-      );
+      assert.equal(await api.hasPermission(perm), expected,
+        `${role} ${expected ? 'should' : 'should NOT'} have ${perm}`);
     }
   }
+  // Every key in the source matrix is covered above.
+  const { PERMISSIONS } = require('../server/rbac.js');
+  assert.deepEqual(Object.keys(PERMISSIONS).sort(), Object.keys(MATRIX).sort());
 });
 
-test('_requirePermission throws for a role that lacks the permission', () => {
+test('requirePermission rejects for a role that lacks the permission', async () => {
   const { api } = envAs(EMAIL.Viewer);
-  assert.throws(() => api._requirePermission('ASSIGN_CREW'), /Access denied/);
-  // and does not throw when allowed
-  assert.doesNotThrow(() => api._requirePermission('VIEW_DISPATCH'));
+  await assert.rejects(() => api.requirePermission('ASSIGN_CREW'), /Access denied\. Your role \(Viewer\)/);
+  await api.requirePermission('VIEW_DISPATCH');
 });
 
-test('inactive users are treated as having no role', () => {
+test('inactive users are treated as having no role', async () => {
   const { api } = envAs(EMAIL.Inactive);
-  assert.equal(api._getCurrentUserRecord(), null);
-  assert.equal(api._hasPermission('VIEW_DISPATCH'), false);
-  assert.throws(() => api._requirePermission('VIEW_DISPATCH'), /Access denied/);
+  assert.equal(await api.currentUser(), null);
+  assert.equal(await api.hasPermission('VIEW_DISPATCH'), false);
+  await assert.rejects(() => api.requirePermission('VIEW_DISPATCH'), /Access denied\. Your role \(unauthenticated\)/);
 });
 
-test('unknown / unauthenticated users get no permissions', () => {
+test('unknown / unauthenticated users get no permissions', async () => {
   const { api: unknownApi } = envAs(EMAIL.Unknown);
-  assert.equal(unknownApi._getCurrentUserRecord(), null);
-  assert.equal(unknownApi._hasPermission('VIEW_DISPATCH'), false);
+  assert.equal(await unknownApi.currentUser(), null);
+  assert.equal(await unknownApi.hasPermission('VIEW_DISPATCH'), false);
 
-  const { api: anonApi } = makeEnv({ sheets: { Users: usersSheet() }, userEmail: 'unknown' });
-  assert.equal(anonApi._hasPermission('EDIT_MASTER_RECORDS'), false);
+  const { api: anonApi } = envAs('unknown');
+  assert.equal(await anonApi.hasPermission('EDIT_MASTER_RECORDS'), false);
 });
 
-test('email matching is case-insensitive', () => {
+test('email matching is case-insensitive and tolerates whitespace in the sheet', async () => {
   const { api } = envAs('ADMIN@ANGELOYAL.COM');
-  const rec = api._getCurrentUserRecord();
+  const rec = await api.currentUser();
   assert.ok(rec);
   assert.equal(rec.role, 'Admin');
-});
+  assert.equal(rec.email, 'admin@angeloyal.com');
 
-test('Active is honored whether stored as a boolean or the string "TRUE"', () => {
-  // Live sheets often hold the string 'TRUE'/'FALSE' rather than native
-  // booleans (manual entry / CSV import). Both must resolve correctly, and
-  // stray whitespace around the email must not break the match.
+  // Live sheets held '  email ' and the string 'TRUE'; the transform trims
+  // and normalizes, so the same rows still resolve.
   const sheets = {
     Users: [
       ['ID', 'Email', 'Display Name', 'Role', 'Active'],
@@ -93,31 +86,27 @@ test('Active is honored whether stored as a boolean or the string "TRUE"', () =>
       [2, 'string.former@angeloyal.com', 'Stringy Former', 'Admin', 'FALSE'],
     ],
   };
-
   const active = makeEnv({ sheets, userEmail: 'string.admin@angeloyal.com' });
-  const rec = active.api._getCurrentUserRecord();
-  assert.ok(rec, 'string "TRUE" should count as active');
-  assert.equal(rec.role, 'Admin');
-  assert.equal(active.api.getUserSession().role, 'Admin');
-
+  assert.equal((await active.api.currentUser()).role, 'Admin');
+  assert.equal((await active.api.getUserSession()).role, 'Admin');
   const inactive = makeEnv({ sheets, userEmail: 'string.former@angeloyal.com' });
-  assert.equal(inactive.api._getCurrentUserRecord(), null, 'string "FALSE" is inactive');
+  assert.equal(await inactive.api.currentUser(), null);
 });
 
-test('getUserSession exposes the role for the client, and null for outsiders', () => {
+test('getUserSession exposes the role for the client, and null for outsiders', async () => {
   const { api: adminApi } = envAs(EMAIL.Admin);
-  // Field-by-field (the session object is built inside the vm realm, so its
-  // prototype differs from the host's — deepStrictEqual would reject it).
-  const session = adminApi.getUserSession();
-  assert.equal(session.email, 'admin@angeloyal.com');
-  assert.equal(session.displayName, 'Ada Admin');
-  assert.equal(session.role, 'Admin');
+  assert.deepEqual(await adminApi.getUserSession(),
+    { email: 'admin@angeloyal.com', displayName: 'Ada Admin', role: 'Admin' });
 
   const { api: outsiderApi } = envAs(EMAIL.Unknown);
-  assert.equal(outsiderApi.getUserSession().role, null);
+  assert.deepEqual(await outsiderApi.getUserSession(),
+    { email: EMAIL.Unknown, displayName: EMAIL.Unknown, role: null });
+
+  const { api: anonApi } = envAs('unknown');
+  assert.deepEqual(await anonApi.getUserSession(), { email: '', displayName: 'Not signed in', role: null });
 });
 
-test('unknown permission keys deny by default', () => {
+test('unknown permission keys deny by default', async () => {
   const { api } = envAs(EMAIL.Admin);
-  assert.equal(api._hasPermission('NOT_A_REAL_PERMISSION'), false);
+  assert.equal(await api.hasPermission('NOT_A_REAL_PERMISSION'), false);
 });

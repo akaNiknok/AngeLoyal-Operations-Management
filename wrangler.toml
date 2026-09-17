@@ -1,0 +1,31 @@
+# AngeLoyal OMS — one Cloudflare Pages project, two environments.
+#   main    -> production  (angeloyal-oms.pages.dev)          PROD D1
+#   develop -> preview     (develop.angeloyal-oms.pages.dev)  DEV D1
+# The static site is web/; web/functions/api.js is the backend.
+#
+# Until v2.0.0 ships, the top-level binding points at the DEV database too:
+# `wrangler pages dev` and the db:* scripts resolve bindings from here, and
+# main still runs the v1 app. Phase 4 swaps database_name/database_id below
+# for angeloyal-oms (PROD).
+
+name = "angeloyal-oms"
+pages_build_output_dir = "web"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+OAUTH_CLIENT_ID = "118714839189-3h6n4p3bgjrp6ue2vfq4sk3c3a1q9sq8.apps.googleusercontent.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "angeloyal-oms-dev"
+database_id = "ed9b2438-baef-4edb-81c3-e0ef3c9fbf5d"
+
+[env.preview]
+[env.preview.vars]
+OAUTH_CLIENT_ID = "118714839189-3h6n4p3bgjrp6ue2vfq4sk3c3a1q9sq8.apps.googleusercontent.com"
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "angeloyal-oms-dev"
+database_id = "ed9b2438-baef-4edb-81c3-e0ef3c9fbf5d"

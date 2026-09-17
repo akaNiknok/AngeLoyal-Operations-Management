@@ -2,12 +2,10 @@
 //  web/core.js — the client transport (call / callBackend).
 //
 //  Three things here are load-bearing and easy to break silently:
-//   1. The POST must stay a *simple* CORS request — a plain string body
-//      and NO headers. Adding a Content-Type triggers a preflight, and
-//      Apps Script cannot serve OPTIONS, so every call in the app dies
-//      before it is sent (see CLAUDE.md).
-//   2. doPost never throws, so failures arrive as { ok:false, error }
-//      in the body and have to become promise rejections here.
+//   1. Every call is one POST of { token, fn, args } to /api on the
+//      page's own origin (a Pages Function), as a plain string body.
+//   2. The function never throws, so failures arrive as { ok:false,
+//      error } in the body and have to become promise rejections here.
 //   3. An expired session must re-prompt sign-in and run neither the
 //      success nor the failure handler.
 // ============================================================
@@ -16,13 +14,13 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadWeb } = require('./webharness');
 
-const EXEC = 'https://script.google.com/macros/s/TEST/exec';
+const API = '/api';
 
 /** Loads core.js with fetch stubbed to reply with `payload`. */
 function loadTransport(payload, { reject } = {}) {
   const seen = { requests: [], expired: 0 };
   const stubs = {
-    EXEC_URL: EXEC,
+    API_URL: API,
     fetch: (url, init) => {
       seen.requests.push({ url, init });
       if (reject) return Promise.reject(reject);
@@ -36,7 +34,7 @@ function loadTransport(payload, { reject } = {}) {
   return { ui: sandbox, seen };
 }
 
-test('a call posts token, fn and args as a headerless plain-string body', async () => {
+test('a call posts token, fn and args as a plain-string body to /api', async () => {
   const { ui, seen } = loadTransport({ ok: true, data: { trips: [] } });
   ui.__setToken('sess-123');
 
@@ -44,11 +42,9 @@ test('a call posts token, fn and args as a headerless plain-string body', async 
 
   assert.equal(seen.requests.length, 1);
   const { url, init } = seen.requests[0];
-  assert.equal(url, EXEC);
+  assert.equal(url, API);
   assert.equal(init.method, 'POST');
 
-  // The whole point: no headers at all, or the preflight kills the call.
-  assert.equal(init.headers, undefined);
   assert.equal(typeof init.body, 'string');
 
   assert.deepEqual(JSON.parse(init.body), {
@@ -106,7 +102,7 @@ test('an expired session re-prompts sign-in and settles neither handler', async 
 test('toastError surfaces the message and stops the spinner', () => {
   const toasts = [];
   const sync = [];
-  const { sandbox } = loadWeb(['core.js'], { EXEC_URL: EXEC });
+  const { sandbox } = loadWeb(['core.js'], { API_URL: API });
 
   // core.js declares its own showToast/setSyncing, so the stubs have to land
   // after the script has run — the identifiers resolve at call time.

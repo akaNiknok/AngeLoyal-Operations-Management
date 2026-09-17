@@ -1,75 +1,58 @@
 # Tests
 
-Unit tests for the Apps Script backend (`.gs` files), runnable on a plain
-machine — **no Apps Script account, no clasp, no live Google Sheet, and no npm
-install** (the harness uses Node's built-in `node:test` and `vm`).
+Unit tests for the v2 backend (`server/`, `functions/api.js`) and the frontend
+logic (`web/*.js`), runnable on a plain machine — **no wrangler, no live
+database, no npm install**. `node:sqlite` (built into Node 24) runs the same
+SQL as D1 in memory.
 
 ```sh
-npm test
+npm test                        # every test/*.test.js
+node --test test/readers.test.js
 ```
 
-## How it works
+## How the backend harness works
 
-Apps Script has no module system: every `.gs` file shares one global scope, and
-the backend talks to Google via the `SpreadsheetApp` / `Session` / `Utilities`
-globals. `harness.js` mirrors that:
-
-- It concatenates the `.gs` files and runs them as **one script** inside a Node
-  `vm` context, so top-level `const`s (`SHEET_*`, `ROLES`, `PERMISSIONS`) and
-  `function`s see each other exactly as on Apps Script.
-- It injects **in-memory fakes** for the Apps Script globals. A "sheet" is just
-  a 2D array (header row + data rows); `FakeSheet`/`FakeRange` implement the
-  slice of the Sheets API the code actually calls (`getDataRange`, `getRange`,
-  `appendRow`, `deleteRow`, `setValues`, …).
-- `makeEnv({ sheets, userEmail })` returns `{ api, ss }`: `api` is every backend
-  function, `ss` is the fake spreadsheet you can read back to assert on writes.
+`harness.js` opens an in-memory `DatabaseSync`, applies `migrations/0001_init.sql`,
+loads the fixtures, and wraps the database in a shim with the D1 shape
+(`prepare / bind / all / first / run / batch / exec`). The shim binds values as
+D1 does: booleans become integers, `undefined` throws, foreign keys are on.
 
 ```js
-const { makeEnv, dump, rowObject } = require('./harness');
-const { api, ss } = makeEnv({ sheets: { Users: [...], Trips: [...] }, userEmail: 'admin@angeloyal.com' });
-api.confirmWaybill(7, null);
-const { headers, rows } = dump(ss, 'Waybills'); // inspect the result
+const { makeEnv, dump } = require('./harness');
+const { api, db } = makeEnv({ sheets: { Users: [...], Trips: [...] }, userEmail: 'admin@angeloyal.com' });
+await api.confirmWaybill(7, null);         // every server function, run in a request context
+dump(db, 'waybills');                       // rows as plain objects, snake_case keys
 ```
+
+- `sheets` are the legacy sheet-shaped fixtures (`[[headers], [row], …]`,
+  headers in `fixtures.js`). They go through `server/migrate/transform.js` in
+  lenient mode, so the old fixtures keep working. `tables` are native rows
+  (`{ trips: [{ id, trip_date, … }] }`) inserted as-is.
+- Fixtures load with foreign keys **off** (they are partial on purpose); the
+  test body runs with them **on**, as D1 does. A writer that inserts a child
+  of a row the fixture lacks fails — add the parent row.
+- A self-seeding table (route map, colors, charge types, categories) gets its
+  `0002_seed.sql` defaults only when the test provides no rows for it — the
+  equivalent of "the sheet did not exist yet".
+- `userEmail` is the request identity. `fetch` and `oauthClientId` stub the
+  Google tokeninfo call for sign-in tests. `api.post(body)` drives
+  `functions/api.js` the way the browser does.
+- Every DB-touching function is `async`: `await` it, and `assert.rejects` a
+  denied permission.
 
 ## What's covered
 
-Phase 1 (records, dispatch, waybills) is now broadly covered:
+| Suite | Area |
+| :-- | :-- |
+| `db.test.js` | date vocabulary (Manila "today", client ↔ storage formats), batch atomicity, the shim's binding rules |
+| `rbac.test.js` | the role × permission matrix, inactive / unknown users |
+| `auth.test.js` | sign-in verification, sessions, the rpc allow-list, identity scoping across concurrent calls |
+| `api.test.js` | the `/api` envelope: AUTH_REQUIRED, BAD_REQUEST, unknown actions |
+| `readers.test.js` | every reader's return shape, rebuilt from the normalized tables |
+| `transform.test.js` | the snapshot → tables rules (dates, helpers, waybill loads, orphans, rates) |
+| `transport.test.js`, `admin-records`, `billing-web`, `fliprender`, `route-file`, `trip-statuses`, `whatsnew` | frontend logic through `webharness.js` (stub DOM, no layout — check anything visual in a browser) |
 
-| Suite | Area | Why it matters |
-| :-- | :-- | :-- |
-| `utils.test.js` | `Utils.gs` pure helpers | date parse/format, Excel-serial conversion, business-day skip, lookups |
-| `rbac.test.js` | `Code.gs` permission matrix | the server is the real access gate |
-| `waybills.test.js` | waybill numbering & confirmation | suffix rules, sequence guard, custom-number parsing, immutability |
-| `carryover.test.js` | carry-over trips | Billing-Date preservation, crew copy, parent linkage, `-R`/`-FT` waybills |
-| `trips.test.js` | `createTrip` / `saveTripChanges` | outlet resolve, billing snapshot, status→carry-over, route-frequency warning |
-| `import.test.js` | `importRouteFile` + delete | batch import, outlet dedup, crew pre-fill, sequential waybills, delete guard |
-| `masters.test.js` | master CRUD + roster | dedup/validation, billing-category rename cascade, append-only roster |
-| `readers.test.js` | read path | `getTrips` date filtering, dispatch-board join, route-frequency window, `getBootData` |
-| `edits.test.js` | edit paths + small readers | `updateOutlet`/`updateEmployee`/`updateDefaultAssignment`/`updateTruck`, `_resolveBillingCategory`, master-list readers |
-
-Phase 2 (billing & payroll) is not built yet — write its tests alongside the code.
-
-## Fixtures & gotchas
-
-- `fixtures.js` holds the sheet **header rows**, mirrored from `Docs/Schema.md`
-  and the column order the writers append in. **Keep these in sync** if the
-  schema changes — a drift here is a real bug the tests should surface.
-- **The fakes keep each cell's JS type and treat formatting as a no-op**
-  (`FakeRange.setNumberFormat()`). Anything that leans on how Sheets coerces a
-  written value is therefore invisible here — that is exactly how the
-  zero-padded waybill counter shipped broken past a green suite. Keep backend
-  logic independent of cell formatting rather than testing around this.
-- Objects returned *from* the bundle live in the vm realm, so their prototype
-  differs from the host's: prefer field-by-field assertions over
-  `deepStrictEqual` on returned objects. The host `Date` is shared into the vm
-  so `instanceof Date` works across the boundary.
-
-## Adding tests for a new area
-
-1. Seed the sheets it reads/writes in `makeEnv({ sheets })` (add headers to
-   `fixtures.js` if missing).
-2. Set `userEmail` to a user whose role passes the writer's `_requirePermission`.
-3. Call `api.yourFunction(...)`, then `dump(ss, 'Sheet')` to assert on the result.
-
-Phase 1 is now broadly covered. The main remaining gap is **Phase 2 (billing
-and payroll)** — write those tests alongside the code as it lands.
+`test/legacy/` holds the suites not yet ported from the Apps Script backend,
+with a copy of the old vm harness so they still run one at a time against the
+`.gs` files (`node --test test/legacy/trips.test.js`). They sit outside the
+`npm test` glob; a Phase 1 worker moves its files back when they pass on D1.

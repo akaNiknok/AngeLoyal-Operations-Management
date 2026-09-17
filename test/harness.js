@@ -1,212 +1,129 @@
 // ============================================================
 //  AngeLoyal OMS — Test harness
-//  Loads the .gs backend into a Node `vm` sandbox with in-memory
-//  fakes for the Apps Script globals (SpreadsheetApp / Session /
-//  Utilities), so the same code that runs on Apps Script can be
-//  unit-tested under `node --test` with no Apps Script account and
-//  no live Google Sheet.
+//  Runs the ESM backend in server/ against an in-memory SQLite
+//  (node:sqlite, built into Node 24) behind a shim with the D1
+//  shape (prepare / bind / all / first / run / batch / exec). Same
+//  SQL, same constraints, no wrangler, no install.
 //
-//  Why a vm bundle instead of `require()`:
-//  Apps Script shares one global scope across every .gs file and has
-//  no module system. We mirror that by concatenating the .gs files
-//  and running them as a single script, so top-level `const`s (sheet
-//  names, ROLES, PERMISSIONS) and `function` declarations all see one
-//  another exactly as they do in production.
+//  makeEnv({ sheets, tables, userEmail, fetch, oauthClientId })
+//    sheets   legacy sheet-shaped fixtures { 'Sheet': [[headers], [row]…] },
+//             converted through server/migrate/transform.js (lenient).
+//    tables   native rows { table: [{ snake_case: value }] }, inserted as-is.
+//    Fixtures load with foreign keys OFF (they are partial on purpose);
+//    the test body runs with foreign keys ON, as D1 does.
+//    A self-seeding table (see migrations/0002_seed.sql) is seeded only
+//    when the test provides no rows for it.
+//  Returns { api, db, raw }: `api` is every server function, each run
+//  inside the request context; `db` is the D1 shim; `raw` the
+//  DatabaseSync. `api.post(body)` drives web/functions/api.js.
+//  dump(db, 'trips') returns the rows as plain objects.
 // ============================================================
 
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
+const fs = require('node:fs');
+const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = path.resolve(__dirname, '..');
 
-// Order matters only for top-level `const` evaluation (Code.gs defines
-// the SHEET_* / ROLES / PERMISSIONS constants the others close over).
-const GS_FILES = [
-  'Code.gs',
-  'Auth.gs',
-  'Utils.gs',
-  'DataReaders.gs',
-  'DataWriters.gs',
-  'Internals.gs',
-  'DevTools.gs',
-];
+// Node 24 loads ESM through require() when the module has no top-level await.
+const ctx = require('../server/ctx.js');
+const dbmod = require('../server/db.js');
+const rbac = require('../server/rbac.js');
+const internals = require('../server/internals.js');
+const readers = require('../server/readers.js');
+const auth = require('../server/auth.js');
+const { transform } = require('../server/migrate/transform.js');
+const { onRequestPost } = require('../functions/api.js');
 
 // ------------------------------------------------------------
-//  Apps Script global fakes
+//  D1 shim
 // ------------------------------------------------------------
 
-/** Deep-ish clone so reads return copies (Sheets returns copies of cell values). */
-function cloneCell(v) {
-  return v instanceof Date ? new Date(v.getTime()) : v;
+/** node:sqlite rows have a null prototype; tests compare against plain objects. */
+const plain = (r) => ({ ...r });
+
+/** What D1 does with a bound value: booleans become integers, undefined is an error. */
+function coerce(v) {
+  if (v === undefined) throw new TypeError('D1_TYPE_ERROR: Type undefined not supported for value undefined');
+  if (v === true) return 1;
+  if (v === false) return 0;
+  if (v instanceof Date) throw new TypeError('D1_TYPE_ERROR: Type Date not supported');
+  return v;
 }
 
-/** Minimal Utilities.formatDate supporting the M/d/yyyy [HH:mm:ss] patterns the code uses. */
-function formatDate(date, _tz, fmt) {
-  const pad = (n) => String(n).padStart(2, '0');
-  // Tokens listed longest-first so greedy matching picks MM over M, dd over d, etc.
-  const tokens = [
-    ['yyyy', () => date.getFullYear()],
-    ['MM', () => pad(date.getMonth() + 1)],
-    ['M', () => date.getMonth() + 1],
-    ['dd', () => pad(date.getDate())],
-    ['d', () => date.getDate()],
-    ['HH', () => pad(date.getHours())],
-    ['mm', () => pad(date.getMinutes())],
-    ['ss', () => pad(date.getSeconds())],
-  ];
-  let out = '';
-  let i = 0;
-  while (i < fmt.length) {
-    const hit = tokens.find(([tok]) => fmt.startsWith(tok, i));
-    if (hit) {
-      out += hit[1]();
-      i += hit[0].length;
-    } else {
-      out += fmt[i];
-      i += 1;
+class D1Statement {
+  constructor(raw, sql) { this.raw = raw; this.sql = sql; this.args = []; }
+  bind(...args) { this.args = args.map(coerce); return this; }
+  async all() {
+    const results = this.raw.prepare(this.sql).all(...this.args).map(plain);
+    return { results, success: true, meta: {} };
+  }
+  async first(col) {
+    const r = this.raw.prepare(this.sql).get(...this.args);
+    if (!r) return null;
+    return col === undefined ? plain(r) : r[col];
+  }
+  async run() {
+    const m = this.raw.prepare(this.sql).run(...this.args);
+    return { success: true, meta: { changes: m.changes, last_row_id: Number(m.lastInsertRowid) } };
+  }
+}
+
+class D1Database {
+  constructor(raw) { this.raw = raw; }
+  prepare(sql) { return new D1Statement(this.raw, sql); }
+  async batch(stmts) {
+    this.raw.exec('BEGIN');
+    try {
+      const out = [];
+      for (const s of stmts) out.push(await s.all());
+      this.raw.exec('COMMIT');
+      return out;
+    } catch (e) {
+      this.raw.exec('ROLLBACK');
+      throw e;
     }
   }
+  async exec(sql) { this.raw.exec(sql); return { count: 0, duration: 0 }; }
+}
+
+// ------------------------------------------------------------
+//  Schema, fixtures, seed
+// ------------------------------------------------------------
+
+const SCHEMA = fs.readFileSync(path.join(ROOT, 'migrations', '0001_init.sql'), 'utf8');
+const SEED = fs.readFileSync(path.join(ROOT, 'migrations', '0002_seed.sql'), 'utf8');
+
+/** { table: sql } from the `-- @seed <table>` sections of 0002_seed.sql. */
+function seedSections() {
+  const out = {};
+  let cur = null;
+  SEED.split('\n').forEach((line) => {
+    const m = /^--\s*@seed\s+(\w+)/.exec(line);
+    if (m) { cur = m[1]; out[cur] = ''; return; }
+    if (cur && !/^\s*--/.test(line)) out[cur] += line + '\n';
+  });
   return out;
 }
 
-class FakeRange {
-  constructor(sheet, row, col, numRows, numCols) {
-    this.sheet = sheet;
-    this.row = row;
-    this.col = col;
-    this.numRows = numRows;
-    this.numCols = numCols;
-  }
+const SEED_SHEET = {
+  billing_categories: 'Billing Categories',
+  route_type_map: 'Route Type Map',
+  customer_group_colors: 'Customer Group Colors',
+  billing_charge_types: 'Billing Charge Types',
+};
 
-  getValue() {
-    const r = this.sheet.data[this.row - 1] || [];
-    return cloneCell(r[this.col - 1] === undefined ? '' : r[this.col - 1]);
-  }
-
-  getValues() {
-    const out = [];
-    for (let r = 0; r < this.numRows; r++) {
-      const rowArr = [];
-      const srcRow = this.sheet.data[this.row - 1 + r] || [];
-      for (let c = 0; c < this.numCols; c++) {
-        const cell = srcRow[this.col - 1 + c];
-        rowArr.push(cloneCell(cell === undefined ? '' : cell));
-      }
-      out.push(rowArr);
+function insertRows(raw, table, rows) {
+  const cache = {};
+  rows.forEach((row) => {
+    const cols = Object.keys(row);
+    const key = cols.join(',');
+    if (!cache[key]) {
+      cache[key] = raw.prepare(
+        `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`);
     }
-    return out;
-  }
-
-  setValue(v) {
-    if (!this.sheet.data[this.row - 1]) this.sheet.data[this.row - 1] = [];
-    this.sheet.data[this.row - 1][this.col - 1] = cloneCell(v);
-    return this;
-  }
-
-  // Cells in the in-memory fake keep their JS type, so formatting is a no-op.
-  setNumberFormat() { return this; }
-
-  clearContent() {
-    for (let r = 0; r < this.numRows; r++) {
-      const srcRow = this.sheet.data[this.row - 1 + r];
-      if (!srcRow) continue;
-      for (let c = 0; c < this.numCols; c++) srcRow[this.col - 1 + c] = '';
-    }
-    return this;
-  }
-
-  setValues(vals) {
-    for (let r = 0; r < vals.length; r++) {
-      const tr = this.row - 1 + r;
-      if (!this.sheet.data[tr]) this.sheet.data[tr] = [];
-      for (let c = 0; c < vals[r].length; c++) {
-        this.sheet.data[tr][this.col - 1 + c] = cloneCell(vals[r][c]);
-      }
-    }
-    return this;
-  }
-}
-
-class FakeSheet {
-  constructor(name, data) {
-    this.name = name;
-    this.data = data; // 2D array including the header row
-  }
-
-  getName() {
-    return this.name;
-  }
-
-  _width() {
-    return this.data.reduce((m, r) => Math.max(m, r.length), 0);
-  }
-
-  getLastRow() {
-    return this.data.length;
-  }
-
-  getLastColumn() {
-    return this._width();
-  }
-
-  getDataRange() {
-    return new FakeRange(this, 1, 1, this.data.length, this._width());
-  }
-
-  getRange(row, col, numRows = 1, numCols = 1) {
-    return new FakeRange(this, row, col, numRows, numCols);
-  }
-
-  appendRow(arr) {
-    this.data.push(arr.map(cloneCell));
-  }
-
-  deleteRow(rowNum) {
-    this.data.splice(rowNum - 1, 1);
-  }
-}
-
-class FakeSpreadsheet {
-  constructor(sheets) {
-    this.sheets = {};
-    Object.keys(sheets || {}).forEach((name) => {
-      this.sheets[name] = new FakeSheet(name, sheets[name]);
-    });
-  }
-
-  getSheetByName(name) {
-    return this.sheets[name] || null;
-  }
-
-  getSheets() {
-    return Object.values(this.sheets);
-  }
-
-  insertSheet(name) {
-    this.sheets[name] = new FakeSheet(name, []);
-    return this.sheets[name];
-  }
-}
-
-// ------------------------------------------------------------
-//  Bundle loader
-// ------------------------------------------------------------
-
-function loadBundle(sandbox) {
-  let src = GS_FILES.map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n;\n');
-
-  // Collect every top-level function name so the test side can call them.
-  const names = new Set();
-  const re = /^\s*function\s+([A-Za-z0-9_$]+)\s*\(/gm;
-  let m;
-  while ((m = re.exec(src)) !== null) names.add(m[1]);
-
-  src += `\n;globalThis.__api = { ${[...names].join(', ')} };\n`;
-
-  const context = vm.createContext(sandbox);
-  vm.runInContext(src, context, { filename: 'gas-bundle.js' });
-  return sandbox.__api;
+    cache[key].run(...cols.map((c) => coerce(row[c] === undefined ? null : row[c])));
+  });
 }
 
 // ------------------------------------------------------------
@@ -214,124 +131,60 @@ function loadBundle(sandbox) {
 // ------------------------------------------------------------
 
 /**
- * Builds a fresh sandboxed copy of the backend.
- *
- * @param {Object}  [opts]
- * @param {Object}  [opts.sheets]     Map of sheetName -> 2D array (incl. header row).
- * @param {string}  [opts.userEmail]  Email returned by Session.getActiveUser().
- * @param {string}  [opts.tz]         Script timezone (default Asia/Shanghai).
- * @returns {{ api: Object, ss: FakeSpreadsheet, sandbox: Object }}
+ * @param {Object}   [opts]
+ * @param {Object}   [opts.sheets]         Sheet-shaped fixtures (legacy).
+ * @param {Object}   [opts.tables]         Native table rows.
+ * @param {string}   [opts.userEmail]      The request identity ('unknown' = not signed in).
+ * @param {Function} [opts.fetch]          Stub for the tokeninfo call: (url) => Response-like.
+ * @param {string}   [opts.oauthClientId]  The `aud` a token must carry.
+ * @returns {{ api: Object, db: D1Database, raw: DatabaseSync, store: Object }}
  */
 function makeEnv(opts = {}) {
-  const ss = new FakeSpreadsheet(opts.sheets || {});
-  const email = opts.userEmail || 'unknown';
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(SCHEMA);
+  raw.exec('PRAGMA foreign_keys = OFF');
 
-  // In-memory CacheService (TTL ignored — tests don't exercise expiry).
-  const cacheStore = new Map();
-  // opts.fetch: (url, params) => { code, body } — simulates UrlFetchApp.
-  const fetchImpl = opts.fetch || (() => ({ code: 404, body: '' }));
-  let uuidSeq = 0;
+  const { tables } = transform(opts.sheets || {}, { strict: false });
+  Object.entries(opts.tables || {}).forEach(([t, rows]) => { tables[t] = (tables[t] || []).concat(rows); });
+  Object.entries(tables).forEach(([t, rows]) => insertRows(raw, t, rows));
 
-  const lockLog = [];
-
-  const sandbox = {
-    SpreadsheetApp: {
-      getActiveSpreadsheet: () => ss,
-      // Nothing is queued in the fake sheet, so flush only has to be observable:
-      // tests assert writers flush before releasing the lock.
-      flush: () => { lockLog.push('flush'); },
-    },
-    Session: {
-      getActiveUser: () => ({ getEmail: () => email }),
-      getScriptTimeZone: () => opts.tz || 'Asia/Shanghai',
-    },
-    CacheService: {
-      getScriptCache: () => ({
-        get: (k) => (cacheStore.has(k) ? cacheStore.get(k) : null),
-        put: (k, v) => cacheStore.set(k, v),
-        remove: (k) => cacheStore.delete(k),
-      }),
-    },
-    PropertiesService: {
-      getScriptProperties: () => ({
-        getProperty: (k) => (opts.scriptProperties || {})[k] || null,
-      }),
-    },
-    // Single-threaded tests never contend, so the lock always grants. Set
-    // opts.lockUnavailable to exercise the "someone else is issuing" path.
-    // Every acquire/release/flush lands in lockLog, exposed as `_lockLog`.
-    LockService: {
-      getScriptLock: () => ({
-        tryLock: () => {
-          if (opts.lockUnavailable) return false;
-          lockLog.push('lock');
-          return true;
-        },
-        releaseLock: () => { lockLog.push('release'); },
-      }),
-    },
-    ContentService: {
-      MimeType: { JSON: 'JSON' },
-      createTextOutput: (text) => {
-        const output = {
-          getContent: () => text,
-          setMimeType: () => output,
-        };
-        return output;
-      },
-    },
-    UrlFetchApp: {
-      fetch: (url, params) => {
-        const r = fetchImpl(url, params);
-        return {
-          getResponseCode: () => r.code,
-          getContentText: () => r.body,
-        };
-      },
-    },
-    Utilities: {
-      formatDate,
-      getUuid: () => `uuid-${++uuidSeq}-0000-0000`,
-      base64DecodeWebSafe: (s) =>
-        Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
-      newBlob: (buf) => ({ getDataAsString: () => Buffer.from(buf).toString('utf8') }),
-    },
-    // Share the host Date so `val instanceof Date` and `new Date()` inside the
-    // bundle agree with Dates we seed into sheets from the test side (the vm
-    // otherwise has its own Date realm, breaking instanceof across the boundary).
-    Date,
-    HtmlService: {
-      XFrameOptionsMode: { ALLOWALL: 'ALLOWALL' },
-      createTemplateFromFile: () => ({ evaluate: () => ({}) }),
-      createHtmlOutputFromFile: () => ({ getContent: () => '' }),
-    },
-    ScriptApp: {
-      getService: () => ({
-        getUrl: () => opts.appUrl || 'https://script.google.com/macros/s/EXEC/exec',
-      }),
-    },
-    console,
-  };
-  sandbox.globalThis = sandbox;
-
-  const api = loadBundle(sandbox);
-  return { api, ss, sandbox, lockLog };
-}
-
-/** Reads a FakeSheet's data back out as { headers, rows } for assertions. */
-function dump(ss, sheetName) {
-  const sheet = ss.getSheetByName(sheetName);
-  const data = sheet.getDataRange().getValues();
-  return { headers: data[0], rows: data.slice(1) };
-}
-
-/** Builds a row-as-object using a headers array (handy for assertions). */
-function rowObject(headers, row) {
-  const obj = {};
-  headers.forEach((h, i) => {
-    obj[String(h).trim()] = row[i];
+  const sections = seedSections();
+  Object.entries(SEED_SHEET).forEach(([table, sheet]) => {
+    const given = (opts.sheets && sheet in opts.sheets) || (opts.tables && table in opts.tables);
+    if (!given && sections[table]) raw.exec(sections[table]);
   });
-  return obj;
+
+  raw.exec('PRAGMA foreign_keys = ON');
+
+  const db = new D1Database(raw);
+  const store = {
+    db,
+    email: opts.userEmail || 'unknown',
+    clientId: opts.oauthClientId || '',
+    fetch: opts.fetch || (() => Promise.resolve({ status: 404, json: async () => ({}) })),
+  };
+
+  const api = {};
+  [ctx, dbmod, internals, rbac, readers, auth].forEach((mod) => {
+    Object.entries(mod).forEach(([name, fn]) => {
+      if (typeof fn === 'function') api[name] = (...args) => ctx.runWith(store, () => fn(...args));
+    });
+  });
+
+  /** Drives the Pages Function the way the browser does: a JSON string body. */
+  api.post = (body) => ctx.runWith(store, () => onRequestPost({
+    request: new Request('http://oms.test/api', {
+      method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body),
+    }),
+    env: { DB: db, OAUTH_CLIENT_ID: store.clientId },
+  }).then((res) => res.json()));
+
+  return { api, db, raw, store };
 }
 
-module.exports = { makeEnv, dump, rowObject, formatDate, FakeSpreadsheet, FakeSheet };
+/** All rows of a table as plain objects, in rowid order. */
+function dump(db, table) {
+  return db.raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map(plain);
+}
+
+module.exports = { makeEnv, dump, D1Database };

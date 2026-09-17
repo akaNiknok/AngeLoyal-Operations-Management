@@ -1,20 +1,21 @@
 # D1 Migration Plan — Google Sheets → Cloudflare D1 (v2.0.0)
 
-Status: PLAN. Tick the boxes as work lands. A fresh session reads this file
+Status: PHASE 0 BUILT (2026-09-17); the gate waits on the owner's sign-in check. Tick the boxes as work lands. A fresh session reads this file
 and `HANDOFF.md`, not the codebase, to resume.
 
 ## 1. Decisions (settled, do not re-open)
 
 | Topic | Decision |
 | :--- | :--- |
-| Runtime | The backend moves to **Cloudflare Pages Functions** (`web/functions/api.js`) in the Pages project. D1 is reachable only from Cloudflare code, so Apps Script and `clasp` go away. |
+| Runtime | The backend moves to **Cloudflare Pages Functions** (`functions/api.js` at the repo root — the Pages convention; `web/` holds only static files) in the Pages project. D1 is reachable only from Cloudflare code, so Apps Script and `clasp` go away. |
 | Environments | **One Pages project** (`angeloyal-oms`). `main` = PROD (production env, PROD D1). `develop` = DEV (preview env, DEV D1, alias `develop.angeloyal-oms.pages.dev`). The `angeloyal-oms-dev` project is deleted after v2.0.0 ships. |
 | Tables | **Normalized** (see §3). Helpers, default crews and manual charges become rows. One waybill row per load. Freight rates go long-format. Redundant columns go. |
 | Sheet after cutover | Renamed `ARCHIVE pre-v2 — <env>`, shared read-only. Nobody reads it in daily work. |
 | Tests | `npm test` stays zero-install. `node:sqlite` (built into Node 24) runs the same SQL as D1 behind a 40-line shim with the D1 `prepare/bind/all/first/run/batch` shape. |
 | API contract | **Frozen.** Function names, argument shapes and return shapes stay as the `.gs` readers and writers return them today, so `web/*.js` changes only in `config.js` and `callBackend()`. Readers rebuild `helperIds`, `manualCharges`, `locked` and the rate grid from the normalized tables. |
 | Concurrency | No global lock. `INTEGER PRIMARY KEY` removes the ID race, `UPDATE … RETURNING` reserves a waybill sequence atomically, `UNIQUE` constraints guard duplicates, `db.batch()` makes multi-row writes atomic. D1 serializes writes per database. |
-| Request context | `AsyncLocalStorage` (Workers `nodejs_compat`) carries `{ db, email }` per request. Module-level globals are a cross-request race in a Worker isolate and would mis-attribute audit rows and RBAC. |
+| Sheet snapshots | The `fetch-data` JSON holds Sheets dates as ISO instants in UTC (`2026-08-28T16:00:00.000Z` = 8/29 Manila). The transform shifts them; a `M/d/yyyy` string is wall time. |
+| Request context | `AsyncLocalStorage` (Workers `nodejs_compat`) carries `{ db, email, clientId, fetch }` per request; a nested `runWith` merges over the outer store, so `rpc()` only sets `email`. Module-level globals are a cross-request race in a Worker isolate and would mis-attribute audit rows and RBAC. |
 | Sessions | A `sessions` table replaces `CacheService`. TTL 12 h (the 6 h cap was CacheService's). |
 | Dates | Pure dates `YYYY-MM-DD`. Timestamps `YYYY-MM-DD HH:MM:SS` in Asia/Manila. Readers still emit `M/d/yyyy` to the client. "Today" always goes through `todayPH()`, because Workers run in UTC. |
 | Hotfixes during migration | `main` stays v1.7.x on Sheets. A hotfix lands on `main` and is re-applied by hand on `develop`. Frontend-only fixes cherry-pick cleanly. |
@@ -24,8 +25,9 @@ and `HANDOFF.md`, not the codebase, to resume.
 
 ```
 server/                      ESM backend (was *.gs). Not served as static.
-  db.js                      D1 helpers: q, one, run, batch, now(), todayPH(), date fmt
-  ctx.js                     AsyncLocalStorage: db(), currentEmail(), runWith()
+  package.json               { "type": "module" } — the repo root stays CommonJS
+  db.js                      D1 helpers: stmt, q, one, run, batch; nowPH(), todayPH(), date fmt
+  ctx.js                     AsyncLocalStorage: db(), currentEmail(), clientId(), fetchImpl(), runWith()
   rbac.js                    ROLES, PERMISSIONS, requirePermission   (from Code.gs)
   auth.js                    verifyIdToken (fetch), sessions, login/logout, rpc + RPC_ALLOWED
   readers.js                 getBootData, getDispatchBoardData, getTrips, … (DataReaders.gs)
@@ -40,8 +42,9 @@ server/                      ESM backend (was *.gs). Not served as static.
                              setBillingNumber, importFreightRates, updateFreightRate, fuel prices
   migrate/transform.js       sheet snapshot JSON → table rows (shared by the migration script
                              and the test harness)
-migrations/0001_init.sql     the schema in §3 (wrangler d1 migrations)
-web/functions/api.js         onRequestPost → login | rpc. Same origin, no CORS.
+migrations/0001_init.sql     the schema in §3 (wrangler d1 migrations); 0002_seed.sql the defaults
+functions/api.js             onRequestPost → login | rpc. Same origin, no CORS. (Pages reads
+                             functions/ at the repo root, next to the output dir, never inside it.)
 scripts/sheets-to-d1.mjs     snapshot → SQL file + reconciliation report
 test/harness.js              node:sqlite shim + makeEnv({ sheets | tables, userEmail })
 test/legacy/                 unported tests wait here (outside the npm test glob)
@@ -111,11 +114,13 @@ CREATE TABLE outlets (
   id INTEGER PRIMARY KEY, outlet_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   area TEXT, address TEXT, customer_group TEXT, notes TEXT, created_at TEXT NOT NULL);
 
--- One waybill row per LOAD (trips sharing trip_date + fo_number + truck_id).
+-- One waybill row per LOAD (the trips sharing one number on one FO).
 -- trips.waybill_id replaces waybills.trip_id. fo_number and locked are gone:
 -- join trips for the FO, and locked ⇔ status = 'Confirmed'.
+-- waybill_number is indexed, NOT unique: PROD holds 19 hand-typed numbers that
+-- sit on two loads (e.g. 12985 on FO …620 and FO …689), and each load bills alone.
 CREATE TABLE waybills (
-  id INTEGER PRIMARY KEY, waybill_number TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  id INTEGER PRIMARY KEY, waybill_number TEXT NOT NULL COLLATE NOCASE,
   prefix_id INTEGER NOT NULL REFERENCES waybill_prefixes(id),
   sequence_number INTEGER NOT NULL,
   waybill_type TEXT NOT NULL CHECK (waybill_type IN ('Regular','Redeliver','Foul Trip')),
@@ -154,12 +159,15 @@ CREATE TABLE route_frequency_log (
   driver_id INTEGER NOT NULL REFERENCES employees(id),
   outlet_id INTEGER NOT NULL REFERENCES outlets(id));
 
--- Long format: one row per band. area_key = _normArea(area) so SQL matches directly.
+-- Long format: one row per band. area_key = _normArea(area) for matching (indexed);
+-- the uniqueness key is the RAW area: the DOE matrix names two different towns
+-- "San Juan" and "SAN JUAN" (6W 6,760 vs 16,490). v1 stored both and billed
+-- the first. A band with no rate has no row. See §6 for the open question.
 CREATE TABLE freight_rates (
   id INTEGER PRIMARY KEY, origin TEXT NOT NULL, area TEXT NOT NULL, area_key TEXT NOT NULL,
   truck_type TEXT NOT NULL, effective_date TEXT NOT NULL,
   band INTEGER NOT NULL CHECK (band BETWEEN 1 AND 25), rate REAL NOT NULL,
-  UNIQUE (origin, area_key, truck_type, effective_date, band));
+  UNIQUE (origin, area, truck_type, effective_date, band));
 
 CREATE TABLE fuel_prices (
   id INTEGER PRIMARY KEY, effective_date TEXT NOT NULL UNIQUE,
@@ -198,6 +206,8 @@ CREATE INDEX trips_trip_date    ON trips(trip_date);
 CREATE INDEX trips_billing_date ON trips(billing_date);
 CREATE INDEX trips_fo           ON trips(trip_date, fo_number);
 CREATE INDEX trips_waybill      ON trips(waybill_id);
+CREATE INDEX waybills_number    ON waybills(waybill_number);
+CREATE INDEX freight_rates_key  ON freight_rates(origin, area_key, truck_type, effective_date);
 CREATE INDEX rfl_driver_outlet  ON route_frequency_log(driver_id, outlet_id);
 CREATE INDEX audit_ts           ON audit_log(ts);
 CREATE INDEX sessions_expires   ON sessions(expires_at);
@@ -205,14 +215,19 @@ CREATE INDEX sessions_expires   ON sessions(expires_at);
 
 Self-seeding sheets (Route Type Map, Customer Group Colors, Billing Charge
 Types, Billing Categories) become `INSERT OR IGNORE` seed statements in
-`0002_seed.sql`. Payroll tables come later as `0003_payroll.sql`.
+`0002_seed.sql`, in `-- @seed <table>` sections the test harness applies one at
+a time. The import file starts with `DELETE FROM` every table, so the seed rows
+never collide with imported ids. Payroll tables come later as `0003_payroll.sql`.
 
 ### 3.1 Transform rules (`server/migrate/transform.js`)
 
 Input: the JSON from `npm run fetch-data` (`data/sheets-snapshot.json`).
 Output: `{ table: [rowObject, …] }` in insert order. Rules:
 
-- `M/d/yyyy` → `YYYY-MM-DD`; `M/d/yyyy HH:mm:ss` → `YYYY-MM-DD HH:MM:SS`.
+- `M/d/yyyy` → `YYYY-MM-DD`; `M/d/yyyy HH:mm:ss` → `YYYY-MM-DD HH:MM:SS`. An ISO
+  instant (`…Z`, what the snapshot holds) shifts to Manila first.
+- `transform(snapshot, { strict })`: strict (the migration) applies every rule
+  below; lenient (the test harness) creates unknown categories and checks no FK.
 - `TRUE/FALSE` → `1/0`. Blank `Active` → `1`. Employee and truck `Status`
   `Active/Inactive` → `active 1/0`.
 - Trucks `Billing Category` name → `billing_category_id`. Route Type Map
@@ -220,39 +235,53 @@ Output: `{ table: [rowObject, …] }` in insert order. Rules:
 - Default Assignments → `trucks.default_driver_id`, `trucks.roster_notes`,
   `truck_default_helpers` (slot = position in the comma list).
 - Trips `Helper IDs` → `trip_helpers`. `Area` dropped.
-- Waybills: group rows by `Waybill Number`. Keep the lowest ID as the waybill
-  row (a Confirmed row wins for `confirmed_by/at`). Every original `Trip ID`
-  gets `trips.waybill_id`. Rows sharing a number with different `Status`
-  values **fail the run** with the list.
-- Freight Rates: 25 band columns → 25 rows; `band` = column position;
-  `area_key` = `_normArea(area)`. Copy `_normArea` from `Internals.gs`.
+- Waybills: group rows by `Waybill Number` **and `FO Number`** (a number alone
+  is not a load — see the `waybills` note in §3). Keep the lowest ID as the
+  waybill row (a Confirmed row wins for `confirmed_by/at`). Every original
+  `Trip ID` gets `trips.waybill_id`; `Parent Waybill ID` is remapped through
+  the same map. Rows sharing a group with different `Status` values **fail the
+  run** with the list.
+- Orphan FKs on Trips (`Outlet/Truck/Driver/Parent Trip ID` that no row
+  carries — PROD has 3 trips on truck 98) are **cleared and reported**; an
+  orphan helper id or Route Frequency Log row is **dropped and reported**. A
+  Waybills row whose Trip ID or Prefix ID is missing fails the run.
+- Freight Rates: 25 band columns → up to 25 rows (a blank band has no row);
+  `band` from the column label; `area_key` = `_normArea(area)` from
+  `server/internals.js`. A second block with the same raw
+  `(Origin, Area, Truck Type, Effective Date)` is dropped and reported — the
+  first wins, as `_indexRates` did (DEV holds 27 such rows).
+- Waybill Prefixes: a blank `Sequence Width` takes the length of the stored
+  `Last Sequence Number`, the rule the old reader applied at read time.
 - Billing Lines: `Manual Charges` JSON → `billing_line_charges`; `Waybill
   Number` → `waybill_id` through the dedup map; `Rate Band` label → index.
 - Audit Log copies as-is.
 
 Reconciliation report (printed, and the script exits non-zero on a mismatch):
-row count per sheet vs table, `COUNT(DISTINCT Waybill Number)` =
-`COUNT(waybills)`, `SUM(Total)` of Billing Lines = `SUM(total)`, helper counts,
-zero unresolved FKs.
+row count per sheet vs table (minus what the transform reported dropped),
+`COUNT(DISTINCT number+FO)` = `COUNT(waybills)`, trips linked, `SUM(Total)` of
+Billing Lines = `SUM(total)`, helper counts, rate band cells, and
+`PRAGMA foreign_key_check` empty — all run against a fresh SQLite loaded from
+the generated file, so the file itself is what is verified.
 
 ## 4. Phases and gates
 
-### Phase 0 — Contract (Opus, one session, sequential)
+### Phase 0 — Contract (one session, sequential) — BUILT 2026-09-17
 
 The orchestrator builds everything a worker copies from. No worker starts
 before the gate passes.
 
-- [ ] `wrangler.toml`: `pages_build_output_dir = "web"`, `compatibility_flags = ["nodejs_compat"]`, `[vars] OAUTH_CLIENT_ID`, `[[d1_databases]]` PROD, `[env.preview]` DEV.
-- [ ] `wrangler d1 create angeloyal-oms-dev` (PROD db is created in Phase 4).
-- [ ] `migrations/0001_init.sql` (§3), `0002_seed.sql`.
-- [ ] `server/db.js`, `server/ctx.js`.
-- [ ] `server/migrate/transform.js` + `scripts/sheets-to-d1.mjs` + `test/transform.test.js` (run it on the DEV snapshot; the reconciliation must pass).
-- [ ] `test/harness.js`: `node:sqlite` shim with the D1 shape; `makeEnv({ sheets, tables, userEmail })` — `sheets` go through `transform.js` (legacy fixtures keep working), `tables` are native rows; returns `{ api, db }`; `dump(db, 'trips')` returns row objects. Move every unported test file to `test/legacy/` so the Stop hook stays green; a worker moves its files back when they pass.
-- [ ] `server/rbac.js`, `server/auth.js` (sessions table, `rpc`, `RPC_ALLOWED` without the `'r'/'w'` marks), `web/functions/api.js`.
-- [ ] `server/readers.js` ported in full — **this is the exemplar**. It fixes the return shapes every writer test asserts on.
-- [ ] `server/internals.js`: `_auditLog`, `_auditLogBatch`, `_normArea`, `_fuelBandLabel`, `_rateFor`, `nextBusinessDay`. Waybill suggestion and carry-over stay for the waybills worker.
-- [ ] `web/config.js` → label by hostname + `OAUTH_CLIENT_ID` only; `callBackend()` posts to `/api`; `_headers` CSP `connect-src 'self' https://accounts.google.com`.
-- [ ] Gate: `npm test` green (readers, auth, rbac, transform, web suites); `npm run dev:web` boots with a local D1 seeded from the DEV snapshot and the dispatch board renders a real day.
+- [x] `wrangler.toml`: `pages_build_output_dir = "web"`, `compatibility_flags = ["nodejs_compat"]`, `[vars] OAUTH_CLIENT_ID`, `[[d1_databases]]`, `[env.preview]`. Until Phase 4 the top-level binding is the DEV db too, so `pages dev` and the `db:*` scripts share one local file.
+- [x] `wrangler d1 create angeloyal-oms-dev` → `ed9b2438-baef-4edb-81c3-e0ef3c9fbf5d` (PROD db is created in Phase 4).
+- [x] `migrations/0001_init.sql` (§3), `0002_seed.sql`.
+- [x] `server/db.js`, `server/ctx.js`, `server/package.json`.
+- [x] `server/migrate/transform.js` + `scripts/sheets-to-d1.mjs` + `test/transform.test.js`. Run on the DEV snapshot: all checks pass; 27 duplicate rate blocks reported.
+- [x] `test/harness.js`: `node:sqlite` shim with the D1 shape; `makeEnv({ sheets, tables, userEmail, fetch, oauthClientId })` returns `{ api, db, raw }`; `api.post(body)` drives `functions/api.js`; `dump(db, 'trips')`. Fixtures load with FKs off, the test body runs with FKs on. 14 unported suites sit in `test/legacy/` with a copy of the old vm harness.
+- [x] `server/rbac.js` (`currentUser`, `hasPermission`, `requirePermission`, `getUserSession`, all async), `server/auth.js` (sessions table, 12 h TTL, `rpc`, `RPC_ALLOWED` as a name list, `FNS` registry), `functions/api.js`.
+- [x] `server/readers.js` ported in full — **this is the exemplar**. `getDefaultAssignments().id` is the truck id; `getFreightRates().id` is the lowest row id of the block, and any band row's id resolves the block; `getWaybillsForTrip` returns 0 or 1 rows.
+- [x] `server/internals.js`: audit, `_normArea`, bands, `_rateFor`, `_computeBillingLine`, `nextBusinessDay`, `helperSlots`, the billing constants. Waybill suggestion and carry-over stay for the waybills worker.
+- [x] `web/config.js` → label by hostname + `OAUTH_CLIENT_ID`; `callBackend()` posts to `API_URL` (`/api`); `_headers` CSP `connect-src 'self' https://accounts.google.com`.
+- [x] Gate: `npm test` green (126 tests: readers, auth, api, rbac, db, transform, web suites); `npm run dev:web` boots with the local D1 seeded from the DEV snapshot and the dispatch board renders 9/17/2026 (44 drops) with no console errors.
+- [ ] Owner: sign in with Google on `http://localhost:8788` once (the origin is already authorized). The Phase 0 session was planted with `wrangler d1 execute --local`, because sign-in needs a real account.
 
 ### Phase 1 — Port the writers (Opus orchestrates, 5 Sonnet workers in parallel)
 
@@ -316,7 +345,7 @@ Rules that keep the token bill down without losing quality:
 
 1. **Read the plan, not the repo.** Every session starts from this file and `HANDOFF.md`. Do not re-derive the schema or the layout.
 2. **Contract before workers.** Nothing in Phase 1 starts until the Phase 0 gate passes. Workers copy `readers.js` patterns; they do not design.
-3. **Scoped briefs.** A worker reads only: its `.gs` source functions, its test files, `server/readers.js`, `server/db.js`, `server/ctx.js`, §1 and §3 of this file. It does not read `web/`, `Docs/`, other writers, or `CLAUDE.md`.
+3. **Scoped briefs.** A worker reads only: its `.gs` source functions, its test files, `server/readers.js`, `server/db.js`, `server/ctx.js`, `server/internals.js`, §1 and §3 of this file. It does not read `web/`, `Docs/`, other writers, or `CLAUDE.md`.
 4. **Freeze the API.** A worker keeps every function name, argument and return shape. A shape change is a bug, not a refactor.
 5. **Freeze the schema.** A worker that needs a column change stops and reports it. Only the orchestrator adds a migration file.
 6. **Tests are the gate, run narrowly.** A worker runs `node --test test/<its files>` while it works and the full `npm test` once at the end. It moves its files from `test/legacy/` back to `test/` only when they pass.
@@ -333,8 +362,11 @@ Read only: Docs/D1 Migration.md §1 and §3, server/db.js, server/ctx.js,
 server/readers.js (the pattern), the listed .gs functions, and your test files.
 
 Rules: keep every function name, argument and return shape. Every DB call is
-awaited. No schema changes; stop and report if you need one. Use db().batch()
-for multi-row writes. Audit through _auditLog as before.
+awaited (`await requirePermission()` too). No schema changes; stop and report
+if you need one. Use batch([stmt(...), ...]) for multi-row writes. Audit through
+_auditLog / _auditLogBatch with SQL table names. Register your exports in the
+FNS object in server/auth.js. Writers return the read-back through the
+readers' row mappers (tripFromRow, waybillFromRow, billingLineFromRow).
 
 Tests: move <files> from test/legacy/ to test/, convert them (fixtures may
 stay sheet-shaped through makeEnv({ sheets }); assertions read dump(db,
@@ -355,3 +387,5 @@ decisions and anything you could not port.
 | Cross-request state | `ctx.js` is the only holder of `db` and `email`; a test runs two `rpc` calls concurrently and asserts attribution. |
 | Data loss at cutover | Reconciliation report must pass; the archived Sheet stays; freeze window. |
 | Hotfix drift on `main` | Each `main` hotfix gets a `develop` issue; frontend fixes cherry-pick. |
+| Rate matrix ambiguity (found in Phase 0) | The DOE sheet names different towns identically ("Rosario" x3, "San Juan" x2) with no province column, so `_normArea` collapses them and the first row wins — v1 behaviour, kept. The owner decides whether the matrix gains a province column (then `area_key` includes it). Until then the transform report lists every dropped duplicate. |
+| PROD truck 98 | Three PROD trips point at a truck id that no longer exists. The transform clears the link and reports it; the owner re-adds the truck before the Phase 4 run or accepts blank plates on those trips. |

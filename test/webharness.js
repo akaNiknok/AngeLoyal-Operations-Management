@@ -76,7 +76,7 @@ function loadWeb(files, overrides = {}, expose = '') {
     location: { hostname: 'localhost' },
     fetch: () => Promise.resolve({ json: () => Promise.resolve({ ok: true, data: null }) }),
     setTimeout, clearTimeout, requestAnimationFrame: (fn) => fn(),
-    EXEC_URL: '', OAUTH_CLIENT_ID: '',
+    API_URL: '/api', OAUTH_CLIENT_ID: '',
     ...overrides,
   };
   sandbox.globalThis = sandbox;
