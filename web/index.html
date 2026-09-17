@@ -1125,7 +1125,10 @@
                                 rate from now on — a billing already computed
                                 keeps the rate it was priced at.
                             </p>
-                            <div style="overflow-x: auto">
+                            <!-- The height cap makes this box the vertical
+                                 scroller too; without it the sticky header
+                                 pins to a box that never scrolls. -->
+                            <div style="overflow: auto; max-height: 70vh">
                                 <table class="data-table" id="rate-matrix-table">
                                     <thead id="rate-matrix-thead"></thead>
                                     <tbody id="rate-matrix-tbody"></tbody>

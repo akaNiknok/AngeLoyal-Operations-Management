@@ -344,6 +344,19 @@ test('manual charges add to the total and a zero drops the charge', () => {
   assert.deepEqual(Object.keys(res.line.manualCharges), ['1']);
 });
 
+// Tabbing along a row fires one save per cell, and each carries only its own
+// charge. The second must not erase the first while the first is in flight.
+test('a charge saved alone keeps the charges already on the line', () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api } = seeded(s);
+  const id = api.getBillingLines(DAY, DAY).lines[0].id;
+
+  api.saveBillingLine(id, { manualCharges: { 1: 111 } });
+  const res = api.saveBillingLine(id, { manualCharges: { 2: 22 } });
+  assert.deepEqual({ ...res.line.manualCharges }, { 1: 111, 2: 22 });
+  assert.equal(res.line.total, 17670 + 133);
+});
+
 test('saveBillingLine refuses a negative override and a non-numeric charge', () => {
   const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
   const { api } = seeded(s);

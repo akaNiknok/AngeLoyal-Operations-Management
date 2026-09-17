@@ -331,11 +331,11 @@
                     charges: Object.assign({}, line.manualCharges),
                     total: line.total,
                 };
-                const next = Object.assign({}, line.manualCharges);
-                if (n === 0) delete next[String(chargeTypeId)];
-                else next[String(chargeTypeId)] = n;
 
-                bgSave("saveBillingLine", [lineId, { manualCharges: next }], {
+                // Send only this charge; the server merges it. A whole-object
+                // send built from local state let a second save in flight
+                // erase the first. A zero removes the charge.
+                bgSave("saveBillingLine", [lineId, { manualCharges: { [chargeTypeId]: n } }], {
                     onOk: (r) => {
                         if (r.line) Object.assign(line, r.line);
                         patchBillingRow(line);

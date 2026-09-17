@@ -2552,11 +2552,15 @@ function saveBillingLine(lineId, changes) {
 
     let manual = _parseJsonCell(_val(ctx.row, ctx.headers, 'Manual Charges'), {});
     if (changes && changes.manualCharges !== undefined) {
-      const clean = {};
+      // Merge, do not replace: the panel saves one cell at a time, and two
+      // saves in flight each carry only their own charge. A replace let the
+      // second save erase the first.
+      const clean = Object.assign({}, manual);
       Object.keys(changes.manualCharges || {}).forEach(k => {
         const n = Number(changes.manualCharges[k]);
         if (!isFinite(n)) throw new Error('A manual charge must be a number.');
         if (n !== 0) clean[String(k)] = n;   // a zero is the same as no charge
+        else delete clean[String(k)];
       });
       manual = clean;
       updates['Manual Charges'] = Object.keys(clean).length ? JSON.stringify(clean) : '';
