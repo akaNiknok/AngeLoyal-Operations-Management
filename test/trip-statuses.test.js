@@ -90,3 +90,27 @@ test('the statuses the backend writes are all known to the board', () => {
     assert.equal(known.has(name), true, `backend status "${name}" is missing from TRIP_STATUSES`);
   }
 });
+
+// A merged Status cell sets every stop of the load, in ONE request.
+test('a whole-load status change sends one bulk request', () => {
+  const { sandbox: ui } = loadWeb(
+    ['core.js', 'dispatch.js'],
+    {},
+    `
+    dispatchData = { date: '9/17/2026', trips: [
+      { id: 1, foNumber: 'FO-A', tripStatus: 'Scheduled' },
+      { id: 2, foNumber: 'FO-A', tripStatus: 'Scheduled' },
+      { id: 3, foNumber: 'FO-A', tripStatus: 'Delivered' },
+      { id: 4, foNumber: 'FO-B', tripStatus: 'Scheduled' },
+    ] };
+    globalThis.__calls = [];
+    globalThis.renderDispatch = () => {};
+    globalThis.bgSave = (fn, args) => globalThis.__calls.push({ fn, args });
+    `,
+  );
+  ui.changeStatus(1, 'Delivered', true);
+
+  assert.equal(ui.__calls.length, 1);
+  assert.equal(ui.__calls[0].fn, 'bulkSetTripStatus');
+  assert.deepEqual(plain(ui.__calls[0].args), [[1, 2], 'Delivered', null]);
+});

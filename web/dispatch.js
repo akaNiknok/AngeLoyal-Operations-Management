@@ -471,6 +471,15 @@
 
                 bgSave("bulkSetTripStatus", [ids, status, prefixId], {
                     onOk: (r) => {
+                        // The server skips a trip it cannot save and still
+                        // reports success — reload so the board shows the truth.
+                        if (r.updated < ids.length) {
+                            showToast(
+                                `${ids.length - r.updated} trip${ids.length - r.updated === 1 ? "" : "s"} did not save.`,
+                                "error",
+                            );
+                            loadDispatch(true);
+                        }
                         if (r.newTripIds && r.newTripIds.length) {
                             showToast(
                                 `${r.newTripIds.length} carry-over trip${r.newTripIds.length === 1 ? "" : "s"} created for next day.`,
@@ -945,37 +954,13 @@
                     renderDispatch(); // snap the select back until confirmed
                     return;
                 }
-                targets.forEach((t) => applyStatus(t, status));
-            }
-
-            function applyStatus(trip, status) {
-                const tripId = trip.id;
-                if (trip.tripStatus === status) return;
-                const old = trip.tripStatus;
-                trip.tripStatus = status;
-                renderDispatch();
-                bgSave("saveTripChanges", [tripId, { tripStatus: status }], {
-                    onOk: (r) => {
-                        if (r.trip) {
-                            Object.assign(trip, r.trip);
-                            renderDispatch();
-                        }
-                        if (r.newTripId) {
-                            showToast(
-                                `Carry-over trip created for next day (ID ${r.newTripId}).`,
-                                "success",
-                            );
-                            // Carry-over lands on the NEXT day, not this board.
-                            delete dispatchCache[
-                                mdyAddDays(dispatchData.date, 1)
-                            ];
-                        }
-                    },
-                    revert: () => {
-                        trip.tripStatus = old;
-                        renderDispatch();
-                    },
-                });
+                // One request for the whole load, not one per stop: the stops
+                // no longer queue behind each other on the script lock, and
+                // one failed response can no longer leave the load half-shown.
+                const ids = targets
+                    .filter((t) => t.tripStatus !== status)
+                    .map((t) => t.id);
+                if (ids.length) doBulkStatus(ids, status, null);
             }
 
             function changeRemarks(tripId, val) {
