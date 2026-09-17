@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.7.3",
+      "date": "2026-09-17",
+      "title": "",
+      "body": "### Fixes\n\n- **The board shows the correct status after a save error.** Sometimes the app shows \"NetworkError\" when you change a trip status. The status can save even when this error shows. Now the board loads the day again and shows the status that saved.\n- **A second click on the same status does not make a second trip.** Before, when you set Redeliver again, the app made one more carry-over trip each time.\n- **A status change on a merged Status cell saves faster.** The app sends all the stops of the load together.\n\n### Check your data\n\nThe app does not remove extra carry-over trips from before this version. Open the next day of each trip that you set to Redeliver or Foul Trip. If a stop shows two times, tell your admin."
+    },
+    {
       "version": "v1.7.2",
       "date": "2026-09-08",
       "title": "Waybill numbers stay as you type them",
