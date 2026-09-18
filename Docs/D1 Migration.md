@@ -319,7 +319,12 @@ independent and start with W2.
 
 ### Phase 3 — DEV cutover, then Phase 2 features on D1
 
-- [ ] Add `https://develop.angeloyal-oms.pages.dev` to the OAuth client's Authorized JavaScript origins.
+- [x] Add `https://develop.angeloyal-oms.pages.dev` to the OAuth client's Authorized JavaScript origins. (Done for the Phase 2 smoke.)
+- [ ] Cut D1 row writes before the next full load. The free plan allows 100,000 rows written per day **per account**, shared by every database in it. D1 counts each index entry as a written row, and a `DELETE` writes too. `freight_rates` is 36,750 of the 37,059 rows in a load, with two indexes, so one load costs about 110,000 writes and a reload over existing data about 220,000.
+  - `scripts/sheets-to-d1.mjs --skip-rates`: leave `DELETE`/`INSERT` for `freight_rates` out of the SQL file when the rates have not changed. A reload drops to about 1,000 writes.
+  - New migration: `DROP INDEX freight_rates_key`. No query uses it (`getFreightRates` reads the whole table and the rate lookup runs in JS; the rate seed filters on `effective_date`). Every rate write then costs 2 rows, not 3. `area_key` stays: the seed writes it.
+  - `db:export:prod` for a PROD → DEV copy: add a variant that passes `--table` for every table except `freight_rates`, so the copy leaves the DEV rates in place.
+  - Optional, reads: `getFreightRates(origin)` reads all 36,750 rows and filters the origin in JS. Filter in SQL (the `UNIQUE` index leads with `origin`) to read about a third. Keep the `_normArea` match: read `SELECT DISTINCT origin` first and pass the matching raw spellings.
 - [ ] Final DEV snapshot → `sheets-to-d1` → apply to DEV D1. Rename the DEV Sheet `ARCHIVE pre-v2 — DEV`. Archive the DEV Apps Script deployment.
 - [ ] Build the RTVS tab and payroll on D1 (`0003_payroll.sql`). Normal `develop` workflow.
 
