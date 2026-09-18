@@ -314,7 +314,7 @@ independent and start with W2.
 - [x] `scripts/claude-hooks.mjs` guard: `npm run release|db:migrate:prod`, `wrangler pages deploy … --branch main`, `wrangler d1 migrations apply|execute angeloyal-oms` (not `-dev`). Stop hook watches `.js/.mjs/.sql`. CI on Node 24.
 - [x] `.claude/skills/release/` runbook: migration step + the v2.0.0 data move.
 - [x] `Docs/Schema.md` rewritten for tables (rationale kept); `CLAUDE.md` architecture, constraints and workflow; `DEPLOY.md`; `test/README.md`; `.env.example`; stale `.gs` comment references in `web/` and `test/`.
-- [ ] Smoke on `develop.angeloyal-oms.pages.dev` against DEV D1 seeded from the DEV snapshot: sign in, import a route file, schedule the day, confirm a waybill, carry a trip over, open Billing, print. Check the Audit Log rows.
+- [x] Smoke on `develop.angeloyal-oms.pages.dev` against DEV D1 seeded from the DEV snapshot: sign in, import a route file, schedule the day, confirm a waybill, carry a trip over, open Billing, print. Check the Audit Log rows.
 - [ ] Gate: smoke passes; owner signs off on the DEV app.
 
 ### Phase 3 — DEV cutover, then Phase 2 features on D1
