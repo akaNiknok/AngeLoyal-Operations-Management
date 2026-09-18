@@ -1,6 +1,6 @@
 # D1 Migration Plan — Google Sheets → Cloudflare D1 (v2.0.0)
 
-Status: PHASE 1 DONE (2026-09-17); Phase 2 next. Tick the boxes as work lands. A fresh session reads this file
+Status: PHASE 2 IN PROGRESS (2026-09-17): docs, scripts and hooks done; file deletion and the DEV smoke remain. Tick the boxes as work lands. A fresh session reads this file
 and `HANDOFF.md`, not the codebase, to resume.
 
 ## 1. Decisions (settled, do not re-open)
@@ -309,11 +309,11 @@ independent and start with W2.
 
 ### Phase 2 — Integrate and clean up (Opus, sequential)
 
-- [ ] Delete `*.gs`, `appsscript.json`, `.clasp*`, `.claspignore`, `scripts/fetch-sheet-data.js`, `scripts/clear-sheet-data.js`, the vm harness code, `DevTools` and `_devDump`.
-- [ ] `package.json`: drop clasp scripts; add `db:migrate:dev|prod` (`wrangler d1 migrations apply`), `db:seed:local`, `db:export:dev|prod` (`wrangler d1 export`), `db:migrate-sheets` (`scripts/sheets-to-d1.mjs`); `deploy:dev` = `wrangler pages deploy web --branch develop`; `release` = `--branch main`; `help` text updated.
-- [ ] `scripts/claude-hooks.mjs` guard: `--branch main`, `migrations apply angeloyal-oms ` (PROD db) and `release` are the PROD patterns.
-- [ ] `.claude/skills/release/` runbook: add the data-migration steps (§4 Phase 4).
-- [ ] `Docs/Schema.md` rewritten for tables (keep the rationale sections); `CLAUDE.md` architecture, constraints and workflow sections; `DEPLOY.md`; `test/README.md`.
+- [x] Delete `*.gs`, `appsscript.json`, `.clasp*`, `.claspignore`, `scripts/clear-sheet-data.js`. (The vm backend harness is already gone; `DevTools`/`_devDump` go with the `.gs` files.) **Keep `scripts/fetch-sheet-data.js`** until Phase 4: Phases 3 and 4 snapshot through the *deployed* v1 `devDump` endpoint, which does not need the local `.gs` files.
+- [x] `package.json`: clasp scripts and `@google/clasp` gone; `db:migrate:local|dev|prod`, `db:seed:local`, `db:export:dev|prod`, `db:migrate-sheets`, `fetch-data` (v1 snapshot); `deploy:dev` = `--branch develop`, `release` = `--branch main`, both on project `angeloyal-oms`; help text updated.
+- [x] `scripts/claude-hooks.mjs` guard: `npm run release|db:migrate:prod`, `wrangler pages deploy … --branch main`, `wrangler d1 migrations apply|execute angeloyal-oms` (not `-dev`). Stop hook watches `.js/.mjs/.sql`. CI on Node 24.
+- [x] `.claude/skills/release/` runbook: migration step + the v2.0.0 data move.
+- [x] `Docs/Schema.md` rewritten for tables (rationale kept); `CLAUDE.md` architecture, constraints and workflow; `DEPLOY.md`; `test/README.md`; `.env.example`; stale `.gs` comment references in `web/` and `test/`.
 - [ ] Smoke on `develop.angeloyal-oms.pages.dev` against DEV D1 seeded from the DEV snapshot: sign in, import a route file, schedule the day, confirm a waybill, carry a trip over, open Billing, print. Check the Audit Log rows.
 - [ ] Gate: smoke passes; owner signs off on the DEV app.
 

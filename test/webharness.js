@@ -1,10 +1,9 @@
 // ============================================================
 //  AngeLoyal OMS — Frontend test harness
-//  Loads web/*.js into a Node `vm` sandbox with a stub DOM, the same
-//  way test/harness.js loads the .gs backend with stub Apps Script
-//  globals. The web/ files are plain classic scripts sharing one global
-//  scope (no modules, no bundler — see CLAUDE.md), so we mirror that by
-//  running them into one context in load order.
+//  Loads web/*.js into a Node `vm` sandbox with a stub DOM. The web/
+//  files are plain classic scripts sharing one global scope (no
+//  modules, no bundler — see CLAUDE.md), so we mirror that by running
+//  them into one context in load order.
 //
 //  The DOM stub is deliberately dumb: it answers every property and
 //  swallows every call. It is enough for logic that *reads* state and

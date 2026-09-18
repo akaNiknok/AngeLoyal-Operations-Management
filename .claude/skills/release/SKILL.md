@@ -20,6 +20,19 @@ Full reference: [DEPLOY.md](../../../DEPLOY.md#releases-tags--github-releases). 
 3. `gh release create vX.Y.Z` with notes written for dispatchers (see below). `--generate-notes` gives a commit list. Use it as raw material at most.
 4. `npm run changelog:sync -- --apply`, then commit `web/changelog.json`. The in-app **What's new?** dialog reads this file.
 5. Run the PROD deploy script (`release` in package.json). A hook blocks it outside `main`.
+6. A release with a new file in `migrations/`: run `npm run db:export:prod` (backup), then `npm run db:migrate:prod`, **before** step 5. The hook blocks the migrate outside `main` too.
+
+## v2.0.0 only: move PROD data from the Sheet to D1
+
+Do this once, with the owner present. Rollback works only inside the freeze window. Full plan: [Docs/D1 Migration.md](../../../Docs/D1%20Migration.md) §4 Phase 4.
+
+1. `npx wrangler d1 create angeloyal-oms`. Put its id in the top-level `[[d1_databases]]` of `wrangler.toml` (it points at DEV until now), and commit on `develop` before step 1 above.
+2. Start the **freeze window** (about 30 minutes, agreed with the dispatchers). Nobody edits in the v1 app.
+3. `npm run fetch-data` (PROD Sheet) → `npm run db:migrate-sheets`. Stop if the reconciliation report fails.
+4. `npm run db:migrate:prod`, then `npx wrangler d1 execute angeloyal-oms --remote --file data/d1-import.sql`.
+5. `npm run release`. Smoke on `angeloyal-oms.pages.dev`: sign in, import a route file, schedule the day, confirm a waybill, carry a trip over, open Billing, print. Check the Audit Log.
+6. Rename the PROD Sheet `ARCHIVE pre-v2 — PROD`. Keep the Apps Script deployments 30 days, then archive them.
+7. Rollback before the first D1 write only: redeploy the `v1.7.x` tag's `web/` and unfreeze the Sheet.
 
 ## Write the notes for dispatchers
 

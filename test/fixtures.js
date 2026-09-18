@@ -45,7 +45,7 @@ const HEADERS = {
   'Route Frequency Log': ['ID', 'Trip ID', 'Trip Date', 'Driver ID', 'Outlet ID'],
 
   // 25 diesel-price bands, 5 pesos wide, from 30.01-35 to 150.01-155.
-  // Kept in step with _fuelBandLabel() in Internals.gs.
+  // Kept in step with _fuelBandLabel() in server/internals.js.
   'Freight Rates': ['ID', 'Origin', 'Area', 'Truck Type', 'Effective Date'].concat(
     Array.from({ length: 25 }, (_, i) => `${30 + 5 * i}.01-${35 + 5 * i}`),
   ),

@@ -9,9 +9,9 @@ Owner holds a **BS in Management Information Systems**. Bridge IT and strategy: 
 
 A web-based Operations Management System for **AngeLoyal Logistics**, a Philippine trucking subcontractor that hauls for Rebisco. It replaces Excel and group chats for dispatch scheduling, waybill tracking, billing, driver payroll, and proof-of-delivery (POD) tracking.
 
-It is a **Google Apps Script web app**: the `.gs` backend runs on Apps Script, the frontend is a static site on Cloudflare Pages, and **Google Sheets is the database**. No server, no SQL, no build step.
+It is a **Cloudflare Pages app**: the frontend is a static site, the backend is one Pages Function (`/api`), and **Cloudflare D1 (SQLite) is the database**. No build step. v1 (tags `v1.x` on `main`) ran on Google Apps Script with Google Sheets as the database; [`Docs/D1 Migration.md`](Docs/D1%20Migration.md) tracks the move to v2.
 
-- [`Docs/Schema.md`](Docs/Schema.md) — the authoritative data model. Reconcile every change against it.
+- [`Docs/Schema.md`](Docs/Schema.md) — the data model; `migrations/` holds the DDL. Reconcile every change against it.
 - [`Docs/Project Proposal.md`](Docs/Project%20Proposal.md) — feature set, pricing, contractual scope.
 - Interview notes in `Docs/` are rough transcriptions. Confirm a detail before you build on it.
 
@@ -25,36 +25,45 @@ The GitHub Project board is the backlog source of truth: `gh issue list --json n
 
 ## Architecture
 
-### Backend (`.gs`, Apps Script, V8)
+### Backend (`server/`, Cloudflare Pages Functions, D1)
+
+ESM modules (`server/package.json` sets `"type": "module"`; the repo root stays CommonJS). [`functions/api.js`](functions/api.js) is the only route. Pages reads `functions/` at the repo root, next to the `web/` output directory.
 
 | File | Responsibility |
 | :--- | :--- |
-| `Code.gs` | Entry point. Sheet-name constants, RBAC (`ROLES`, `PERMISSIONS`, `_requirePermission`), request identity (`_REQUEST_EMAIL`, `_getCurrentUserEmail`), the **`doPost` JSON API** (`_jsonOut`), and `doGet`, which keeps the dev endpoints and redirects to `_frontendUrl`. |
-| `Auth.gs` | Google sign-in and sessions. `login(idToken)` is the one pre-session action: `_verifyIdToken` checks the browser token against Google's tokeninfo endpoint (**never a local decode**), then `_createSession` mints a token in `CacheService`. Every other client call goes through the **`rpc(sessionToken, fnName, args)` gateway** and its `RPC_ALLOWED` allow-list. `OAUTH_CLIENT_ID` lives in Script Properties; there is no client secret. |
-| `Utils.gs` | Sheet and row helpers: `_getSheet`, `_val`, `_numOrNull`, date parse/format, `_nextRowId`, `_findRowById`, `_writeRowFields`, `_indexById`. Also the master-record writer envelope: `_openSheet`, `_openRow`, `_readFields`, `_writerResult`, `_requireUnique`. **Reuse these. Do not hand-roll sheet access.** |
-| `DataReaders.gs` | Read-only accessors. `getBootData()` returns all master data in one round trip; also `getDispatchBoardData()`, `getTrips()`, `getWaybillsForTrip()`. |
-| `DataWriters.gs` | Every sheet mutation: `createTrip`, `saveTripChanges`, `confirmWaybill`, `importRouteFile`, `createOutlet/Truck/Employee/BillingCategory`, `updateDefaultAssignment`. Largest file. |
-| `Internals.gs` | Private writer helpers: `_auditLog`, waybill suggestion, carry-over trips, outlet resolve-or-create, route-frequency append, billing-category rename cascade. |
-| `DevTools.gs` | Token-gated `_devDump` JSON export for local snapshots. Not in the UI. |
+| `functions/api.js` | `onRequestPost` at `/api`. Opens the request context, then calls `login` or `rpc`. Never throws: every failure returns `{ok:false, error}`. |
+| `server/ctx.js` | `AsyncLocalStorage` request context: `db()`, `currentEmail()`, `clientId()`, `fetchImpl()`, `runWith()`. **The only holder of per-request state** — a module-level global is shared across requests in a Worker isolate and would mis-attribute RBAC and audit rows. |
+| `server/db.js` | D1 helpers: `stmt`, `q`, `one`, `run`, `batch`, plus the date vocabulary (`nowPH`, `todayPH`, `toClientDate`, `fromClientDate`…). **Reuse these. Do not call `db().prepare` by hand.** |
+| `server/auth.js` | Google sign-in and sessions. `login(idToken)` is the one pre-session action: `_verifyIdToken` checks the token against Google's tokeninfo endpoint (**never a local decode**), then inserts a row in `sessions` (12 h). Every other call goes through **`rpc(sessionToken, fnName, args)`**, its `RPC_ALLOWED` list and the `FNS` registry. |
+| `server/rbac.js` | `ROLES`, `PERMISSIONS`, `currentUser`, `hasPermission`, `requirePermission`, `getUserSession` (all async). |
+| `server/readers.js` | Read-only accessors, and the row mappers writers reuse for read-back (`tripFromRow`, `waybillFromRow`, `billingLineFromRow`). `getBootData()` returns all master data in one round trip. Readers rebuild the v1 shapes (`helperIds`, `manualCharges`, the rate grid) from the normalized tables. |
+| `server/internals.js` | Shared private helpers: `_auditLog`/`_auditLogBatch`, areas and fuel bands (`_normArea`, `_fuelBandLabel`), `_rateFor`, `_computeBillingLine`, `nextBusinessDay`, billing constants. |
+| `server/writers/trips.js` | Trip writers and the carry-over spawn. |
+| `server/writers/waybills.js` | Waybill suggestion, sequence reservation, confirmation, prefixes. |
+| `server/writers/import.js` | `importRouteFile` and outlet resolve-or-create. |
+| `server/writers/masters.js` | Outlets, trucks, employees, users, categories, route map, colors, the truck roster, charge types, `clearAllData`. |
+| `server/writers/billing.js` | Billing lines, billing numbers, the freight-rate matrix, fuel prices. |
+| `server/migrate/transform.js` | Sheet snapshot JSON → table rows. Used by `scripts/sheets-to-d1.mjs` and the test harness. Remove the Sheets import path after the v2.0.0 cutover. |
+| `migrations/` | Numbered SQL files applied by `wrangler d1 migrations apply`. `0001_init.sql` is the schema, `0002_seed.sql` the defaults. |
 
 ### Frontend (`web/`, static site on Cloudflare Pages)
 
-Apps Script does not serve the frontend. `web/index.html` loads the scripts in dependency order — that is the whole build. No bundler, no framework, no router. `switchPanel()` toggles `.panel` visibility and state lives in module-level globals in `web/core.js`.
+`web/index.html` loads the scripts in dependency order — that is the whole build. No bundler, no framework, no router. `switchPanel()` toggles `.panel` visibility and state lives in module-level globals in `web/core.js`.
 
 | File | Responsibility |
 | :--- | :--- |
 | `index.html` | Shell: markup, nav, script and style tags. |
-| `config.js` | `location.hostname` → `/exec` URL map, plus `OAUTH_CLIENT_ID`. An unknown host falls back to DEV, never PROD. |
+| `config.js` | Environment label by hostname (prod / dev / local), `API_URL = "/api"`, `OAUTH_CLIENT_ID`. An unknown host is "local", never prod. |
 | `styles.css` | All CSS (DM Sans/DM Mono, design tokens). |
 | `core.js` | Global state (`employees`, `trucks`, `dispatchData`), `bootApp()`, the `call()`/`callBackend()` transport, GIS sign-in, RBAC UI gating, panel switching, shared utilities. `toastError` handles rejections; `bgSave()` wraps optimistic saves. |
 | `dispatch.js` | The dispatch board — the primary screen. |
 | `export.js` | Client-only exports of a dispatch day: FINAL-ROUTE print/xlsx and per-truck `.jpg` driver cards. |
 | `crewboard.js` | Crew rail: draggable crew cards dropped onto dispatch rows. |
 | `import.js` | Rebisco `.xlsx` route-file parsing and import. |
-| `roster.js` | Truck roster (driver/helper ↔ truck, edits Default Assignments) and the Outlets admin. |
+| `roster.js` | Truck roster (driver/helper ↔ truck) and the Outlets admin. |
 | `masters.js` | Admin master-detail panels, the Waybill Prefixes panel (Admin **and** Dispatcher, gated by `EDIT_WAYBILL_PREFIXES`), and the Settings danger zone — an Admin-only `clearAllData()` behind a typed confirmation phrase, scoped to the current environment. |
 | `billing.js` | The Billing panel: one row per billable waybill over a date range, filtered by status, origin and subcon (the waybill prefix). Mano, the drop fee and the hauling rate compute but can be typed over; totals never can. Prints the Rebisco billing format through `export.js`'s `printHtmlDocument`. |
-| `billing-matrix.js` | The Billing Matrix panel: the rate grid for one origin across the 25 diesel bands, the weekly diesel price entry, and the `.xlsx` seed that loads a rates workbook one sheet per origin. `FUEL_BANDS` here must name the bands exactly as `_fuelBandLabel()` does in `Internals.gs`. |
+| `billing-matrix.js` | The Billing Matrix panel: the rate grid for one origin across the 25 diesel bands, the weekly diesel price entry, and the `.xlsx` seed that loads a rates workbook one sheet per origin. `FUEL_BANDS` here must name the bands exactly as `_fuelBandLabel()` does in `server/internals.js`. |
 | `whatsnew.js` + `changelog.json` | The "What's new?" dialog. `npm run changelog:sync -- --apply` generates the JSON from GitHub Releases, because the repo is private. |
 | `vendor/` | ExcelJS and html2canvas, pinned and self-hosted so the CSP can refuse every third-party script. ExcelJS is the only spreadsheet library. |
 | `_headers` | Cloudflare Pages response headers: CSP, `X-Frame-Options: DENY`, nosniff. |
@@ -63,47 +72,47 @@ The public launcher page is a plain redirect and lives in the separate `angeloya
 
 ### Data flow
 
-1. The GIS button posts a Google ID token to `login()`. The server verifies it, returns an app session token, and `core.js` keeps it in `localStorage`.
-2. `call(fnName, ...args)` POSTs `{token, fn, args}` to `doPost` → `rpc()`, and returns a promise. It absorbs `AUTH_REQUIRED` centrally, so call sites handle only real failures. `rpc` resolves the session, sets `_REQUEST_EMAIL`, then dispatches.
+1. The GIS button posts a Google ID token to `/api` as `{fn:"login", idToken}`. The server verifies it, returns an app session token, and `core.js` keeps it in `localStorage`.
+2. `call(fnName, ...args)` POSTs `{token, fn, args}` to `/api` → `rpc()`, and returns a promise. It absorbs `AUTH_REQUIRED` centrally, so call sites handle only real failures. `rpc` resolves the session and runs the function with the session email in the request context.
 3. `getBootData()` returns the session and all master data — or the session alone when the verified user has no role.
 4. The board calls `getDispatchBoardData(date)`. Display names come from cached master data through `indexById()`; the server does not re-send them.
-5. Writes go through `DataWriters.gs`, which check permissions, write, and append to the Audit Log.
+5. Writes go through `server/writers/*.js`, which check permissions, write, and append to the Audit Log.
 
 ## Critical constraints
 
-- **Sheets are the schema. Match `Docs/Schema.md` exactly.** Sheet names are Title Case with spaces (mirrored in `Code.gs` `SHEET_*` constants). Headers sit in row 1, and code resolves columns by header name (`_val(row, headers, 'Column Name')`), never by index. You can rename a header or reorder columns, but keep the header strings in sync.
-- **IDs** are auto-increment integers (`_nextRowId` = last ID + 1) in column 1. Foreign keys are numeric IDs, never names.
-- **Dates**: pure dates use `M/d/yyyy`, timestamps use `M/d/yyyy HH:mm:ss`. Sheets coerce cells to `Date` objects, so read through `_readDateCell` / `_valDateTime` — a raw `Date` cannot serialize to JSON.
-- **Booleans** are native sheet `TRUE`/`FALSE`. Compare with `=== true` / `=== 'TRUE'` defensively.
+- **The migrations are the schema. Match `Docs/Schema.md`.** A schema change is a new numbered file in `migrations/` — never edit an applied one — plus the doc, plus `server/migrate/transform.js` while the Sheets import still exists. Tables and columns are `snake_case`.
+- **The API contract is frozen.** Function names, arguments and return shapes stay as v1 returned them, so `web/*.js` never learns about the tables. Readers return camelCase and dates as `M/d/yyyy`.
+- **IDs** are `INTEGER PRIMARY KEY`; SQLite assigns them. Foreign keys are numeric IDs, never names, and D1 enforces them.
+- **Dates**: pure dates are `YYYY-MM-DD`, timestamps `YYYY-MM-DD HH:MM:SS` in Manila time. **Workers run in UTC**, so "today" and "now" come only from `todayPH()` / `nowPH()`. Convert at the edge with `fromClientDate` / `toClientDate`.
+- **Booleans** are `INTEGER 0/1`.
+- **Every DB call is `await`ed**, and so is `requirePermission`. A missing `await` is a silent permission bypass or a lost write.
 - **Billing Date is not Trip Date.** Trip Date is the calendar dispatch day. Billing Date is the original operational day and survives carry-overs, so fuel-price and rate indexing stay correct.
-- **Snapshotting**: dispatch stamps `Truck Billing Category` onto the trip, so a later category rename does not re-price history.
-- **Helpers** live as a comma-separated string of employee IDs in one cell (0–3 helpers). There is no sub-table.
-- **Append-only logs**: Audit Log and Route Frequency Log. Do not mutate a prior row. Derive current state from the latest row.
+- **Snapshotting**: dispatch stamps `truck_billing_category` onto the trip, so a later category rename does not re-price history.
+- **Helpers and manual charges are rows** (`trip_helpers`, `truck_default_helpers`, `billing_line_charges`). Readers rebuild the client's `helperIds` string and `manualCharges` object.
+- **Append-only logs**: `audit_log` and `route_frequency_log`. Do not mutate a prior row. Derive current state from the latest row.
 - **Reading .xlsx cells** goes through `cellValue()` in `web/import.js`. Read a formula cell as `cell.result`, **not** `cell.value.result`: ExcelJS drops `result` when the cached number is 0, and the route file's TOTAL is a shared `SUM` that is 0 for every FO in a convoy. Lost zeros give each of those FOs its own truck.
-- **Waybills** go from suggested (`Locked=FALSE`) to confirmed (`Locked=TRUE`, immutable). Suggestion reserves the number and bumps `Last Sequence Number`; confirmation bumps it again only for a higher custom number. Suffixes: `-R` redeliver, `-FT` foul trip.
-- **Waybill numbering never depends on cell formatting.** `Last Sequence Number` is a plain number and the zero-pad width has its own `Sequence Width` column. Minting takes the script lock, reserves the sequence *before* it appends the row, and issues past `max(counter, highest sequence in the ledger)` — a counter that fails to write cannot re-issue a live number. Inferring the width from a padded text value is what froze the `AY` and `GL` booklets in production.
-- **RBAC**: Admin / Dispatcher / Payroll / Viewer. Every sensitive writer calls `_requirePermission(...)`. The UI hides controls too, but **the server is the real gate**.
-- **Identity** comes from a verified Google sign-in, not `Session.getActiveUser()`, which is blank outside the deployer's Workspace domain. `rpc()` sets `_REQUEST_EMAIL`; `_getCurrentUserEmail()` prefers it and falls back to `Session` only for the editor. A new client-callable function must join `RPC_ALLOWED` in `Auth.gs` or the browser cannot reach it. **Never trust an unverified ID token** — that is an auth bypass.
-- **Audit every mutation**: `_auditLog(action, table, rowId, old, new)` with a vocabulary token from `Docs/Schema.md`. It is best-effort and never throws.
-- **Writers run one at a time.** `rpc()` wraps every `'w'` function in `RPC_ALLOWED` in `_withLock`, which holds the script lock and calls `SpreadsheetApp.flush()` before release. The board fires saves in parallel (`bgSave`), so without this two executions read the same last row ID and overwrite each other — PROD grew two trips with ID 91 and one load split across three `-R` numbers. Mark a new writer `'w'`; leave a reader `'r'` so it does not queue behind an import. `_withLock` is re-entrant by depth guard.
-- **Performance**: minimize `getDataRange().getValues()` round trips. Batch writes with `setValues` / `_writeRowFields` / `_appendRows`.
-- **Timezone and access**: `appsscript.json` is `Asia/Shanghai` (UTC+8 = PH time). The web app runs `executeAs: USER_DEPLOYING` with `ANYONE_ANONYMOUS` access, so the Sheet stays private while sign-in establishes identity. Script Property `OAUTH_CLIENT_ID` needs the pages.dev hosts and `http://localhost:8788` as Authorized JavaScript origins.
-- **CORS constrains the transport.** Apps Script cannot serve `OPTIONS`, so `callBackend()` must stay a *simple* request: POST, plain string body, **no headers**. A `Content-Type: application/json` header triggers a preflight and kills every call. `doPost` can never throw either — a thrown error returns an HTML page, not a status code, so failures come back as `{ok:false, error}`.
+- **Waybills**: one row per load; trips point at it through `trips.waybill_id`. `Suggested` → `Confirmed` (immutable). Suggestion reserves the number; confirmation moves the counter again only for a higher custom number. Suffixes: `-R` redeliver, `-FT` foul trip. `waybill_number` is not unique.
+- **Waybill numbering is atomic.** `_reserveWaybillSequence` is one `UPDATE … RETURNING` past `max(counter, highest sequence in waybills)`, run before the waybill row exists. `last_sequence_number` is a plain number and the pad width is `sequence_width`. Inferring the width from padded text is what froze the `AY` and `GL` booklets in v1.
+- **Concurrency without a lock.** The board fires saves in parallel (`bgSave`). D1 runs writes one at a time per database, but a read-then-write across two statements can still race. Use a constraint (`UNIQUE`, `ON CONFLICT`), an `UPDATE … RETURNING`, or one `batch()` — never read a max and write max + 1. Multi-row writes go in one `batch()`, which is atomic.
+- **RBAC**: Admin / Dispatcher / Payroll / Viewer. Every sensitive writer calls `await requirePermission(...)`. The UI hides controls too, but **the server is the real gate**.
+- **Identity** comes from a verified Google sign-in. `rpc()` puts the session email in the request context; `currentEmail()` reads it. A new client-callable function must join `RPC_ALLOWED` and `FNS` in `server/auth.js` or the browser cannot reach it (a test checks every name resolves). **Never trust an unverified ID token** — that is an auth bypass.
+- **Audit every mutation**: `_auditLog(action, table, rowId, old, new)` or `_auditLogBatch`, with an SQL table name and a vocabulary token from `Docs/Schema.md`. It is best-effort and never throws.
+- **Performance**: the Workers free plan allows 10 ms CPU per request. Keep loops small, query only what you need, and batch writes. Parsing stays in the browser.
+- **`/api` never throws.** A thrown error becomes a 500 with no readable body, so failures return `{ok:false, error}`. The client re-prompts sign-in on the exact string `AUTH_REQUIRED`.
 
 ## Deploy, test, and local workflow
 
-Full details in [`DEPLOY.md`](DEPLOY.md). The `.gs` backend goes to Apps Script through `clasp`; `web/` goes to Cloudflare Pages through `wrangler`.
+Full details in [`DEPLOY.md`](DEPLOY.md). `web/` and `functions/` deploy together to one Cloudflare Pages project with `wrangler`.
 
-- **Two environments**, each a Sheet plus its bound script. Day-to-day commands target **DEV**. Only the release command touches **PROD**, only from `main`, after the tag — a hook blocks it elsewhere.
-- `npm run help` prints every script with its purpose. The usual ones: `npm test`, `npm run push`, `npm run deploy:dev`, `npm run fetch-data`, `npm run clear-data`.
-- `.clasp.prod.json` / `.clasp.dev.json` hold the non-secret Script IDs. `.clasp.json` is a generated, gitignored pointer. `.claspignore` keeps `Docs/` out of Apps Script.
-- `data/`, `.env`, `*.xlsx`, `*.pdf` are gitignored — they hold real operational data. `DEV_DUMP_TOKEN` in `.env` is password-equivalent.
-- **Tests** live in `test/` and run on `node:test` with a `vm` shim — no clasp, no live Sheet, no install. See [`test/README.md`](test/README.md). Phase 1 is broadly covered. **Phase 2 has no code and no tests yet; write them together.** Frontend logic is testable through [`test/webharness.js`](test/webharness.js), which runs `web/*.js` against a stub DOM. The stub has no layout, so check anything visual in a browser.
-- Add a test next to any backend logic you add. For anything the harness cannot cover, verify against a snapshot (`npm run fetch-data`) or a deployed copy.
+- **Two environments** in one Pages project: `develop` → preview (`develop.angeloyal-oms.pages.dev`, DEV D1 `angeloyal-oms-dev`); `main` → production (`angeloyal-oms.pages.dev`, PROD D1 `angeloyal-oms`). Bindings live in [`wrangler.toml`](wrangler.toml). Only `npm run release` and `npm run db:migrate:prod` touch PROD, only from `main` — a hook blocks them elsewhere.
+- `npm run help` prints every script with its purpose. The usual ones: `npm test`, `npm run dev:web`, `npm run db:migrate:local`, `npm run deploy:dev`.
+- `data/`, `.env`, `*.xlsx`, `*.pdf` are gitignored — they hold real operational data. `DEV_DUMP_TOKEN` in `.env` is password-equivalent until the v1 Apps Script deployments are archived.
+- **Tests** live in `test/` and run on `node:test` with `node:sqlite` (Node 24) behind a D1-shaped shim — no wrangler, no live database, no install. See [`test/README.md`](test/README.md). Frontend logic is testable through [`test/webharness.js`](test/webharness.js), which runs `web/*.js` against a stub DOM. The stub has no layout, so check anything visual in a browser.
+- Add a test next to any backend logic you add. For anything the harness cannot cover, run `npm run dev:web` against the local D1.
 
 ## Working agreements
 
-- A new feature usually walks this path: sheet or columns in `Docs/Schema.md` → constants in `Code.gs` → reader in `DataReaders.gs` → writer with `_requirePermission` and `_auditLog` in `DataWriters.gs` → the `web/*.js` panel and the `core.js` state and boot wiring. Keep the schema doc and the code in lockstep.
+- A new feature usually walks this path: a migration file and `Docs/Schema.md` → reader in `server/readers.js` → writer with `requirePermission` and `_auditLog` in `server/writers/*.js` → `RPC_ALLOWED` and `FNS` in `server/auth.js` → the `web/*.js` panel and the `core.js` state and boot wiring. Keep the schema doc and the code in lockstep.
 - Match the surrounding style: `_`-prefixed helpers are private, readers return camelCase objects, writers return `{ success, ... } | { success:false, error }`.
 - Commit or push only when the owner asks.
 - **Branching (solo dev)**: routine work commits straight to `develop` with Conventional Commit messages. Use a `feat/` or `fix/` branch only when a change is big or risky, then merge-commit it back. `main` stays production-only.
@@ -114,8 +123,8 @@ Full details in [`DEPLOY.md`](DEPLOY.md). The `.gs` backend goes to Apps Script 
 `.claude/settings.json` wires three hooks in [`scripts/claude-hooks.mjs`](scripts/claude-hooks.mjs):
 
 - **SessionStart** prints `HANDOFF.md` when it exists, so a fresh session resumes without being told.
-- **Stop** runs `npm test` when a `.gs`/`.js`/`.mjs` file changed in the turn, and blocks on a failure.
-- **PreToolUse** blocks a PROD deploy from any branch except `main`.
+- **Stop** runs `npm test` when a `.js`/`.mjs`/`.sql` file changed in the turn, and blocks on a failure.
+- **PreToolUse** blocks a PROD deploy or PROD migration from any branch except `main`.
 
 The `/release` skill (`.claude/skills/release/`) holds the release runbook and the dispatcher release-note rules. Commit and PR attribution lines are already off in the user settings — never add one by hand.
 

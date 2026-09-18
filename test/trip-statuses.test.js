@@ -73,16 +73,16 @@ test('the dropdown shows short labels, not raw values', () => {
 });
 
 // The backend decides a trip's status; the board has to be able to draw
-// whatever it writes. These are the statuses DataWriters.gs acts on by name.
+// whatever it writes. These are the statuses server/writers/trips.js acts on by name.
 test('the statuses the backend writes are all known to the board', () => {
   const ui = board();
   const known = new Set(ui.__statuses.map((s) => s[0]));
   const writers = fs.readFileSync(
-    path.resolve(__dirname, '..', 'DataWriters.gs'), 'utf8',
+    path.resolve(__dirname, '..', 'server', 'writers', 'trips.js'), 'utf8',
   );
 
   const carryover = /const carryoverStatuses = \[([^\]]*)\]/.exec(writers);
-  assert.ok(carryover, 'carryoverStatuses list still exists in DataWriters.gs');
+  assert.ok(carryover, 'carryoverStatuses list still exists in server/writers/trips.js');
 
   const names = [...carryover[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
   assert.ok(names.length >= 3);

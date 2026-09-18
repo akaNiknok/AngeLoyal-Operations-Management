@@ -50,9 +50,9 @@ dump(db, 'waybills');                       // rows as plain objects, snake_case
 | `api.test.js` | the `/api` envelope: AUTH_REQUIRED, BAD_REQUEST, unknown actions |
 | `readers.test.js` | every reader's return shape, rebuilt from the normalized tables |
 | `transform.test.js` | the snapshot → tables rules (dates, helpers, waybill loads, orphans, rates) |
+| `trips`, `edits`, `prepping`, `reorder`, `convoy`, `carryover`, `delete-trips` | trip writers: create, edit, status, order, convoy groups, carry-over spawn, delete |
+| `waybills`, `prefixes` | waybill suggestion, atomic sequence reservation, confirmation, prefixes |
+| `import` | the route-file import: grouping, outlet resolve-or-create, re-import |
+| `masters`, `clear-data` | master-record writers, the Admin wipe |
+| `billing-lines`, `billing-rates` | billing ledger pricing and overrides, the rate matrix and fuel prices |
 | `transport.test.js`, `admin-records`, `billing-web`, `fliprender`, `route-file`, `trip-statuses`, `whatsnew` | frontend logic through `webharness.js` (stub DOM, no layout — check anything visual in a browser) |
-
-`test/legacy/` holds the suites not yet ported from the Apps Script backend,
-with a copy of the old vm harness so they still run one at a time against the
-`.gs` files (`node --test test/legacy/trips.test.js`). They sit outside the
-`npm test` glob; a Phase 1 worker moves its files back when they pass on D1.

@@ -178,8 +178,8 @@
             }
 
             // Renders a full HTML document into a hidden same-origin iframe
-            // and prints it (popups are unreliable in the Apps Script
-            // sandbox; the browser's Print dialog does the PDF part).
+            // and prints it (popup blockers make a new window unreliable;
+            // the browser's Print dialog does the PDF part).
             function printHtmlDocument(html) {
                 const old = document.getElementById("print-frame");
                 if (old) old.remove();

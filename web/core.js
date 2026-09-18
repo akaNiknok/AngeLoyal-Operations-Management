@@ -62,7 +62,7 @@
             let importExcluded = new Set(); // indices excluded by dispatcher
 
             // ── AUTH STATE ────────────────────────────────────────────
-            // Session token from a verified Google sign-in (see Auth.gs). It is
+            // Session token from a verified Google sign-in (see server/auth.js). It is
             // sent with every backend call via call() and persisted so a reload
             // doesn't force a fresh sign-in. localStorage access is guarded —
             // some sandboxed iframe contexts block it.

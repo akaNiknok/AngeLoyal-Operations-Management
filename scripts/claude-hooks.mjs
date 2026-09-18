@@ -27,7 +27,8 @@ if (mode === 'handoff') {
 if (mode === 'guard-release') {
   const cmd = input?.tool_input?.command || '';
   // Command position only, so the words inside a heredoc or an echo do not trip the guard.
-  if (/(^|[;&|]\s*)(npm run release|npm run deploy:web\b|clasp push --force)/.test(cmd)) {
+  // PROD = the main branch deploy, and any write to the angeloyal-oms database (not -dev).
+  if (/(^|[;&|]\s*)(npm run (release|db:migrate:prod)\b|(npx )?wrangler (pages deploy\b.*--branch[ =]main\b|d1 (migrations apply|execute) angeloyal-oms(\s|$)))/.test(cmd)) {
     const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
     if (branch !== 'main') {
       process.stderr.write(`Blocked: this command touches PROD and the branch is "${branch}". Release only from main, after the tag. See DEPLOY.md.\n`);
@@ -41,7 +42,7 @@ if (mode === 'test') {
   if (input?.stop_hook_active) process.exit(0);            // already re-entered once; do not loop
   const dirty = git('status', '--porcelain')
     .split('\n')
-    .some((line) => /\.(gs|js|mjs)$/.test(line));
+    .some((line) => /\.(js|mjs|sql)$/.test(line));
   if (!dirty) process.exit(0);
   const run = spawnSync('npm', ['test'], { cwd: repo, encoding: 'utf8', shell: true });
   if (run.status !== 0) {

@@ -1,420 +1,420 @@
-# **AngeLoyal OMS — Google Sheets Schema Specification**
+# AngeLoyal OMS — D1 Schema Specification
 
-## **Overview: Sheet Registry**
+The database is **Cloudflare D1** (SQLite). The DDL in [`migrations/`](../migrations/) is the source of truth for types and constraints; this document explains what each table means and how the system uses it. Keep the two in lockstep: a schema change is a new numbered migration file plus an edit here.
 
-The AngeLoyal Order Management System (OMS) relies on a structured collection of Google Sheets, categorized into functional groups. All sheets listed below are active components of the current operational system.
+v1 kept the same data in Google Sheets. [`Docs/D1 Migration.md`](D1%20Migration.md) §3.1 lists how each sheet maps to a table.
 
-| \# | Sheet Name | Group | Access / Type |
-| :---- | :---- | :---- | :---- |
-| 1 | Users | Config | Administrative Setup |
-| 2 | Billing Categories | Config | Administrative Setup |
-| 3 | Waybill Prefixes | Config | Administrative Setup |
-| 4 | Employees | People & Trucks | Master Records |
-| 5 | Trucks | People & Trucks | Master Records |
-| 6 | Default Assignments | People & Trucks | Operations Config (the truck roster) |
-| 7 | Outlets | People & Trucks | Master Records (Auto-Populating) |
-| 8 | Trips | Dispatch | Core Operational Ledger |
-| 9 | Route Frequency Log | Dispatch | Append-Only Performance Log |
-| 10 | Waybills | Waybills | Append-Only Transaction Ledger |
-| 11 | Audit Log | Audit | System-Wide Activity Journal |
-| 12 | Route Type Map | Config | Administrative Setup (Self-Seeding) |
-| 13 | Customer Group Colors | Config | Administrative Setup (Self-Seeding) |
-| 14 | Freight Rates | Billing | DOE Rate Matrix (Effective-Dated) |
-| 15 | Fuel Prices | Billing | Weekly Price History |
-| 16 | Billing Charge Types | Billing | Administrative Setup (Self-Seeding) |
-| 17 | Billing Lines | Billing | Core Billing Ledger |
+## Conventions
 
-## **Group 1: Config Sheets**
+- **Table and column names** are `snake_case`. Readers return `camelCase` keys to the client, in the shape the v1 readers returned.
+- **IDs** are `INTEGER PRIMARY KEY`. SQLite assigns them, so two concurrent inserts never share one. The import from Sheets keeps the v1 ID values, so `audit_log.row_id` still points at the right row.
+- **Foreign keys** are numeric IDs, never names. D1 enforces them.
+- **Booleans** are `INTEGER` `0/1`.
+- **Pure dates** are `TEXT` `YYYY-MM-DD`. **Timestamps** are `TEXT` `YYYY-MM-DD HH:MM:SS` in Asia/Manila time. Readers send dates to the client as `M/d/yyyy`. "Today" always comes from `todayPH()`, because Workers run in UTC.
+- **Names that must be unique** (email, plate, outlet name, prefix, category) use `UNIQUE COLLATE NOCASE`. The constraint is the guard; a writer turns the violation into a readable error.
+- **Multi-row writes** go in one `db.batch()`, which is atomic.
+- **Append-only tables**: `audit_log` and `route_frequency_log`. Never update or delete a prior row, except through the Admin wipe.
 
-### **Sheet 1: Users**
+## Table registry
 
-Maps Google account emails to specific system roles to manage access control.
+| # | Table | Group | Kind |
+| :-- | :-- | :-- | :-- |
+| 1 | `users` | Config | Access list |
+| 2 | `sessions` | Config | Sign-in sessions |
+| 3 | `billing_categories` | Config | Master (seeded) |
+| 4 | `route_type_map` | Config | Master (seeded) |
+| 5 | `customer_group_colors` | Config | Master (seeded) |
+| 6 | `waybill_prefixes` | Config | Master |
+| 7 | `employees` | People & Trucks | Master |
+| 8 | `trucks` | People & Trucks | Master + the truck roster |
+| 9 | `truck_default_helpers` | People & Trucks | Roster helpers |
+| 10 | `outlets` | People & Trucks | Master (filled by import) |
+| 11 | `trips` | Dispatch | Core ledger |
+| 12 | `trip_helpers` | Dispatch | Trip helpers |
+| 13 | `route_frequency_log` | Dispatch | Append-only |
+| 14 | `waybills` | Waybills | Ledger, one row per load |
+| 15 | `freight_rates` | Billing | DOE rate matrix, long format |
+| 16 | `fuel_prices` | Billing | Weekly price history |
+| 17 | `billing_charge_types` | Billing | Master (seeded) |
+| 18 | `billing_lines` | Billing | Billing ledger |
+| 19 | `billing_line_charges` | Billing | Manual charges per line |
+| 20 | `audit_log` | Audit | Append-only |
+
+`0002_seed.sql` holds the defaults for the seeded tables as `INSERT OR IGNORE`. A database that already has rows keeps them.
+
+## Group 1: Config
+
+### users
+
+Maps a Google account email to a role.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Email | String | Google account email—validated via Session.getActiveUser().getEmail() |
-| Display Name | String | User's name displayed within the user interface |
-| Role | String | Authorized roles: Admin, Dispatcher, Payroll, Viewer |
-| Active | Boolean | TRUE/FALSE—inactive users are blocked from system access |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| email | TEXT, unique (nocase) | The verified Google sign-in email |
+| display_name | TEXT | Name shown in the UI |
+| role | TEXT | `Admin`, `Dispatcher`, `Payroll` or `Viewer` (CHECK) |
+| active | INTEGER 0/1 | `0` blocks access |
 
-#### **Role Permissions Matrix**
+#### Role permissions matrix
 
 | Feature | Admin | Dispatcher | Payroll | Viewer |
-| :---- | :---- | :---- | :---- | :---- |
+| :-- | :-- | :-- | :-- | :-- |
 | View dispatch board | ✓ | ✓ | ✓ | ✓ |
 | Assign drivers to trips | ✓ | ✓ | — | — |
 | Add manual trips | ✓ | ✓ | — | — |
 | Flag trip status | ✓ | ✓ | — | — |
 | Confirm waybill numbers | ✓ | ✓ | — | — |
-| Edit the truck roster (Default Assignments) | ✓ | ✓ | — | — |
-| Edit Outlets | ✓ | — | — | — |
-| Edit Billing Categories | ✓ | — | — | — |
-| Edit Waybill Prefixes | ✓ | ✓ | — | — |
-| Edit Users sheet | ✓ | — | — | — |
-| View Audit Log | ✓ | — | — | — |
-| Clear all transactional data (Admin panel) | ✓ | — | — | — |
+| Edit the truck roster | ✓ | ✓ | — | — |
+| Edit outlets | ✓ | — | — | — |
+| Edit billing categories | ✓ | — | — | — |
+| Edit waybill prefixes | ✓ | ✓ | — | — |
+| Edit users | ✓ | — | — | — |
+| View the Audit Log | ✓ | — | — | — |
+| Clear all transactional data | ✓ | — | — | — |
 
-### **Sheet 2: Billing Categories**
+`server/rbac.js` holds the matrix. The server is the real gate; the UI only hides controls.
 
-Maintains the list of valid billing classifications that Admins can assign to trucks (e.g., 10W, 6W, 4W, L300). Admins can add new categories or rename/deactivate existing ones as the fleet's billing structure evolves.
+### sessions
 
-| Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Name | String | Billing category code, e.g. 10W, 6W, 4W, L300 |
-| Active | Boolean | Inactive categories are hidden from the "Add/Edit Truck" dropdown but remain valid for trucks still using them |
-
-#### **Initial seed:**
-
-| Name | Active |
-| :---- | :---- |
-| 10W | TRUE |
-| 6W | TRUE |
-| 4W | TRUE |
-| L300 | TRUE |
-
-**System Behavior:** Admins select a truck's Billing Category directly when creating or editing a truck record (Sheet 5). Renaming a category here cascades to every Trucks row currently set to the old name, so existing trucks stay matched to the renamed category.
-
-### **Sheet 12: Route Type Map**
-
-Maps the truck-type column codes that appear in a Rebisco route file (e.g. 6WF, 6WC, 4WC) to a truck **Billing Category** (Sheet 2). A route file lists how many trucks of each type an FO needs in dedicated per-type columns (10W, 6WF, 6WC, 4WC, L300…), separate from the client's "Restrictions" constraint. During import the system reads which type column carries the count, looks up its billing category here, and assigns a truck of that category. This sheet **self-seeds** with sensible defaults the first time it is read, so no manual setup is required; Admins can add/edit mappings via the Route Type Map admin panel as the route-file format evolves.
+One row per signed-in browser. `login()` verifies the Google ID token with Google, then inserts a random token here.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| File Type Code | String | Truck-type column header from the route file, e.g. 6WF, 6WC, 4WC |
-| Billing Category | String | Target billing category (Sheet 2) the code resolves to during import |
-| Active | Boolean | Inactive mappings are ignored during import and hidden from the admin list |
+| :-- | :-- | :-- |
+| token | TEXT PK | Random session token the client keeps in `localStorage` |
+| email | TEXT | The verified email |
+| display_name | TEXT | From the Google token |
+| expires_at | TEXT timestamp | 12 hours after sign-in. A sign-in deletes expired rows |
 
-#### **Initial seed:**
+### billing_categories
 
-| File Type Code | Billing Category | Active |
-| :---- | :---- | :---- |
-| 10W | 10W | TRUE |
-| 6WF | 6W | TRUE |
-| 6WC | 6W | TRUE |
-| 4WC | 6W | TRUE |
-| L300 | L300 | TRUE |
-
-**System Behavior:** Codes not found in the map fall back to using the code itself as the category name (so an unmapped code still attempts a match). A code that resolves to a category with no free truck leaves the trip's truck blank for the dispatcher, but the required category is still stamped onto the trip so the needed type stays visible.
-
-### **Sheet 13: Customer Group Colors**
-
-Stores the color chip shown per **customer group** on the dispatch board and exports. Customer groups are the free-text Customer Group values on Outlets (Sheet 7) — chain codes like PG, SM, WM — not a separate registry; this sheet only assigns a color to a code. This sheet **self-seeds** the first time it is read with the fixed chain-code palette the client previously hard-coded, so the board keeps matching the paper route file until an Admin edits a color in the Settings panel. Groups without a row (or with a blank/inactive one) fall back to a color hashed from the group name on the client.
+The billing classes an Admin assigns to trucks (10W, 6W, L300).
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Customer Group | String | Customer group code, e.g. PG, SM, WM (matched case-insensitively) |
-| Color | String | Hex color like #92d050; blank clears the color (row goes inactive → group falls back to its hashed color) |
-| Active | Boolean | FALSE (or blank Color) means the group uses its hashed fallback color instead |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| name | TEXT, unique (nocase) | e.g. `6W` |
+| active | INTEGER 0/1 | Inactive categories leave the truck dropdown but stay valid for trucks that use them |
 
-#### **Initial seed:**
+**Seed:** `10W`, `6W`, `L300`.
 
-| Customer Group | Color | Active |
-| :---- | :---- | :---- |
-| PG | #92d050 | TRUE |
-| SM | #00b0f0 | TRUE |
-| WM | #ffe94d | TRUE |
-| RO | #e5b8b7 | TRUE |
-| SW | #e5b8b7 | TRUE |
-| PS | #ffc000 | TRUE |
-| ALFA | #ffc000 | TRUE |
+Trucks and the route type map point at a category by ID, so a rename needs no cascade. Trips keep a text snapshot (`trips.truck_billing_category`), so a rename does not re-price history.
 
-**System Behavior:** `saveCustomerGroupColor(group, color)` upserts by group code (case-insensitive) and is Admin-only (EDIT_MASTER_RECORDS). The color is validated as a `#rrggbb` hex; an empty color deactivates the row. The client folds active rows into its `CG_COLORS` lookup at boot, so a saved color wins over the hash everywhere `colorChip` is used.
+### route_type_map
 
-### **Sheet 3: Waybill Prefixes**
-
-Tracks the alphanumeric code sequences allocated to each company or subcontractor generating waybills within the platform.
+Maps a truck-type column code in the Rebisco route file (6WF, 6WC, 4WC…) to a billing category. The route file gives the truck count for each type in its own column, separate from the client's Restrictions field. The import reads which column holds the count, looks up the category here, and assigns a truck of that category.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Prefix | String | Unique short code (e.g., AY) prepended to the numeric sequence. May be left blank for "no prefix" — the waybill number is then just the bare sequence (e.g., `10761` instead of `AY-10761`). |
-| Company Name | String | Corporate identity associated with the prefix (e.g., AngeLoyal Logistics) |
-| Last Sequence Number | Number | The most recent sequence number issued, stored as a **plain number** (e.g. `357`, `10760`) — never zero-padded text. **Suggestion reserves the number** (advances this counter) and confirmation advances it further only if a higher custom number is entered. The counter is only a cache: the backend also reads the highest Sequence Number already in the Waybills ledger for the prefix and issues past whichever is higher, so a counter that fails to write can never re-issue a live number. |
-| Sequence Width | Number | The booklet's fixed digit width — how many digits the generated waybill number is zero-padded to (`4` prints `0358`). Padding never truncates: a sequence longer than the width prints in full. Set from the length of the value typed into the admin panel, so entering `0000` records width 4. **A row with no width falls back to the length of the Last Sequence Number**, which keeps pre-migration sheets printing correctly until their next issue rewrites both fields; the column is appended automatically when a sheet lacks it. |
-| Active | Boolean | Inactive prefixes are hidden from the waybill-prefix pickers but stay valid for waybills already issued under them. A blank cell reads as active, and the column is appended automatically on the first edit if a pre-existing sheet lacks it. |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| file_type_code | TEXT, unique (nocase) | Column header in the route file |
+| billing_category_id | INTEGER FK → billing_categories | |
+| active | INTEGER 0/1 | The import ignores inactive rows |
 
-> **Why the width is its own column.** It used to be inferred from the *formatting* of Last Sequence Number — the counter was stored as text (`0358`) and its length was the width. Persisting that took a `setNumberFormat('@').setValue(…)` write which silently did nothing, so **every zero-padded booklet froze**: `AY` stayed at `0358` and re-issued `AY-0359` across four different FOs, `GL` stayed at `039` and re-issued `GL-040` across two, while every prefix stored without a leading zero advanced normally. Re-basing this counter to a number the booklet has already issued is now refused.
+**Seed:** `10W`→10W, `6WF`→6W, `6WC`→6W, `4WC`→6W, `L300`→L300.
 
-**Initial seed:**
+A code with no row falls back to a category with the same name. When no truck of the category is free, the trip keeps a blank truck but still records the category, so the dispatcher sees the type it needs.
 
-| Prefix | Company Name | Last Sequence Number | Active | Sequence Width |
-|---|---|---|---|---|
-| AY | AngeLoyal Logistics | (set at deployment, e.g. 10760) | TRUE | (booklet digits, e.g. 5) |
+### customer_group_colors
 
-## **Group 2: People & Trucks**
-
-### **Sheet 4: Employees**
-
-Maintains the authoritative roster of personnel.
+The color chip for each customer group on the dispatch board and exports. A customer group is the free-text `outlets.customer_group` code (PG, SM, WM); this table only assigns a color.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Nickname | String | Preferred name used throughout operational dropdowns |
-| First Name | String | Legal first name |
-| Middle Name | String | Legal middle name |
-| Last Name | String | Legal last name |
-| Role | String | Employee job function (e.g., Driver, Helper) |
-| Status | String | Active / Inactive—inactive employees are excluded from dispatch options |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| customer_group | TEXT, unique (nocase) | |
+| color | TEXT | `#rrggbb`; null clears it |
+| active | INTEGER 0/1 | `0` or a null color falls back to a color hashed from the group name |
 
-### **Sheet 5: Trucks**
+**Seed:** PG `#92d050`, SM `#00b0f0`, WM `#ffe94d`, RO `#e5b8b7`, SW `#e5b8b7`, PS `#ffc000`, ALFA `#ffc000`.
 
-Maintains the authoritative fleet registry, combining physical specifications with system billing metrics.
+`saveCustomerGroupColor(group, color)` upserts by group code and needs `EDIT_MASTER_RECORDS`.
 
-| Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Plate Number | String | Unique vehicle license plate |
-| Brand | String | Vehicle manufacturer (e.g., Isuzu, Mitsubishi) |
-| Type | String | Detailed model/body designation |
-| Status | String | Active / Inactive—inactive trucks are hidden from dispatch options |
-| Billing Category | String | Selected manually by Admins from the Billing Categories list (Sheet 2) at truck creation; editable afterward via the Trucks admin panel |
+### waybill_prefixes
 
-### **Sheet 6: Default Assignments**
-
-The **truck roster**: the permanent, baseline crew configuration for each vehicle. It is the single source of crew truth — the dispatch board's Crew Rail stamps a truck's default crew onto trips (`assignCrew`), and the Truck Roster panel edits it directly. One row per truck (seeded blank at truck creation).
+One row per waybill booklet.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Truck ID | Number | Foreign Key → Trucks.ID |
-| Default Driver ID | Number | Foreign Key → Employees.ID (Nullable if unassigned) |
-| Default Helper IDs | String | Comma-separated list of Employee IDs (0–3, e.g., 30,52, Nullable) |
-| Notes | String | Special scheduling constraints (e.g., "Driver available Mon–Wed only") |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| prefix | TEXT, unique (nocase) | e.g. `AY`. Empty string means no prefix: the number prints as the bare sequence (`10761`) |
+| company_name | TEXT | e.g. AngeLoyal Logistics |
+| last_sequence_number | INTEGER | The last sequence issued. A plain number, never padded text |
+| sequence_width | INTEGER | The booklet's digit width. `4` prints `0358`. Padding never truncates a longer number |
+| active | INTEGER 0/1 | Inactive prefixes leave the pickers but stay valid for issued waybills |
 
-**System Behavior:** Edited via `updateDefaultAssignment` (gated by `ASSIGN_CREW` — Admin + Dispatcher). Updates apply strictly to newly generated trips; historical trip logs remain unchanged. One-off per-day crew substitutions are made directly on the trip's Crew column, not here.
+> **Why the width has its own column.** v1 once inferred the width from the text format of the counter (`0358`). The write that kept the text format silently failed, so every zero-padded booklet froze and re-issued the same numbers (`AY-0359` on four FOs). The counter is now a number and the width is data. A re-base to a number the booklet already issued is refused.
 
-### **Sheet 7: Outlets**
+## Group 2: People & Trucks
 
-Created empty. On first import of a Rebisco route file, the backend scans all outlet names in the file and inserts any that don't already exist as new rows. Admin can then enrich the records (add address, notes, etc.).
-
-| Column | Type | Notes |
-|---|---|---|
-| ID | Number | Auto-increment |
-| Outlet Name | String | Exact name from Rebisco file, e.g. `PUREGOLD PRICE CLUB TANZA CAVI` |
-| Area | String | e.g. `Tanza`, `Las Pinas`, `Paranaque` |
-| Address | String | Full delivery address (from Rebisco file on seed, editable) |
-| Customer Group | String | e.g. `PG` (Puregold), `SM`, manually editable |
-| Notes | String | Any special delivery notes (restricted times, dock info, etc.) |
-| Created At | DateTime | Timestamp of first import |
-
-## **Group 3: Dispatch**
-
-### **Sheet 8: Trips**
-
-The core transactional table of the system. Each row tracks an individual delivery assignment. Multiple rows may share an FO Number for multi-drop routes, or contain distinct alphabetical suffixes for split-load allocations.
+### employees
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Trip Date | Date | Calendar date the delivery is scheduled for dispatch |
-| Billing Date | Date | The original operational date. This date remains constant even if a trip carries over to subsequent days |
-| FO Number | String | Client Freight Order identifier (e.g., 6100044620\) |
-| FO Split Suffix | String | Suffix identifier (A, B, C) for split shipments; Null for single-truck loads |
-| Outlet ID | Number | Foreign Key → Outlets.ID |
-| Area | String | Denormalized location name copied from the Outlet profile for UI sorting |
-| Quantity | Number | Total volume in cartons or packages |
-| CBM | Number | Volume measurement in cubic meters |
-| Restrictions | String | Vehicle configuration constraints requested by the client (e.g., 6W) |
-| Truck ID | Number | Foreign Key → Trucks.ID pointing to the physical vehicle dispatched |
-| Driver ID | Number | Foreign Key → Employees.ID pointing to the operating driver |
-| Helper IDs | String | Comma-separated Employee IDs for assigned crew; Nullable |
-| Truck Billing Category | String | Historical snapshot of the vehicle's billing class at the exact moment of dispatch |
-| Trip Status | String | Current execution state: Prepping, Backlog, Scheduled, Preload, Delivered, Undelivered, Foul Trip \- No Redeliver, Foul Trip \- For Redeliver, Redeliver, Two-Day Trip |
-| Parent Trip ID | Number | Foreign Key → Trips.ID. Points to the initiating record for all redeliveries or foul trip tracking |
-| Source | String | Generation origin: Import, Manual, or Carry-over |
-| Tier | Number | Client priority ranking (1, 2, 3); Nullable for manual entries |
-| Remarks | String | Free-form operational commentary from dispatchers |
-| Status Changed By | String | Email address of the user who performed the latest status update |
-| Status Changed At | DateTime | Timestamp of the latest status modification |
-| Added By | String | Email address of the user who generated the record |
-| Added At | DateTime | Creation timestamp |
-| Convoy Group | String | Token grouping trips whose trucks must travel together (convoys / split loads); unique within a Trip Date; Nullable (blank = not in a convoy) |
-| Sort Order | Number | Manual display/route order within a Trip Date, set by dragging rows on the dispatch board; Nullable (blank sorts last) |
-| Origin | String | The Rebisco warehouse the load departs from (e.g. `TANZA`, `LINGUNAN`, `3M MARILAO`). Chosen once per route file at import and stamped on every trip in it. Selects which sheet of the Freight Rates matrix prices this trip; Nullable for manual entries |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| nickname | TEXT | The name in dispatch dropdowns |
+| first_name, middle_name, last_name | TEXT | Legal name |
+| role | TEXT | e.g. `Driver`, `Helper` |
+| active | INTEGER 0/1 | Inactive employees leave the dispatch options |
 
-#### **Status & Carry-Over Workflow**
+### trucks
+
+The fleet and the **truck roster** in one table. v1 kept the roster in a separate 1:1 Default Assignments sheet; it folded in here.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | Also the ID `getDefaultAssignments()` returns for a roster row |
+| plate_number | TEXT, unique (nocase) | |
+| brand | TEXT | e.g. Isuzu |
+| type | TEXT | Model or body |
+| active | INTEGER 0/1 | Inactive trucks leave the dispatch options |
+| billing_category_id | INTEGER FK → billing_categories | Set by an Admin |
+| default_driver_id | INTEGER FK → employees | Roster driver; nullable |
+| roster_notes | TEXT | e.g. "Driver available Mon–Wed only" |
+
+### truck_default_helpers
+
+The roster helpers of a truck, 0–3 rows.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| truck_id | INTEGER FK → trucks | Cascades on truck delete |
+| employee_id | INTEGER FK → employees | |
+| slot | INTEGER 1–3 | Order on the crew card. PK is `(truck_id, slot)` |
+
+`updateDefaultAssignment` edits the roster and needs `ASSIGN_CREW` (Admin, Dispatcher). A roster change applies to new trips only. A one-day crew change goes on the trip, not here.
+
+### outlets
+
+Empty at first. The route-file import inserts every outlet name it does not know. An Admin then adds the address, group and notes.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| outlet_name | TEXT, unique (nocase) | Exact name from the route file |
+| area | TEXT | e.g. `Tanza`. Trips read the area through this join |
+| address | TEXT | |
+| customer_group | TEXT | e.g. `PG` |
+| notes | TEXT | Dock hours, restrictions |
+| created_at | TEXT timestamp | |
+
+## Group 3: Dispatch
+
+### trips
+
+One row per delivery drop. Several rows share an FO number on a multi-drop route. A split load uses a suffix (A, B, C).
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| trip_date | TEXT date | The calendar dispatch day |
+| billing_date | TEXT date | The original operational day. It stays the same through carry-overs |
+| fo_number | TEXT | Rebisco Freight Order |
+| fo_split_suffix | TEXT | A, B, C for a split load; null for one truck |
+| outlet_id | INTEGER FK → outlets | |
+| quantity | INTEGER | Cartons |
+| cbm | REAL | Cubic meters |
+| restrictions | TEXT | Truck constraint the client asks for (e.g. 6W) |
+| truck_id | INTEGER FK → trucks | |
+| driver_id | INTEGER FK → employees | |
+| truck_billing_category | TEXT | Snapshot of the truck's category at dispatch |
+| trip_status | TEXT | CHECK: `Prepping`, `Backlog`, `Scheduled`, `Preload`, `Delivered`, `Undelivered`, `Foul Trip - No Redeliver`, `Foul Trip - For Redeliver`, `Redeliver`, `Two-Day Trip` |
+| parent_trip_id | INTEGER FK → trips | The trip a carry-over came from |
+| source | TEXT | CHECK: `Import`, `Manual`, `Carry-over` |
+| tier | INTEGER | Client priority 1–3; null for manual trips |
+| remarks | TEXT | |
+| status_changed_by, status_changed_at | TEXT | Email and timestamp of the last status change |
+| added_by, added_at | TEXT | Email and timestamp of creation |
+| convoy_group | TEXT | Token for trucks that travel together; unique within a trip date; null when not in a convoy |
+| sort_order | INTEGER | Manual order within a trip date (drag on the board); null sorts last |
+| origin | TEXT | Rebisco warehouse (`TANZA`, `LINGUNAN`…), chosen once per route file. Selects the rate matrix |
+| waybill_id | INTEGER FK → waybills | The load's waybill; null before one is suggested |
+
+### trip_helpers
+
+The helpers of a trip, 0–3 rows. Same shape as `truck_default_helpers`, keyed `(trip_id, slot)`, cascading on trip delete. Readers rebuild the client's `helperIds` string from these rows.
+
+#### Status and carry-over workflow
 
 ```
-Prepping (imported, pre-waybill — dispatcher merges/splits/reassigns freely)
-  → Scheduled (day promoted via markDayScheduled; waybills suggested)
-  → Backlog (day promoted but still no crew — no waybill; carries over to the
-             next business day as a fresh Prepping trip)
+Prepping (imported, no waybill — the dispatcher merges, splits and reassigns freely)
+  → Scheduled (markDayScheduled promotes the day; waybills are suggested)
+  → Backlog (promoted with no crew — no waybill; carries over to the
+             next business day as a new Prepping trip)
 Scheduled
-  → Preload (goods loaded onto the truck, not yet delivered)
+  → Preload (loaded, not yet delivered)
       → Delivered
-  → Delivered (normal completion)
+  → Delivered
   → Undelivered
       → Foul Trip - No Redeliver (billed as foul, no next-day attempt)
-      → Foul Trip - For Redeliver (carries over to next day, generates -FT waybill)
-      → Redeliver (carries over to next day, generates -R waybill)
-      → Two-Day Trip (spans 2 days, single billing, covers both days)
+      → Foul Trip - For Redeliver (carries over, gets a -FT waybill)
+      → Redeliver (carries over, gets a -R waybill)
+      → Two-Day Trip (two days, one billing)
 ```
 
-When a trip status transitions to `Foul Trip - For Redeliver`, `Redeliver`, or `Backlog`, the system automatically inserts a new row into the Trips log for the following business day using these parameters:
+When a trip changes to `Foul Trip - For Redeliver`, `Redeliver` or `Backlog`, the server inserts a new trip and its helpers in one batch:
 
-* Trip Date \= Next business day
-* Billing Date \= Preserves the original initiating trip's Billing Date
-* Parent Trip ID \= Links back to the original trip's ID
-* Source \= Carry-over
-* Trip Status \= Scheduled, or Prepping for a `Backlog` carry-over (it still needs a crew, and gets no suggested waybill)
-* Waybill \= the parent trip's waybill number with `-R` or `-FT` appended, not a new number (see Redeliver and Foul Trip Numbering under Sheet 10\)
+- `trip_date` = the next business day
+- `billing_date` = the parent's billing date
+- `parent_trip_id` = the parent's ID
+- `source` = `Carry-over`
+- `trip_status` = `Scheduled`, or `Prepping` for a `Backlog` carry-over (it still needs a crew and gets no waybill)
+- waybill = the parent's number with `-R` or `-FT`, not a new number (see the waybills section)
 
-### **Sheet 9: Route Frequency Log**
+### route_frequency_log
 
-An append-only table recording the driver-outlet assignments that were actually scheduled. It acts as the data source for real-time compliance alerts regarding driver delivery frequencies.
-
-A trip is logged when it **leaves Prepping** — via `markDayScheduled`, a manual status change, or creation at a status other than Prepping (manual trips and carry-overs, which are born Scheduled). Imported trips log nothing at import: their crew comes from the truck's default assignment and the dispatcher reshuffles it freely during Prepping, so logging then would credit drivers for trips they never took. Reassigning the driver of an already-scheduled trip appends another row.
+Append-only. One row each time a driver is scheduled to an outlet. It feeds the driver-frequency warning.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Trip ID | Number | Foreign Key → Trips.ID |
-| Trip Date | Date | Denormalized date field to support high-speed query indexing |
-| Driver ID | Number | Foreign Key → Employees.ID |
-| Outlet ID | Number | Foreign Key → Outlets.ID |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| trip_id | INTEGER FK → trips | The date comes from this join |
+| driver_id | INTEGER FK → employees | |
+| outlet_id | INTEGER FK → outlets | |
 
-**Validation Logic:** At the moment of assignment, the system counts entries within this ledger. If a specific Driver-Outlet combination occurs more than **5 times within a rolling 21-day window**, the user interface generates a compliance warning.
+A trip is logged when it **leaves Prepping**: through `markDayScheduled`, a manual status change, or creation at another status (manual trips and carry-overs). The import logs nothing, because the crew during Prepping is only the roster default and the dispatcher still changes it. A driver change on a scheduled trip appends another row.
 
-## **Group 4: Waybills**
+**Warning rule:** more than **5** rows for one driver and outlet in the **last 21 days** shows a warning in the UI.
 
-### **Sheet 10: Waybills**
+## Group 4: Waybills
 
-Tracks system-generated billing numbers. Once a record is finalized by operational staff (Locked \= TRUE), it becomes immutable within the workspace UI; any subsequent amendments can only be executed via structural audit overrides.
+### waybills
 
-| Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Waybill Number | String | Formatted serial number string (e.g., AY-10761, AY-10761-R, AY-10761-FT) |
-| Prefix ID | Number | Foreign Key → Waybill Prefixes.ID |
-| Sequence Number | Number | Raw numeric element used for sorting and ensuring uniqueness |
-| Trip ID | Number | Foreign Key → Trips.ID |
-| FO Number | String | Denormalized freight number for accelerated lookups |
-| Waybill Type | String | Categories: Regular, Redeliver (-R), Foul Trip (-FT) |
-| Parent Waybill ID | Number | Foreign Key → Waybills.ID. Links alternative types back to the initial regular waybill |
-| Status | String | Lifecycle stage: Suggested or Confirmed |
-| Locked | Boolean | TRUE blocks standard interface modifications. The backend rejects direct writes to locked rows |
-| Confirmed By | String | Email address of the user finalizing the transaction |
-| Confirmed At | DateTime | Finalization timestamp |
-
-#### **Document Generation Logic**
-
-1. Upon trip registration, the application evaluates the Last Sequence Number for the active prefix within Waybill Prefixes. For manual trips this happens at creation; for imported trips it happens when the dispatcher promotes the day out of Prepping (markDayScheduled) or promotes an individual trip to Scheduled from the dispatch board (which prompts for the prefix) — one waybill per truck load, so trips sharing a Trip Date, FO Number and Truck ID share a number, and a stop promoted after its load joins the load's existing Suggested number.  
-2. The index increments by 1, rendering a new entry in Waybills marked as Status \= Suggested and Locked \= FALSE, and the prefix's Last Sequence Number advances — **the suggestion reserves the number**, so the next suggestion cannot collide with it.  
-3. Dispatch staff review the layout inside the UI and retain the option to manually alter the number string.  
-4. If changed, the application verifies the registry; if the manually entered string matches an existing record marked Confirmed, the system rejects the input with a validation error.  
-5. Upon confirmation, the parameters shift to Status \= Confirmed and Locked \= TRUE, while updating the master index tracking entry inside Waybill Prefixes.
-
-#### **Redeliver and Foul Trip Numbering**
-
-A carry-over waybill does **not** take a new number. Rebisco requires the redelivered load to keep the original: waybill AY-10761 redelivered is AY-10761-R, and foul is AY-10761-FT. The carry-over row therefore copies the parent waybill's Prefix ID, Sequence Number and number base, appends the suffix, and leaves Last Sequence Number untouched — the sequence was already spent when the parent was issued.
-
-Two rows then hold the same Sequence Number for one prefix (AY-10761 and AY-10761-R). This is correct. The system reads the highest Sequence Number in the ledger, which still reports 10761, so the next Regular waybill is 10762.
-
-A carry-over of a carry-over keeps one suffix: the system strips a trailing -R or -FT off the parent number before it appends the new one, so the number stays AY-10761-R and never grows to AY-10761-R-R.
-
-## **Group 5: Billing**
-
-### **Sheet 14: Freight Rates**
-
-The DOE rate matrix. One row holds every price band for a single origin, area and truck type. A rate revision appends a new block with a later Effective Date; the lookup takes the newest Effective Date on or before the trip's Billing Date, so a past billing never re-prices.
+One row per **load**: the trips that share one number on one FO. The trips point at it through `trips.waybill_id`.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Origin | String | The Rebisco warehouse this rate sheet belongs to (e.g., `TANZA`) |
-| Area | String | Destination city or municipality (e.g., `Calamba`). Matched case- and punctuation-insensitively |
-| Truck Type | String | Billing category the rate applies to: `6W`, `4W`, `L300` |
-| Effective Date | Date | First date this rate block applies |
-| 30.01-35 … 150.01-155 | Number | 25 diesel-price band columns, each 5 pesos wide. The header string is the band range; the source workbook labels the same column by its midpoint (32.5 … 152.5) |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| waybill_number | TEXT (nocase, indexed) | e.g. `AY-10761`, `AY-10761-R`. **Not unique**: a hand-typed number can land on two loads, and each load bills on its own |
+| prefix_id | INTEGER FK → waybill_prefixes | |
+| sequence_number | INTEGER | The numeric part |
+| waybill_type | TEXT | CHECK: `Regular`, `Redeliver`, `Foul Trip` |
+| parent_waybill_id | INTEGER FK → waybills | A `-R`/`-FT` waybill points at the original |
+| status | TEXT | CHECK: `Suggested`, `Confirmed`. `Confirmed` is locked: the server refuses to change it |
+| confirmed_by, confirmed_at | TEXT | Email and timestamp of confirmation |
 
-#### **Band Indexing**
+The FO number comes from the trips join. v1's `Locked` column is gone: locked means `status = 'Confirmed'`.
 
-The band index is `clamp(ceil((price − 30) / 5), 1, 25)`. A price at or below ₱30.00 clamps to the first band and a price above ₱155.00 clamps to the last, so a rate lookup can never fall off the matrix.
+#### Number generation
 
-### **Sheet 15: Fuel Prices**
+1. A manual trip gets a waybill at creation. An imported trip gets one when the day leaves Prepping (`markDayScheduled`), or when the dispatcher schedules one trip from the board. Trips that share a trip date, FO number and truck share one waybill. A stop scheduled after its load joins the load's existing Suggested waybill.
+2. **Suggestion reserves the number.** `_reserveWaybillSequence` runs one `UPDATE … RETURNING` that sets `last_sequence_number` to `max(counter, highest sequence_number in waybills) + n`. D1 runs writes one at a time, so two requests can never get the same number. The number is spent before the waybill row exists.
+3. The dispatcher can type a different number.
+4. A typed number that matches another Confirmed waybill is refused.
+5. Confirmation sets `status = 'Confirmed'` and moves the counter forward only when the typed number is higher.
 
-History of the Quezon City diesel "Common Price" published weekly by the DOE for NCR. The DOE posts a PDF only, so the price is entered by hand.
+#### Redeliver and foul-trip numbering
 
-The DOE posts on a Monday and each posting runs Tuesday to the following Monday, so an Effective Date is a Tuesday. A non-Tuesday date is accepted after a confirmation, because a mid-week special adjustment does happen. A row can be corrected or removed from the Billing Matrix panel; the Audit Log carries the trail of what changed.
+A carry-over waybill does **not** take a new number. Rebisco wants the redelivered load to keep the original: AY-10761 becomes AY-10761-R, or AY-10761-FT for a foul trip. The new row copies the parent's prefix and sequence number, adds the suffix, and leaves the counter alone.
 
-| Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Effective Date | Date | First date this price applies — normally a Tuesday |
-| Diesel Price | Number | Peso price per liter, e.g. `67.00` |
-| Added By | String | Email address of the user who entered the price |
-| Added At | DateTime | Creation timestamp |
+So two rows can hold sequence 10761 for one prefix. That is correct: the highest sequence is still 10761, and the next Regular waybill is 10762.
 
-### **Sheet 16: Billing Charge Types**
+A carry-over of a carry-over keeps one suffix. The server strips a trailing `-R` or `-FT` before it adds the new one, so the number never grows to `AY-10761-R-R`.
 
-The manually entered money columns on the billing output. Adding a row adds a column to the Billing panel; deactivating one removes it without touching history.
+## Group 5: Billing
 
-| Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Label | String | Column heading as it prints, e.g. `Parking Fee/Toll Fees` |
-| Sort Order | Number | Left-to-right column order; Nullable (blank sorts last) |
-| Active | Boolean | Inactive types stay out of new billings but keep old amounts readable |
+### freight_rates
 
-#### **Initial seed:**
-
-* Parking Fee/Toll Fees
-* Packing Tape
-* Bad Orders @5.00 / Bx
-
-### **Sheet 17: Billing Lines**
-
-One row for each billable waybill. The row is created the first time a billing range is opened and holds every value the printed billing shows, so the output is reproducible after rates, fees or trip records change.
+The DOE rate matrix in long format: **one row per band**. A rate revision inserts a new block with a later `effective_date`. The lookup takes the newest block on or before the trip's billing date, so a past billing never re-prices.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Waybill Number | String | The billable unit. Matches Waybills.Waybill Number |
-| Waybill ID | Number | Foreign Key → Waybills.ID of the first row of the load |
-| Trip Date | Date | The day the load was delivered. This is the DATE the billing prints |
-| Billing Date | Date | The original operational date. Selects the fuel price and the rate block |
-| Origin | String | Snapshot of Trips.Origin; selects the Freight Rates sheet |
-| Plate Number | String | Snapshot of the dispatched truck's plate |
-| FO Number | String | Client Freight Order identifier |
-| Truck Type | String | Snapshot of Trips.Truck Billing Category |
-| Area | String | The drop that priced the load — the highest-rate area of the load, not the first |
-| Drops | Number | Count of trip rows under this waybill |
-| Cartons | Number | Sum of Quantity over those trip rows |
-| Diesel Price | Number | Snapshot of the price that selected the band |
-| Rate Band | String | Snapshot of the band column used, e.g. `65.01-70` |
-| Hauling Rate | Number | The matrix rate for Origin, Area, Truck Type and band |
-| Mano | Number | One MANO\_FEE for each full 100 cartons at one store, summed over drops |
-| Drop Fee | Number | DROP\_FEE when the load has 3 or more drops, otherwise 0 |
-| Manual Charges | String | JSON object keyed by Billing Charge Types.ID, e.g. `{"1":250,"3":75}`; Nullable |
-| Total | Number | Hauling Rate \+ Mano \+ Drop Fee \+ every manual charge. Computed by the server and never client-editable |
-| Billing Number | String | The Rebisco billing document this line was submitted on; Nullable until billed |
-| Status | String | `Not Billed`, `Billed`, or `Deferred` |
-| Overrides | String | JSON array of the computed fields the user typed over, e.g. `["haulingRate"]`. A recompute skips these; Nullable |
-| Notes | String | Free-form commentary; Nullable |
-| Added By | String | Email address of the user whose session created the line |
-| Added At | DateTime | Creation timestamp |
-| Updated By | String | Email address of the user who last edited the line; Nullable |
-| Updated At | DateTime | Timestamp of the latest edit; Nullable |
+| :-- | :-- | :-- |
+| id | INTEGER PK | The client sees the lowest ID of a block; any band row's ID resolves the block |
+| origin | TEXT | Rebisco warehouse, e.g. `TANZA` |
+| area | TEXT | Destination as the workbook spells it |
+| area_key | TEXT (indexed) | `_normArea(area)`: case- and punctuation-free, for matching |
+| truck_type | TEXT | `6W`, `4W`, `L300` |
+| effective_date | TEXT date | First day the block applies |
+| band | INTEGER 1–25 | Diesel price band |
+| rate | REAL | Pesos. A band with no rate has no row |
 
-#### **Line Eligibility**
+`UNIQUE (origin, area, truck_type, effective_date, band)`. The key is the raw area, because the DOE workbook names different towns the same ("San Juan" and "SAN JUAN"). The lookup matches on `area_key`, so the first block wins, as in v1. `getFreightRates()` rebuilds the wide grid for the Billing Matrix panel.
 
-A waybill becomes a billing line when it is Confirmed (Locked \= TRUE) and its trips are Delivered. A line set to Deferred drops out of the current billing and stays eligible for a later one.
+#### Band indexing
 
-#### **Split-Load Area Rule**
+Band = `clamp(ceil((price − 30) / 5), 1, 25)`. Band 1 is `30.01-35`, band 25 is `150.01-155`. A price at or below ₱30 uses band 1 and a price above ₱155 uses band 25, so a lookup never falls off the matrix. `_fuelBandLabel()` in `server/internals.js` and `FUEL_BANDS` in `web/billing-matrix.js` must name the bands the same way.
 
-A load with drops in more than one area bills at the **highest** rate among those drops, and prints that drop's area. Rebisco pays the farthest point of the route, not the first.
+### fuel_prices
 
-#### **Billing Totals**
+The Quezon City diesel "Common Price" the DOE posts weekly for NCR. The DOE posts a PDF only, so a person types the price.
 
-The footer derives from the sum of the Total column, which is VAT inclusive:
+A posting runs Tuesday to the next Monday, so an effective date is normally a Tuesday. A non-Tuesday date is accepted after a confirmation, for a mid-week adjustment. The Billing Matrix panel can correct or remove a row; the Audit Log keeps the trail.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| effective_date | TEXT date, unique | |
+| diesel_price | REAL | Pesos per liter |
+| added_by, added_at | TEXT | |
+
+### billing_charge_types
+
+The manual money columns on the billing. A new row adds a column to the Billing panel. Deactivating a row removes the column and keeps history.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| label | TEXT, unique (nocase) | Column heading as it prints |
+| sort_order | INTEGER | Left-to-right order; null sorts last |
+| active | INTEGER 0/1 | |
+
+**Seed:** Parking Fee/Toll Fees, Packing Tape, Bad Orders @5.00 / Bx.
+
+### billing_lines
+
+One row per billable waybill. The server creates it the first time a billing range includes the waybill. It holds every value the printed billing shows, so the output stays the same after rates, fees or trips change.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| waybill_id | INTEGER FK → waybills, unique | The billable unit. The number comes from this join |
+| trip_date | TEXT date | The day the load was delivered; the DATE the billing prints |
+| billing_date | TEXT date | Selects the fuel price and the rate block |
+| origin | TEXT | Snapshot of `trips.origin` |
+| plate_number | TEXT | Snapshot of the truck plate |
+| fo_number | TEXT | |
+| truck_type | TEXT | Snapshot of `trips.truck_billing_category` |
+| area | TEXT | The area that priced the load: the highest-rate drop, not the first |
+| drops | INTEGER | Trips under the waybill |
+| cartons | INTEGER | Sum of `quantity` |
+| diesel_price | REAL | Snapshot of the price that selected the band |
+| rate_band | INTEGER | Band index; the client gets the label |
+| hauling_rate | REAL | Matrix rate for origin, area, truck type and band |
+| mano | REAL | One `MANO_FEE` for each full 100 cartons at one store, summed over drops |
+| drop_fee | REAL | `DROP_FEE` when the load has 3 or more drops, else 0 |
+| total | REAL | Hauling rate + mano + drop fee + every manual charge. The server computes it; the client cannot write it |
+| billing_number | TEXT | The Rebisco billing document; null until billed |
+| status | TEXT | CHECK: `Not Billed`, `Billed`, `Deferred` |
+| overrides | TEXT | JSON array of the computed fields a user typed over, e.g. `["haulingRate"]`. A recompute skips them |
+| notes | TEXT | |
+| added_by, added_at, updated_by, updated_at | TEXT | |
+
+A unique `waybill_id` plus `ON CONFLICT` means two users opening the same range at once create one line, not two. A line save writes the line and its charges in one batch.
+
+### billing_line_charges
+
+The manual charges of a line. Readers rebuild the client's `manualCharges` object (`{"1":250,"3":75}`) from these rows.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| billing_line_id | INTEGER FK → billing_lines | Cascades on line delete |
+| charge_type_id | INTEGER FK → billing_charge_types | |
+| amount | REAL | PK is `(billing_line_id, charge_type_id)` |
+
+#### Line eligibility
+
+A waybill becomes a billing line when it is Confirmed and its trips are Delivered. A Deferred line leaves the current billing and stays eligible for a later one.
+
+#### Split-load area rule
+
+A load with drops in more than one area bills at the **highest** rate among those drops and prints that drop's area. Rebisco pays for the farthest point, not the first.
+
+#### Billing totals
+
+The footer comes from the sum of `total`, which includes VAT:
 
 ```
-totalVatInc = sum of Total
+totalVatInc = sum of total
 lessVat     = totalVatInc / 1.12 × 12%
 netOfVat    = totalVatInc − lessVat
 addVat      = netOfVat × 12%
@@ -422,95 +422,87 @@ withholding = netOfVat × 2%
 amountDue   = totalVatInc − withholding
 ```
 
-## **Group 6: Audit**
+## Group 6: Audit
 
-### **Sheet 11: Audit Log**
+### audit_log
 
-The global ledger recording all administrative, operational, and data state modifications across the entire environment.
+Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (many rows, one round trip) run after the change, are best-effort, and never throw.
 
 | Column | Type | Notes |
-| :---- | :---- | :---- |
-| ID | Number | Auto-incrementing primary key |
-| Timestamp | DateTime | Precise moment the change occurred |
-| User | String | Email address of the account executing the change |
-| Action | String | Standardized action vocabulary token |
-| Detail | String | Human-readable explanation of the operational event |
-| Table | String | Target worksheet affected by the transaction (e.g., Trips, Waybills) |
-| Row ID | Number | Unique row identifier inside the target sheet |
-| Old Value | String | Previous data state, stored as a JSON string for multi-column changes |
-| New Value | String | Revised data state, stored as a JSON string for multi-column changes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| ts | TEXT timestamp (indexed) | |
+| user_email | TEXT | The request's verified email |
+| action | TEXT | A token from the vocabulary below |
+| detail | TEXT | Readable description |
+| table_name | TEXT | SQL table name (`trips`, `waybills`). v1 rows imported from Sheets keep the sheet name (`Trips`) |
+| row_id | INTEGER | Row ID in that table |
+| old_value, new_value | TEXT | Previous and new value; JSON for multi-column changes |
 
-#### **System Action Vocabulary**
+#### Action vocabulary
 
-* TRIP\_CREATE — Registration of a new delivery record  
-* TRIP\_STATUS\_CHANGE — Modifications to an active trip's state  
-* TRIP\_REASSIGN — Changes made to a trip's driver or vehicle allocation  
-* TRIP\_CONVOY\_CHANGE — Grouping or ungrouping trips as a convoy (Old\New Value = the Convoy Group token)  
-* WAYBILL\_SUGGEST — Draft creation of a billing document sequence  
-* WAYBILL\_CONFIRM — Locking and finalizing a waybill sequence  
-* WAYBILL\_OVERRIDE — Manual adjustment of a system-suggested waybill number  
-* OUTLET\_CREATE — Auto-populating a new destination via route file import  
-* OUTLET\_EDIT — Administrative updates to existing outlet records  
-* DEFAULT\_ASSIGN\_CHANGE — Adjustments to a vehicle's standard crew configuration  
-* TRUCK\_CREATE — New vehicle added to the Trucks master record  
-* TRUCK\_EDIT — Administrative updates to an existing truck record (including Active/Inactive toggling and Billing Category changes)  
-* EMPLOYEE\_CREATE — New personnel added to the Employees master record  
-* EMPLOYEE\_EDIT — Administrative updates to an existing employee record (including Active/Inactive toggling)  
-* BILLING\_CATEGORY\_CREATE — New entry added to the Billing Categories list  
-* BILLING\_CATEGORY\_EDIT — Administrative updates to a billing category (rename, Active/Inactive toggling)  
-* ROUTE\_TYPE\_MAP\_CREATE — New route-file truck-type → billing-category mapping added  
-* ROUTE\_TYPE\_MAP\_EDIT — Administrative updates to a route type mapping (code, category, Active/Inactive toggling)  
-* CG\_COLOR\_EDIT — A customer group's dispatch-board color was set or cleared (New Value = "GROUP → #hex" or "GROUP → (cleared)")  
-* WAYBILL\_PREFIX\_CREATE — New prefix added to the Waybill Prefixes list  
-* WAYBILL\_PREFIX\_EDIT — Updates to a waybill prefix (prefix code, company name, re-basing the Last Sequence Number, Active/Inactive toggling)
-* USER\_CREATE — New account added to the Users access list
-* USER\_EDIT — Administrative updates to a user account (email, display name, role, Active/Inactive toggling)
-* LOGIN — A verified Google sign-in opened a session (Table = Users, New Value = the account's email)
-* FREIGHT\_RATE\_IMPORT — A rate block was seeded from a rates workbook (Table \= Freight Rates, New Value \= "ORIGIN → n rows effective M/d/yyyy")
-* FREIGHT\_RATE\_EDIT — A single rate cell was changed in the Billing Matrix panel
-* FUEL\_PRICE\_ADD — A weekly DOE diesel price was entered (New Value \= "price effective M/d/yyyy")
-* FUEL\_PRICE\_EDIT — A recorded diesel price or its effective date was corrected
-* FUEL\_PRICE\_DELETE — A recorded diesel price was removed (Old Value \= "price effective M/d/yyyy")
-* BILLING\_CHARGE\_TYPE\_CREATE — New manual money column added to the billing output
-* BILLING\_CHARGE\_TYPE\_EDIT — Updates to a manual money column (label, order, Active/Inactive toggling)
-* BILLING\_LINE\_CREATE — A billable waybill entered the billing ledger
-* BILLING\_LINE\_EDIT — Manual charges, an override, or notes were changed on a billing line
-* BILLING\_LINE\_STATUS\_CHANGE — A line was deferred to a later billing or brought back
-* BILLING\_NUMBER\_SET — A Rebisco billing number was stamped on a set of lines (New Value \= "BILLING# → n lines")
-* DATA\_CLEAR — An Admin wiped every transactional row of this environment from the Admin panel (Table blank, New Value = the list of cleared sheets). Written *after* the wipe, so it is the first row of the fresh Audit Log.
+- `TRIP_CREATE` — a trip was created (manual, import or carry-over)
+- `TRIP_STATUS_CHANGE` — a trip status changed
+- `TRIP_REASSIGN` — a trip's driver or truck changed
+- `TRIP_CONVOY_CHANGE` — trips were grouped or ungrouped as a convoy (values = the convoy token)
+- `TRIP_DELETE` — an imported trip was deleted
+- `WAYBILL_SUGGEST` — a waybill number was reserved as Suggested
+- `WAYBILL_CONFIRM` — a waybill was confirmed and locked
+- `WAYBILL_OVERRIDE` — a user changed a suggested number
+- `OUTLET_CREATE` — an outlet was added (import or Admin)
+- `OUTLET_EDIT` — an outlet was edited
+- `DEFAULT_ASSIGN_CHANGE` — a truck's roster crew changed (table `trucks`)
+- `TRUCK_CREATE`, `TRUCK_EDIT` — a truck was added or edited (including active and category)
+- `EMPLOYEE_CREATE`, `EMPLOYEE_EDIT` — an employee was added or edited
+- `BILLING_CATEGORY_CREATE`, `BILLING_CATEGORY_EDIT` — a billing category was added, renamed or toggled
+- `ROUTE_TYPE_MAP_CREATE`, `ROUTE_TYPE_MAP_EDIT` — a route type mapping was added or edited
+- `CG_COLOR_EDIT` — a customer group color was set or cleared (new value = `GROUP → #hex` or `GROUP → (cleared)`)
+- `WAYBILL_PREFIX_CREATE`, `WAYBILL_PREFIX_EDIT` — a prefix was added or edited (code, company, re-base, active)
+- `USER_CREATE`, `USER_EDIT` — a user was added or edited
+- `LOGIN` — a verified Google sign-in opened a session (table `users`, new value = the email)
+- `FREIGHT_RATE_IMPORT` — a rate block was loaded from a workbook (new value = `ORIGIN → n rows effective M/d/yyyy`)
+- `FREIGHT_RATE_EDIT` — one rate cell changed in the Billing Matrix panel
+- `FUEL_PRICE_ADD` — a weekly diesel price was entered (new value = `price effective M/d/yyyy`)
+- `FUEL_PRICE_EDIT` — a diesel price or its date was corrected
+- `FUEL_PRICE_DELETE` — a diesel price was removed (old value = `price effective M/d/yyyy`)
+- `BILLING_CHARGE_TYPE_CREATE`, `BILLING_CHARGE_TYPE_EDIT` — a manual money column was added or edited
+- `BILLING_LINE_CREATE` — a billable waybill entered the ledger
+- `BILLING_LINE_EDIT` — manual charges, an override or notes changed on a line
+- `BILLING_LINE_STATUS_CHANGE` — a line was deferred or brought back
+- `BILLING_NUMBER_SET` — a Rebisco billing number was stamped on lines (new value = `BILLING# → n lines`)
+- `DATA_CLEAR` — an Admin wiped every transactional table from the Settings panel (table blank, new value = the cleared tables). It is written *after* the wipe, so it is the first row of the new log
 
-## **Structural Implementation Conventions**
+## Design rationale
 
-* **Sheet Names:** Title Case formatting incorporating spaces exactly as designated in the registry.  
-* **Header Configurations:** Row 1 contains headers using Title Case formatting with spaces, matching this document explicitly.  
-* **Boolean Formatting:** Evaluated natively inside cells as standard TRUE/FALSE parameters.  
-* **Temporal Records:** Complete date/time strings utilize "M/d/yyyy HH:mm:ss" formatting. Pure date records omit timestamps, using "M/d/yyyy".  
-* **Primary Identifiers (IDs):** Calculated dynamically using an auto-incrementing method ($Last\\ Row\\ ID \+ 1$), starting at row value 1\.  
-* **Relational Mappings (FKs):** Relational keys map strictly via numeric database ID values, rather than text string names.
+### Billing date is separate from trip date
 
-## **Technical Design Rationale**
+A carry-over gets the real calendar day as its trip date and keeps the original day as its billing date. Billing then uses the original day for the fuel price, the rate block and the billing period.
 
-### **Separation of Billing Date and Trip Date**
+### Helpers and charges are rows
 
-When delayed delivery statuses necessitate next-day carry-overs, the newly generated record uses the actual calendar date for its Trip Date. However, it preserves the original day's value as its Billing Date. This ensures that billing calculations consistently reference the original transaction date—maintaining correct fuel price indexing, operational periods, and sequential tracking.
+v1 stored helpers as a comma-separated ID string and manual charges as a JSON cell, because a sheet has no cheap sub-table. D1 has foreign keys, so helpers and charges are rows: an employee or charge type cannot be deleted while a row uses it, and a query can count them. The API contract did not change — readers rebuild `helperIds` and `manualCharges` in the v1 shape.
 
-### **Delimited Helper Records**
+### Billing classes are snapshots
 
-To handle fluid crew sizes (ranging from 0 to 3 helpers per vehicle) without adding the structural weight of relational sub-tables, helper identities are maintained as a comma-separated string of IDs. The application code handles parsing this string during operations.
+Dispatch stamps the truck's billing category onto the trip as text. A later category rename or truck edit then cannot change a past billing.
 
-### **Snapshotting Vehicle Billing Classes**
+### One waybill row per load
 
-Vehicle billing classifications are stamped directly onto individual trip lines when they are dispatched. This historical snapshot protects past financial summaries from altering if an administrator subsequently changes a truck's Billing Category or renames an entry in the Billing Categories list.
+v1 wrote one waybill row per trip and grouped rows by number. D1 keeps one row per load and points the trips at it. The load is then one thing that is confirmed, billed and carried over, and a stop added later joins it by reference.
 
-### **Route-File FO Grouping, Waybills & Truck Allocation**
+### No global lock
 
-A Rebisco route file lists one delivery drop per row, but a single Freight Order (FO) can span several rows (one truck, multiple stops) and/or request several trucks (split load, via counts in the per-type columns). On import the rows are grouped by FO:
+v1 serialized every writer behind the Apps Script lock, because two executions could read the same last row ID. D1 removes the cause: `INTEGER PRIMARY KEY` assigns IDs, `UPDATE … RETURNING` reserves waybill numbers atomically, `UNIQUE` constraints refuse duplicates, `db.batch()` makes multi-row writes atomic, and D1 runs writes one at a time per database.
 
-* **Truck type** comes from the per-type count column (10W/6WF/6WC/4WC/L300), **not** the Restrictions column — those are distinct fields. A continuation row with no type count rides the FO's truck and inherits its type.
-* **One waybill per truck.** The FO's primary truck visits every outlet row of the FO, and those trips share one waybill number ("same FO = same waybill", surfaced on the dispatch board as an alternating row shade). Each additional truck on the FO gets its own waybill number. Shared waybill rows carry the same Sequence Number, reserved once for the whole load: suggestion advances the prefix's Last Sequence Number, and a stop of the load suggested later (e.g. manually scheduled after the rest) joins the load's existing Suggested number instead of reserving a new one.
-* **Distribution without double-booking.** Trucks are drawn from the pool matching the resolved billing category, ordered by ID, skipping any already committed on that date. When the pool is exhausted the trip is left unassigned (with the required category recorded) rather than overloading one truck.
-* **Convoy detection from fill colors.** Rebisco highlights the truck-type count columns in alternating yellow/blue runs; each contiguous same-color run is one truck batch, and a run can span multiple FOs (trucks that must travel together because quantities are summed onto one FO's row). The importer reads only those columns' fills (the Customer column reuses the same palette for chain codes), treats a color change as a batch boundary, folds uncolored rows into the batch of a colored row sharing their FO, and persists batches needing ≥ 2 truck slots into `Trips.Convoy Group`. Tokens are numeric, unique within a Trip Date (re-imports offset by the date's existing maximum). Fill parsing is best-effort: if the library or colors are absent, the import proceeds with no groups.
+### Route-file FO grouping, waybills and truck allocation
 
-### **Independent Route Frequency Tracking**
+A Rebisco route file has one drop per row. One Freight Order (FO) can span several rows (one truck, several stops) and can ask for several trucks (a split load, through counts in the type columns). The import groups rows by FO:
 
-Relying on live spreadsheet formulas (FILTER or SORT) across large date boundaries degrades sheet responsiveness over time. Offloading these interactions to an append-only transaction sheet allows the system to evaluate driver assignment thresholds using simple count queries over a rolling 21-day timeline.
+- **Truck type** comes from the type count columns (10W/6WF/6WC/4WC/L300), **not** the Restrictions column. A continuation row with no count rides the FO's truck and takes its type.
+- **One waybill per truck.** The FO's first truck visits every outlet row of the FO, and those trips share one waybill. Each extra truck gets its own waybill.
+- **No double-booking.** Trucks come from the pool of the resolved category, in ID order, skipping trucks already used on that date. When the pool runs out, the trip stays unassigned with its category recorded.
+- **Convoys from fill colors.** Rebisco highlights the type count columns in alternating yellow and blue runs. Each run is one truck batch and can span several FOs. The importer reads only those columns' fills, starts a batch at each color change, folds uncolored rows into the batch of a colored row with the same FO, and stores batches that need 2 or more trucks in `trips.convoy_group`. Tokens are numbers, unique within a trip date (a re-import starts past the date's highest token). If the fills are missing, the import runs with no groups.
+
+### Route frequency is its own table
+
+The driver-frequency warning needs a count over 21 days. An append-only table with an index on `(driver_id, outlet_id)` answers that with one small query, and a later trip edit cannot rewrite the history of who drove where.

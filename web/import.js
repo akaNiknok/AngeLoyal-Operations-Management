@@ -432,7 +432,7 @@
              * A file row is not a drop: importRouteFile groups rows by FO, sends the
              * FO’s first truck round every one of its rows, and adds one more drop
              * for each extra truck the FO asks for (a split load, e.g. "2×L300").
-             * Mirrors the grouping in importRouteFile (DataWriters.gs) — keep in step.
+             * Mirrors the grouping in importRouteFile (server/writers/import.js) — keep in step.
              */
             function dropCount(rows) {
                 const byFO = new Map();

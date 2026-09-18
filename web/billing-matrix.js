@@ -5,7 +5,7 @@
             // ══════════════════════════════════════════════════════════
 
             // The 25 diesel price bands, mirrored from _fuelBandLabel() in
-            // Internals.gs. Both sides must name a band the same way or a
+            // server/internals.js. Both sides must name a band the same way or a
             // rate edit writes to a column the server does not know.
             const FUEL_BANDS = Array.from(
                 { length: 25 },
