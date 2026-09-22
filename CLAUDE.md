@@ -25,49 +25,9 @@ The GitHub Project board is the backlog source of truth: `gh issue list --json n
 
 ## Architecture
 
-### Backend (`server/`, Cloudflare Pages Functions, D1)
+The backend lives in `server/` and the frontend in `web/`. Each folder has its own `CLAUDE.md` with file-level gotchas; it loads when you work there.
 
 ESM modules (`server/package.json` sets `"type": "module"`; the repo root stays CommonJS). [`functions/api.js`](functions/api.js) is the only route. Pages reads `functions/` at the repo root, next to the `web/` output directory.
-
-| File | Responsibility |
-| :--- | :--- |
-| `functions/api.js` | `onRequestPost` at `/api`. Opens the request context, then calls `login` or `rpc`. Never throws: every failure returns `{ok:false, error}`. |
-| `server/ctx.js` | `AsyncLocalStorage` request context: `db()`, `currentEmail()`, `clientId()`, `fetchImpl()`, `runWith()`. **The only holder of per-request state** — a module-level global is shared across requests in a Worker isolate and would mis-attribute RBAC and audit rows. |
-| `server/db.js` | D1 helpers: `stmt`, `q`, `one`, `run`, `batch`, plus the date vocabulary (`nowPH`, `todayPH`, `toClientDate`, `fromClientDate`…). **Reuse these. Do not call `db().prepare` by hand.** |
-| `server/auth.js` | Google sign-in and sessions. `login(idToken)` is the one pre-session action: `_verifyIdToken` checks the token against Google's tokeninfo endpoint (**never a local decode**), then inserts a row in `sessions` (12 h). Every other call goes through **`rpc(sessionToken, fnName, args)`**, its `RPC_ALLOWED` list and the `FNS` registry. |
-| `server/rbac.js` | `ROLES`, `PERMISSIONS`, `currentUser`, `hasPermission`, `requirePermission`, `getUserSession` (all async). |
-| `server/readers.js` | Read-only accessors, and the row mappers writers reuse for read-back (`tripFromRow`, `waybillFromRow`, `billingLineFromRow`). `getBootData()` returns all master data in one round trip. Readers rebuild the v1 shapes (`helperIds`, `manualCharges`, the rate grid) from the normalized tables. |
-| `server/internals.js` | Shared private helpers: `_auditLog`/`_auditLogBatch`, areas and fuel bands (`_normArea`, `_fuelBandLabel`), `_rateFor`, `_computeBillingLine`, `nextBusinessDay`, billing constants. |
-| `server/writers/trips.js` | Trip writers and the carry-over spawn. |
-| `server/writers/waybills.js` | Waybill suggestion, sequence reservation, confirmation, prefixes. |
-| `server/writers/import.js` | `importRouteFile` and outlet resolve-or-create. |
-| `server/writers/masters.js` | Outlets, trucks, employees, users, categories, route map, colors, the truck roster, charge types, `clearAllData`. |
-| `server/writers/billing.js` | Billing lines, billing numbers, the freight-rate matrix, fuel prices. |
-| `server/migrate/transform.js` | Sheet snapshot JSON → table rows. Used by `scripts/sheets-to-d1.mjs` and the test harness. Remove the Sheets import path after the v2.0.0 cutover. |
-| `migrations/` | Numbered SQL files applied by `wrangler d1 migrations apply`. `0001_init.sql` is the schema, `0002_seed.sql` the defaults. |
-
-### Frontend (`web/`, static site on Cloudflare Pages)
-
-`web/index.html` loads the scripts in dependency order — that is the whole build. No bundler, no framework, no router. `switchPanel()` toggles `.panel` visibility and state lives in module-level globals in `web/core.js`.
-
-| File | Responsibility |
-| :--- | :--- |
-| `index.html` | Shell: markup, nav, script and style tags. |
-| `config.js` | Environment label by hostname (prod / dev / local), `API_URL = "/api"`, `OAUTH_CLIENT_ID`. An unknown host is "local", never prod. |
-| `styles.css` | All CSS (DM Sans/DM Mono, design tokens). |
-| `core.js` | Global state (`employees`, `trucks`, `dispatchData`), `bootApp()`, the `call()`/`callBackend()` transport, GIS sign-in, RBAC UI gating, panel switching, shared utilities. `toastError` handles rejections; `bgSave()` wraps optimistic saves. |
-| `dispatch.js` | The dispatch board — the primary screen. |
-| `export.js` | Client-only exports of a dispatch day: FINAL-ROUTE print/xlsx and per-truck `.jpg` driver cards. |
-| `crewboard.js` | Crew rail: draggable crew cards dropped onto dispatch rows. |
-| `import.js` | Rebisco `.xlsx` route-file parsing and import. |
-| `roster.js` | Truck roster (driver/helper ↔ truck) and the Outlets admin. |
-| `masters.js` | Admin master-detail panels, the Waybill Prefixes panel (Admin **and** Dispatcher, gated by `EDIT_WAYBILL_PREFIXES`), and the Settings danger zone — an Admin-only `clearAllData()` behind a typed confirmation phrase, scoped to the current environment. |
-| `billing.js` | The Billing panel: one row per billable waybill over a date range, filtered by status, origin and subcon (the waybill prefix). Mano, the drop fee and the hauling rate compute but can be typed over; totals never can. Prints the Rebisco billing format through `export.js`'s `printHtmlDocument`. |
-| `billing-matrix.js` | The Billing Matrix panel: the rate grid for one origin across the 25 diesel bands, the weekly diesel price entry, and the `.xlsx` seed that loads a rates workbook one sheet per origin. `FUEL_BANDS` here must name the bands exactly as `_fuelBandLabel()` does in `server/internals.js`. |
-| `audit.js` | The Audit Log panel: one page of `audit_log`, Admin-only. Every read sends a date range and pages through the rest — the log only grows. |
-| `whatsnew.js` + `changelog.json` | The "What's new?" dialog. `npm run changelog:sync -- --apply` generates the JSON from GitHub Releases, because the repo is private. |
-| `vendor/` | ExcelJS and html2canvas, pinned and self-hosted so the CSP can refuse every third-party script. ExcelJS is the only spreadsheet library. |
-| `_headers` | Cloudflare Pages response headers: CSP, `X-Frame-Options: DENY`, nosniff. |
 
 The public launcher page is a plain redirect and lives in the separate `angeloyal-oms-launcher` repo, which is its only copy. It is the link the operators keep after the Cloudflare handover. Read [DEPLOY.md](DEPLOY.md#the-account-launcher-page) before you touch it.
 
@@ -75,9 +35,6 @@ The public launcher page is a plain redirect and lives in the separate `angeloya
 
 1. The GIS button posts a Google ID token to `/api` as `{fn:"login", idToken}`. The server verifies it, returns an app session token, and `core.js` keeps it in `localStorage`.
 2. `call(fnName, ...args)` POSTs `{token, fn, args}` to `/api` → `rpc()`, and returns a promise. It absorbs `AUTH_REQUIRED` centrally, so call sites handle only real failures. `rpc` resolves the session and runs the function with the session email in the request context.
-3. `getBootData()` returns the session and all master data — or the session alone when the verified user has no role.
-4. The board calls `getDispatchBoardData(date)`. Display names come from cached master data through `indexById()`; the server does not re-send them.
-5. Writes go through `server/writers/*.js`, which check permissions, write, and append to the Audit Log.
 
 ## Critical constraints
 
@@ -91,7 +48,6 @@ The public launcher page is a plain redirect and lives in the separate `angeloya
 - **Snapshotting**: dispatch stamps `truck_billing_category` onto the trip, so a later category rename does not re-price history.
 - **Helpers and manual charges are rows** (`trip_helpers`, `truck_default_helpers`, `billing_line_charges`). Readers rebuild the client's `helperIds` string and `manualCharges` object.
 - **Append-only logs**: `audit_log` and `route_frequency_log`. Do not mutate a prior row. Derive current state from the latest row.
-- **Reading .xlsx cells** goes through `cellValue()` in `web/import.js`. Read a formula cell as `cell.result`, **not** `cell.value.result`: ExcelJS drops `result` when the cached number is 0, and the route file's TOTAL is a shared `SUM` that is 0 for every FO in a convoy. Lost zeros give each of those FOs its own truck.
 - **Waybills**: one row per load; trips point at it through `trips.waybill_id`. `Suggested` → `Confirmed` (immutable). Suggestion reserves the number; confirmation moves the counter again only for a higher custom number. Suffixes: `-R` redeliver, `-FT` foul trip. `waybill_number` is not unique.
 - **Waybill numbering is atomic.** `_reserveWaybillSequence` is one `UPDATE … RETURNING` past `max(counter, highest sequence in waybills)`, run before the waybill row exists. `last_sequence_number` is a plain number and the pad width is `sequence_width`. Inferring the width from padded text is what froze the `AY` and `GL` booklets in v1.
 - **Concurrency without a lock.** The board fires saves in parallel (`bgSave`). D1 runs writes one at a time per database, but a read-then-write across two statements can still race. Use a constraint (`UNIQUE`, `ON CONFLICT`), an `UPDATE … RETURNING`, or one `batch()` — never read a max and write max + 1. Multi-row writes go in one `batch()`, which is atomic.
