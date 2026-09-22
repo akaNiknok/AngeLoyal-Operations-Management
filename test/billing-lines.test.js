@@ -309,6 +309,21 @@ test('opening the same range twice creates no second line', async () => {
   assert.equal(dump(db, 'billing_lines').length, 1);
 });
 
+test('a second open of an unchanged range writes no row', async () => {
+  // Every index entry counts against the daily row-write budget, so a panel
+  // that recomputes to the same numbers must not write them back.
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api, db } = await seeded(s);
+  await api.getBillingLines(DAY, DAY);
+
+  const sqls = [];
+  const prepare = db.prepare.bind(db);
+  db.prepare = (sql) => { sqls.push(sql); return prepare(sql); };
+  await api.getBillingLines(DAY, DAY);
+
+  assert.deepEqual(sqls.filter((q) => /^UPDATE billing_lines/.test(q)), []);
+});
+
 test('a refresh picks up a rate correction on a line nobody overrode', async () => {
   const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
   const admin = await seeded(s);

@@ -110,6 +110,61 @@ export async function getUsers() {
 }
 
 /**
+ * One page of the audit log, newest first. The log is append-only and grows
+ * without limit, so a page is always bounded by a date range AND a row cap:
+ * the range rides the `audit_ts` index, and ordering by ts reads that index
+ * back in reverse instead of sorting the whole table.
+ *
+ * `search` is one box over every readable column. A dropdown of the action
+ * vocabulary would need a DISTINCT scan of the whole log on every open.
+ *
+ * @param {{ from?: string, to?: string, search?: string, limit?: number, offset?: number }} [filters]
+ *        from/to are 'M/d/yyyy' and both ends are inclusive.
+ * @returns {Promise<{ entries: Array, hasMore: boolean }>}
+ */
+export async function getAuditLog(filters) {
+  await requirePermission('VIEW_AUDIT');
+  const f = filters || {};
+  const to = fromClientDate(f.to) || todayPH();
+  const from = fromClientDate(f.from) || addDays(to, -6);
+  const limit = Math.min(Math.max(Number(f.limit) || 200, 1), 500);
+  const offset = Math.max(Number(f.offset) || 0, 0);
+
+  const args = [from, addDays(to, 1)];
+  let where = `ts >= ? AND ts < ?`;
+  const search = String(f.search == null ? '' : f.search).trim();
+  if (search) {
+    const like = `%${search}%`;
+    where += ` AND (action LIKE ? OR table_name LIKE ? OR user_email LIKE ?
+                    OR detail LIKE ? OR old_value LIKE ? OR new_value LIKE ?)`;
+    args.push(like, like, like, like, like, like);
+  }
+
+  // One row past the page, so the client knows there is a next page without
+  // a second COUNT(*) over the range.
+  const rows = await q(
+    `SELECT * FROM audit_log WHERE ${where} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
+    ...args, limit + 1, offset,
+  );
+  const hasMore = rows.length > limit;
+
+  return {
+    entries: rows.slice(0, limit).map((r) => ({
+      id: r.id,
+      timestamp: toClientDateTime(r.ts),
+      userEmail: r.user_email || '',
+      action: r.action || '',
+      detail: r.detail || '',
+      tableName: r.table_name || '',
+      rowId: numOrNull(r.row_id),
+      oldValue: r.old_value == null ? '' : String(r.old_value),
+      newValue: r.new_value == null ? '' : String(r.new_value),
+    })),
+    hasMore,
+  };
+}
+
+/**
  * How the truck-type codes in a Rebisco route file (6WF, 6WC, 4WC) map to a
  * billing category. The category comes back as its NAME, as before.
  * @returns {Promise<Array<{ id, fileTypeCode, billingCategory, active }>>}
@@ -426,7 +481,7 @@ export async function getBillingChargeTypes() {
 export function billingLineFromRow(r, charges) {
   const manualCharges = {};
   (charges || []).forEach((c) => { manualCharges[c.charge_type_id] = Number(c.amount) || 0; });
-  return {
+  const line = {
     id: r.id,
     waybillNumber: String(r.waybill_number || ''),
     waybillId: numOrNull(r.waybill_id),
@@ -455,6 +510,10 @@ export function billingLineFromRow(r, charges) {
     updatedBy: r.updated_by || '',
     updatedAt: toClientDateTime(r.updated_at),
   };
+  // The stored row, so a writer can compare before it writes. Non-enumerable:
+  // JSON.stringify drops it, so the frozen client shape is unchanged.
+  Object.defineProperty(line, 'row', { value: r });
+  return line;
 }
 
 /** Stored billing lines by waybill id, in the client shape. */

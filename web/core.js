@@ -520,6 +520,7 @@
                 }
                 if (name === "billing") openBilling();
                 if (name === "billing-matrix") openBillingMatrix();
+                if (name === "audit") openAudit();
                 if (name === "settings") {
                     refreshUsers();
                     renderBillingCategoriesAdmin();

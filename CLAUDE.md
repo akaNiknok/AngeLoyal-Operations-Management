@@ -64,6 +64,7 @@ ESM modules (`server/package.json` sets `"type": "module"`; the repo root stays 
 | `masters.js` | Admin master-detail panels, the Waybill Prefixes panel (Admin **and** Dispatcher, gated by `EDIT_WAYBILL_PREFIXES`), and the Settings danger zone — an Admin-only `clearAllData()` behind a typed confirmation phrase, scoped to the current environment. |
 | `billing.js` | The Billing panel: one row per billable waybill over a date range, filtered by status, origin and subcon (the waybill prefix). Mano, the drop fee and the hauling rate compute but can be typed over; totals never can. Prints the Rebisco billing format through `export.js`'s `printHtmlDocument`. |
 | `billing-matrix.js` | The Billing Matrix panel: the rate grid for one origin across the 25 diesel bands, the weekly diesel price entry, and the `.xlsx` seed that loads a rates workbook one sheet per origin. `FUEL_BANDS` here must name the bands exactly as `_fuelBandLabel()` does in `server/internals.js`. |
+| `audit.js` | The Audit Log panel: one page of `audit_log`, Admin-only. Every read sends a date range and pages through the rest — the log only grows. |
 | `whatsnew.js` + `changelog.json` | The "What's new?" dialog. `npm run changelog:sync -- --apply` generates the JSON from GitHub Releases, because the repo is private. |
 | `vendor/` | ExcelJS and html2canvas, pinned and self-hosted so the CSP can refuse every third-party script. ExcelJS is the only spreadsheet library. |
 | `_headers` | Cloudflare Pages response headers: CSP, `X-Frame-Options: DENY`, nosniff. |

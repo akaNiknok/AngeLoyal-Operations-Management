@@ -438,6 +438,10 @@ export async function getBillingLines(from, to) {
       fields.total = haulingRate + mano + dropFee + _sumManualCharges(existing.manualCharges);
 
       const cols = Object.keys(fields);
+      // Opening the panel recomputes every line, but the rates and the trips
+      // rarely moved since the last open. Writing a row that already holds
+      // these values spends the daily row-write budget for nothing.
+      if (cols.every((c) => fields[c] === existing.row[c])) return;
       updateStmts.push(stmt(
         `UPDATE billing_lines SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
         ...cols.map((c) => fields[c]), existing.id));

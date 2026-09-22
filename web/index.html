@@ -118,6 +118,13 @@
                     </button>
                     <button
                         class="nav-btn admin-only"
+                        id="nav-audit"
+                        onclick="switchPanel('audit')"
+                    >
+                        Audit Log
+                    </button>
+                    <button
+                        class="nav-btn admin-only"
                         id="nav-settings"
                         onclick="switchPanel('settings')"
                     >
@@ -1143,6 +1150,63 @@
        PANEL: SETTINGS (admin only) — master config, colors,
        maintenance / danger zone
   ══════════════════════════════════════ -->
+            <!-- ══════════════════════════════════════
+       PANEL: AUDIT LOG — one page of the append-only journal.
+       Always bounded by a date range; pages through the rest.
+  ══════════════════════════════════════ -->
+            <div class="panel" id="panel-audit">
+                <div class="toolbar">
+                    <input type="date" id="au-from" onchange="reloadAudit()" />
+                    <span class="tb-label">to</span>
+                    <input type="date" id="au-to" onchange="reloadAudit()" />
+                    <input
+                        type="search"
+                        id="au-search"
+                        class="cell-input"
+                        style="width: 220px"
+                        placeholder="Search action, user, table…"
+                        onchange="reloadAudit()"
+                    />
+                    <button class="btn btn-sm" onclick="reloadAudit()">
+                        Refresh
+                    </button>
+                    <div class="tb-spacer"></div>
+                    <span class="tb-label" id="au-count"></span>
+                    <button
+                        class="btn btn-sm"
+                        id="au-prev"
+                        onclick="auditPage(-1)"
+                    >
+                        ‹ Newer
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        id="au-next"
+                        onclick="auditPage(1)"
+                    >
+                        Older ›
+                    </button>
+                </div>
+                <div class="admin-split">
+                    <div class="admin-list-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 150px">When</th>
+                                    <th style="width: 180px">User</th>
+                                    <th style="width: 180px">Action</th>
+                                    <th style="width: 130px">Record</th>
+                                    <th>Detail</th>
+                                    <th style="width: 200px">Old value</th>
+                                    <th style="width: 200px">New value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="au-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="panel" id="panel-settings">
                 <div class="toolbar">
                     <span class="tb-label">Settings</span>
@@ -2048,6 +2112,7 @@
         <script src="masters.js"></script>
         <script src="billing.js"></script>
         <script src="billing-matrix.js"></script>
+        <script src="audit.js"></script>
         <script src="whatsnew.js"></script>
 
         <!-- Google Identity Services. `async` still delays window.load, so

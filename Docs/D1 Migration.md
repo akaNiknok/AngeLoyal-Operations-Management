@@ -1,6 +1,6 @@
 # D1 Migration Plan — Google Sheets → Cloudflare D1 (v2.0.0)
 
-Status: PHASE 3 IN PROGRESS (2026-09-22): the row-write cuts are done. The final DEV load and the RTVS/payroll build remain. Tick the boxes as work lands.
+Status: PHASE 3 IN PROGRESS (2026-09-23): the row-write cuts and the DEV load are done. DEV now runs on D1 end to end. The RTVS tab and payroll remain. Tick the boxes as work lands.
 A fresh session reads this file and `HANDOFF.md`, not the codebase, to resume.
 
 ## 1. Decisions (settled, do not re-open)
@@ -218,7 +218,7 @@ Self-seeding sheets (Route Type Map, Customer Group Colors, Billing Charge
 Types, Billing Categories) become `INSERT OR IGNORE` seed statements in
 `0002_seed.sql`, in `-- @seed <table>` sections the test harness applies one at
 a time. The import file starts with `DELETE FROM` every table, so the seed rows
-never collide with imported ids. `0003_drop_freight_rates_key.sql` drops the unused rate index. Payroll tables come later as `0004_payroll.sql`.
+never collide with imported ids. `0003_drop_freight_rates_key.sql` and `0004_drop_trips_billing_date.sql` drop indexes no query used. Payroll tables come later as `0005_payroll.sql`.
 
 ### 3.1 Transform rules (`server/migrate/transform.js`)
 
@@ -327,7 +327,7 @@ independent and start with W2.
   - [x] `scripts/sheets-to-d1.mjs --skip-rates` leaves the `DELETE` and the `INSERT`s for `freight_rates` out of the SQL file, and skips the band-cell check that would then compare against zero. A reload drops to about 1,000 writes.
   - [x] `npm run db:export:prod:norates` dumps PROD with `--no-schema` and a `--table` per table except `freight_rates` and `sessions`, for a PROD → DEV copy that leaves the DEV rates in place. Empty the DEV tables it covers first, or the inserts hit the primary keys.
   - [x] Reads: `getFreightRates(origin)` now reads `SELECT DISTINCT origin`, matches the spellings with `_normArea`, then filters in SQL through the `UNIQUE` index. One origin reads about a third of the table instead of all of it.
-- [ ] Final DEV snapshot → `sheets-to-d1 --skip-rates` → apply to DEV D1. Rename the DEV Sheet `ARCHIVE pre-v2 — DEV`. Archive the DEV Apps Script deployment. Runbook in §4.1.
+- [x] Final DEV snapshot → `sheets-to-d1 --skip-rates` → apply to DEV D1. Rename the DEV Sheet `ARCHIVE pre-v2 — DEV`. Archive the DEV Apps Script deployment. Runbook in §4.1. (Run 2026-09-22.)
 
 #### 4.1 DEV load runbook
 
@@ -402,11 +402,13 @@ the file starts with `DELETE FROM` on every table it writes, so it is safe to
 repeat. If the file itself is wrong, restore `data/d1-dev-export.sql` from
 step 2.
 
-- [ ] Build the RTVS tab and payroll on D1 (`0004_payroll.sql`). Normal `develop` workflow.
+- [x] Drop `trips_billing_date` (`0004`) and stop `getBillingLines` re-writing lines that did not change. `audit_ts` stays — the Audit Log panel now reads a ts range. Apply with `npm run db:migrate:dev`.
+- [x] Build the Audit Log panel (issue #37): `getAuditLog` in `server/readers.js`, `web/audit.js`, Admin-only. It replaces the Sheets tab the owner used to read the log in.
+- [ ] Build the RTVS tab and payroll on D1 (`0005_payroll.sql`). Normal `develop` workflow.
 
 ### Phase 4 — Release v2.0.0 (Opus + owner present)
 
-- [ ] `wrangler d1 create angeloyal-oms` (PROD); id into `wrangler.toml`; run `/release` prep (merge, tag, notes).
+- [ ] `wrangler d1 create angeloyal-oms --location apac` (PROD) — **pass the location hint**: the users are in Manila and every query is a round trip to the primary. DEV reports `running_in_region APAC`; PROD must match. Then the id into `wrangler.toml`; run `/release` prep (merge, tag, notes).
 - [ ] **Freeze window** (about 30 minutes, agreed with the dispatchers): no edits in the v1 app.
 - [ ] `npm run fetch-data` (PROD) → `sheets-to-d1` → reconciliation passes → `wrangler d1 migrations apply angeloyal-oms --remote` → import.
 - [ ] `npm run release` (deploy `main`). Smoke the same list as Phase 2 on PROD. Send the "What's new" note.

@@ -428,7 +428,7 @@ amountDue   = totalVatInc − withholding
 
 ### audit_log
 
-Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (many rows, one round trip) run after the change, are best-effort, and never throw.
+Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (many rows, one round trip) run after the change, are best-effort, and never throw. The Admin-only Audit Log panel reads it through `getAuditLog`, always over a date range and one page at a time.
 
 | Column | Type | Notes |
 | :-- | :-- | :-- |
