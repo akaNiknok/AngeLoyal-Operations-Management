@@ -243,6 +243,42 @@ test('confirmWaybill refuses to re-confirm a locked waybill', async () => {
   assert.match(res.error, /already confirmed and locked/);
 });
 
+// Two dispatchers act on one load at the same moment. Both read it as
+// Suggested; only the first write may land — a Confirmed row is immutable.
+test('two confirms in flight on one load: the first wins, the second is refused', async () => {
+  const { api, db } = asAdmin(baseSheets());
+  const { id } = await api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+
+  const [a, b] = await Promise.all([api.confirmWaybill(id, 'AL-300'), api.confirmWaybill(id, 'AL-400')]);
+  assert.deepEqual([a.success, b.success], [true, false]);
+  assert.match(b.error, /already confirmed and locked/);
+  assert.equal(waybill(db, id).waybill_number, 'AL-300');
+  assert.equal(prefixRow(db).last_sequence_number, 300, 'the loser does not move the counter');
+});
+
+test('a rename in flight cannot change a load confirmed in between', async () => {
+  const { api, db } = asAdmin(baseSheets());
+  const { id } = await api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+
+  const [c, r] = await Promise.all([api.confirmWaybill(id, null), api.updateSuggestedWaybill(id, 'AL-77')]);
+  assert.equal(c.success, true);
+  assert.equal(r.success, false);
+  assert.match(r.error, /already confirmed and locked/);
+  assert.equal(waybill(db, id).waybill_number, 'AL-6');
+  assert.equal(waybill(db, id).status, 'Confirmed');
+});
+
+test('two loads confirmed at once with one custom number: only one gets it', async () => {
+  const { api, db } = asAdmin(baseSheets());
+  const w1 = await api._createSuggestedWaybill(101, 1, 'FO-1', 'Regular', null);
+  const w2 = await api._createSuggestedWaybill(102, 1, 'FO-2', 'Regular', null);
+
+  const [a, b] = await Promise.all([api.confirmWaybill(w1.id, 'AL-500'), api.confirmWaybill(w2.id, 'AL-500')]);
+  assert.deepEqual([a.success, b.success], [true, false]);
+  assert.match(b.error, /already confirmed and in use/);
+  assert.equal(dump(db, 'waybills').filter((w) => w.waybill_number === 'AL-500').length, 1);
+});
+
 // ---- confirmWaybill: one waybill row, several stops ----
 test('confirmWaybill on a multi-stop load confirms every stop through its one shared row', async () => {
   const sheets = baseSheets({ lastSeq: 5 });

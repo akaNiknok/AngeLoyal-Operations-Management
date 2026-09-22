@@ -138,3 +138,17 @@ test('bulkDeleteTrips is gated by ADD_MANUAL_TRIP permission', async () => {
   }), userEmail: EMAIL.Viewer });
   await assert.rejects(() => api.bulkDeleteTrips([70]), /Access denied/);
 });
+
+// Redeliver on a trip whose waybill is still Suggested: the -R row names that
+// waybill as its parent. Deleting the original trip must not trip the FK.
+test('deleteImportedTrip works when a carry-over waybill names its waybill as parent', async () => {
+  const { api, db } = withTripAndWaybill(false);
+  const childTripId = await api._createCarryoverTrip(70, 'Redeliver');
+
+  const res = await api.deleteImportedTrip(70);
+  assert.equal(res.success, true, res.error);
+  const wbs = dump(db, 'waybills');
+  assert.deepEqual(wbs.map((w) => w.waybill_number), ['AL-50-R'], 'the carry-over keeps its number');
+  assert.equal(wbs[0].parent_waybill_id, null);
+  assert.equal(dump(db, 'trips').find((t) => t.id === childTripId).waybill_id, wbs[0].id);
+});

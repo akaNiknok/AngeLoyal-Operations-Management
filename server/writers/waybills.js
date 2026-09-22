@@ -300,11 +300,15 @@ export async function _deleteSuggestedWaybillsForTrip(tripId) {
   if (!wb || wb.status !== 'Suggested') return;
 
   // Detach first: trips.waybill_id is a foreign key, so the row can only go
-  // once no trip points at it.
+  // once no trip points at it. A carry-over's -R/-FT row may name it as its
+  // parent (a foreign key too); that link is cleared the same way a child
+  // trip's parent_trip_id is — the carry-over keeps its number.
+  const orphan = `id = ?1 AND status = 'Suggested' AND NOT EXISTS (SELECT 1 FROM trips WHERE waybill_id = ?1)`;
   await batch([
     stmt(`UPDATE trips SET waybill_id = NULL WHERE id = ?`, id),
-    stmt(`DELETE FROM waybills WHERE id = ? AND status = 'Suggested'
-          AND NOT EXISTS (SELECT 1 FROM trips WHERE waybill_id = ?)`, trip.waybill_id, trip.waybill_id),
+    stmt(`UPDATE waybills SET parent_waybill_id = NULL
+          WHERE parent_waybill_id = ?1 AND EXISTS (SELECT 1 FROM waybills WHERE ${orphan})`, trip.waybill_id),
+    stmt(`DELETE FROM waybills WHERE ${orphan}`, trip.waybill_id),
   ]);
 }
 
@@ -352,14 +356,26 @@ export async function confirmWaybill(waybillId, customNumber) {
       finalNumber = customNumber;
       const match = customNumber.match(/(\d+)(?:-[A-Z]+)?$/);
       seqNumber = match ? Number(match[1]) : seqNumber;
-
-      await _auditLog('WAYBILL_OVERRIDE', 'waybills', id, origNumber, finalNumber);
     }
 
-    await run(
-      `UPDATE waybills SET waybill_number = ?, sequence_number = ?, status = 'Confirmed',
-       confirmed_by = ?, confirmed_at = ? WHERE id = ?`,
-      finalNumber, seqNumber, currentEmail() || 'unknown', nowPH(), id);
+    // The checks above are a read; this write repeats them, so a confirm or
+    // a duplicate number that landed in between cannot slip past. A
+    // Confirmed row is immutable.
+    const won = await one(
+      `UPDATE waybills SET waybill_number = ?1, sequence_number = ?2, status = 'Confirmed',
+         confirmed_by = ?3, confirmed_at = ?4
+       WHERE id = ?5 AND status = 'Suggested'
+         AND (?6 = 0 OR NOT EXISTS (
+           SELECT 1 FROM waybills WHERE waybill_number = ?1 AND status = 'Confirmed' AND id != ?5))
+       RETURNING id`,
+      finalNumber, seqNumber, currentEmail() || 'unknown', nowPH(), id, finalNumber !== origNumber ? 1 : 0);
+    if (!won) {
+      const now = await one(`SELECT status FROM waybills WHERE id = ?`, id);
+      throw new Error(now && now.status === 'Confirmed'
+        ? `Waybill ${origNumber} is already confirmed and locked.`
+        : `Waybill number "${finalNumber}" is already confirmed and in use.`);
+    }
+    if (finalNumber !== origNumber) await _auditLog('WAYBILL_OVERRIDE', 'waybills', id, origNumber, finalNumber);
     await _auditLog('WAYBILL_CONFIRM', 'waybills', id, 'Suggested', finalNumber);
 
     if (prefixId && seqNumber) await _updateWaybillPrefixSequence(prefixId, seqNumber);
@@ -385,9 +401,7 @@ export async function updateSuggestedWaybills(edits) {
   if (!list.length) return { success: true, results: [] };
 
   const results = [];
-  const toApply = [];   // { id, finalNumber, seqNum }
-  const audits = [];
-  const maxSeq = {};    // prefixId -> highest sequence this batch issued
+  const toApply = [];   // { id, finalNumber, seqNum, prefixId, origNumber, at }
 
   for (const edit of list) {
     const waybillId = edit && edit.waybillId;
@@ -418,20 +432,38 @@ export async function updateSuggestedWaybills(edits) {
       const match = finalNumber.match(/(\d+)(?:-[A-Z]+)?$/);
       const seqNum = match ? Number(match[1]) : origSeq;
 
-      toApply.push({ id, finalNumber, seqNum });
-      audits.push({ action: 'WAYBILL_OVERRIDE', table: 'waybills', rowId: id, oldValue: origNumber, newValue: finalNumber });
-      if (prefixId && seqNum && seqNum > (maxSeq[prefixId] || 0)) maxSeq[prefixId] = seqNum;
-
+      toApply.push({ id, finalNumber, seqNum, prefixId, origNumber, at: results.length });
       results.push({ waybillId, success: true, waybillNumber: finalNumber, updated: await _stopCount(id) });
     } catch (e) {
       results.push({ waybillId, success: false, error: e.message });
     }
   }
 
-  if (toApply.length) {
-    await batch(toApply.map((u) => stmt(
-      `UPDATE waybills SET waybill_number = ?, sequence_number = ? WHERE id = ?`,
-      u.finalNumber, u.seqNum, u.id)));
+  // The write repeats the checks the loop read: a load confirmed, or its new
+  // number confirmed elsewhere, since that read stays as it is.
+  const res = await batch(toApply.map((u) => stmt(
+    `UPDATE waybills SET waybill_number = ?1, sequence_number = ?2
+     WHERE id = ?3 AND status = 'Suggested'
+       AND NOT EXISTS (SELECT 1 FROM waybills WHERE waybill_number = ?1 AND status = 'Confirmed' AND id != ?3)
+     RETURNING id`,
+    u.finalNumber, u.seqNum, u.id)));
+
+  const audits = [];
+  const maxSeq = {};    // prefixId -> highest sequence this batch issued
+  for (let i = 0; i < toApply.length; i++) {
+    const u = toApply[i];
+    if (!res[i].results.length) {
+      const now = await one(`SELECT waybill_number, status FROM waybills WHERE id = ?`, u.id);
+      results[u.at] = {
+        waybillId: results[u.at].waybillId, success: false,
+        error: now && now.status === 'Confirmed'
+          ? `Waybill ${now.waybill_number} is already confirmed and locked.`
+          : `Waybill number "${u.finalNumber}" is already confirmed and in use.`,
+      };
+      continue;
+    }
+    audits.push({ action: 'WAYBILL_OVERRIDE', table: 'waybills', rowId: u.id, oldValue: u.origNumber, newValue: u.finalNumber });
+    if (u.prefixId && u.seqNum && u.seqNum > (maxSeq[u.prefixId] || 0)) maxSeq[u.prefixId] = u.seqNum;
   }
   await _auditLogBatch(audits);
 
