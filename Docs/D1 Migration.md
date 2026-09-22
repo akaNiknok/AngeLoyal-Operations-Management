@@ -327,8 +327,81 @@ independent and start with W2.
   - [x] `scripts/sheets-to-d1.mjs --skip-rates` leaves the `DELETE` and the `INSERT`s for `freight_rates` out of the SQL file, and skips the band-cell check that would then compare against zero. A reload drops to about 1,000 writes.
   - [x] `npm run db:export:prod:norates` dumps PROD with `--no-schema` and a `--table` per table except `freight_rates` and `sessions`, for a PROD → DEV copy that leaves the DEV rates in place. Empty the DEV tables it covers first, or the inserts hit the primary keys.
   - [x] Reads: `getFreightRates(origin)` now reads `SELECT DISTINCT origin`, matches the spellings with `_normArea`, then filters in SQL through the `UNIQUE` index. One origin reads about a third of the table instead of all of it.
-- [ ] Final DEV snapshot → `sheets-to-d1` → apply to DEV D1. Rename the DEV Sheet `ARCHIVE pre-v2 — DEV`. Archive the DEV Apps Script deployment.
-  - Budget: a load on an empty database is about 74,000 writes and fits the day. A load over existing rows is about 148,000 and does not, because the `DELETE`s write too. Delete and recreate `angeloyal-oms-dev`, put the new id in `wrangler.toml`, migrate, then import. The OAuth origins do not change.
+- [ ] Final DEV snapshot → `sheets-to-d1 --skip-rates` → apply to DEV D1. Rename the DEV Sheet `ARCHIVE pre-v2 — DEV`. Archive the DEV Apps Script deployment. Runbook in §4.1.
+
+#### 4.1 DEV load runbook
+
+**The DEV rates did not change** since the Phase 2 load, so the rates already in
+DEV D1 are the rates to keep. The load runs with `--skip-rates` and costs about
+2,000 rows written, not 74,000. Nothing is recreated: deleting the database
+would destroy the very rows this saves.
+
+Every step runs from `develop`. The whole run takes about 15 minutes.
+
+1. **Confirm the DEV rates are the ones to keep.** Write the number down; step 7
+   compares against it.
+
+   ```
+   npx wrangler d1 execute angeloyal-oms-dev --env preview --remote --command "SELECT COUNT(*) rates, COUNT(DISTINCT origin) origins, MAX(effective_date) newest FROM freight_rates"
+   ```
+
+   Expect about **36,750** rates. A much smaller number means the Phase 2 load
+   did not reach this database — stop, and run step 4 without `--skip-rates`.
+
+2. **Back up DEV.** `npm run db:export:dev` writes `data/d1-dev-export.sql`.
+   This is the only way back: step 6 deletes every row it then re-inserts.
+
+3. **Apply the pending migration.** `npm run db:migrate:dev` applies
+   `0003_drop_freight_rates_key.sql` and nothing else. Wrangler tracks what ran.
+
+4. **Snapshot the v1 DEV Sheet.** `npm run fetch-data -- --dev` reads the
+   *deployed* Apps Script `devDump` endpoint and needs `DEV_DUMP_TOKEN` in
+   `.env`. It writes `data/sheets-snapshot.json`. Tell the DEV users to stop
+   editing the Sheet first — anything typed after this point is lost.
+
+5. **Generate and reconcile.**
+
+   ```
+   npm run db:migrate-sheets -- --skip-rates
+   ```
+
+   Every check must read `OK` and the script must exit zero. The 27 duplicate
+   rate blocks it reports are the known DOE ambiguity (§6) and are expected.
+   Confirm the file skipped the rates: `grep -c freight_rates data/d1-import.sql`
+   must print `0`, and the file should be tens of KB, not the 2.8 MB a load with
+   the rates in it produces.
+
+6. **Load it.**
+
+   ```
+   npx wrangler d1 execute angeloyal-oms-dev --env preview --remote --file data/d1-import.sql
+   ```
+
+   This signs every DEV user out: the file clears `sessions`.
+
+7. **Verify.** The rate count must be unchanged from step 1, and the other
+   tables must match the reconciliation report.
+
+   ```
+   npx wrangler d1 execute angeloyal-oms-dev --env preview --remote --command "SELECT (SELECT COUNT(*) FROM freight_rates) rates, (SELECT COUNT(*) FROM trips) trips, (SELECT COUNT(*) FROM employees) employees, (SELECT COUNT(*) FROM outlets) outlets"
+   ```
+
+   Then sign in on `develop.angeloyal-oms.pages.dev` and walk the Phase 2 smoke
+   list: open the dispatch board, open Billing, open the Billing Matrix and
+   check a rate still prices.
+
+8. **Archive the v1 DEV side** (owner, in the Google console). Rename the Sheet
+   `ARCHIVE pre-v2 — DEV` and share it read-only. Archive the DEV Apps Script
+   deployment. Keep `scripts/fetch-sheet-data.js` and `DEV_DUMP_TOKEN` — Phase 4
+   runs the same path against PROD.
+
+9. Tick this item, and delete `HANDOFF.md` if one is open.
+
+**If step 6 fails halfway**, the database holds a partial load. Re-run step 6:
+the file starts with `DELETE FROM` on every table it writes, so it is safe to
+repeat. If the file itself is wrong, restore `data/d1-dev-export.sql` from
+step 2.
+
 - [ ] Build the RTVS tab and payroll on D1 (`0004_payroll.sql`). Normal `develop` workflow.
 
 ### Phase 4 — Release v2.0.0 (Opus + owner present)
