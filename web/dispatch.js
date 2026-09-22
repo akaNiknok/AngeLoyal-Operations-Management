@@ -17,6 +17,15 @@
                 const dt = new Date(y, m - 1, d + delta);
                 return `${dt.getMonth() + 1}/${dt.getDate()}/${dt.getFullYear()}`;
             }
+            // Where a carry-over lands: the next day, skipping Sunday, as
+            // nextBusinessDay() does on the server.
+            function mdyNextBusinessDay(mdy) {
+                const next = mdyAddDays(mdy, 1);
+                const [m, d, y] = next.split("/").map(Number);
+                return new Date(y, m - 1, d).getDay() === 0
+                    ? mdyAddDays(next, 1)
+                    : next;
+            }
 
             // Silent background fill of an empty cache slot. Never overwrites
             // an existing entry — if the user navigated there mid-flight, the
@@ -52,6 +61,14 @@
                 call("getDispatchBoardData", key).then(
                     (data) => {
                         dispatchCache[key] = data;
+                        setSyncing(false);
+                        // The user moved to another day while this was in
+                        // flight: that day's own load owns the board.
+                        if (
+                            key !==
+                            isoToMDY(document.getElementById("dispatch-date").value)
+                        )
+                            return;
                         dispatchData = data;
                         if (!cached) {
                             selectedForGroup.clear();
@@ -61,7 +78,6 @@
                         document
                             .getElementById("dispatch-loading")
                             .classList.remove("on");
-                        setSyncing(false);
                         prefetchDispatch(mdyAddDays(key, -1));
                         prefetchDispatch(mdyAddDays(key, 1));
                     },
@@ -455,6 +471,9 @@
             }
 
             function doBulkStatus(ids, status, prefixId) {
+                // The day of the edit, not whatever day is open when the
+                // response comes back.
+                const day = dispatchData.date;
                 const olds = new Map();
                 ids.forEach((id) => {
                     const trip = (dispatchData.trips || []).find(
@@ -485,17 +504,15 @@
                                 `${r.newTripIds.length} carry-over trip${r.newTripIds.length === 1 ? "" : "s"} created for next day.`,
                                 "success",
                             );
-                            // Carry-overs land on the NEXT day — the current
-                            // board is already correct; just make sure the
-                            // next day's visit does a full load.
-                            delete dispatchCache[
-                                mdyAddDays(dispatchData.date, 1)
-                            ];
+                            // Carry-overs land on the next business day — the
+                            // current board is already correct; just make sure
+                            // that day's visit does a full load.
+                            delete dispatchCache[mdyNextBusinessDay(day)];
                         }
                         if (prefixId) {
                             // Refetch so the new suggested waybills show —
                             // the bulk response doesn't carry them per trip.
-                            delete dispatchCache[dispatchData.date];
+                            delete dispatchCache[day];
                             loadDispatch();
                         }
                     },
@@ -1323,6 +1340,10 @@
                                     : ""),
                             "success",
                         );
+                        if (r.backlogged)
+                            delete dispatchCache[
+                                mdyNextBusinessDay(isoToMDY(dateVal))
+                            ];
                         loadDispatch();
                     },
                     toastError,

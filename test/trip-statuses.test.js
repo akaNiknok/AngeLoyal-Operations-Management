@@ -114,3 +114,39 @@ test('a whole-load status change sends one bulk request', () => {
   assert.equal(ui.__calls[0].fn, 'bulkSetTripStatus');
   assert.deepEqual(plain(ui.__calls[0].args), [[1, 2], 'Delivered', null]);
 });
+
+// Two days requested back to back: the slower, older response must not
+// paint its day under the newer day's date.
+test('a board load that returns after the user moved on only fills the cache', async () => {
+  const picker = { value: '2026-09-18' };
+  const { sandbox: ui } = loadWeb(
+    ['core.js', 'dispatch.js'],
+    {},
+    `
+    globalThis.__pending = {};
+    globalThis.call = (fn, day) => new Promise((res) => { globalThis.__pending[day] = res; });
+    globalThis.renderDispatch = () => {};
+    globalThis.prefetchDispatch = () => {};
+    globalThis.__board = () => dispatchData;
+    globalThis.__cache = dispatchCache;
+    `,
+  );
+  ui.document.getElementById = (id) => (id === 'dispatch-date' ? picker : { classList: { add() {}, remove() {}, toggle() {} } });
+
+  ui.loadDispatch();                  // 9/18
+  picker.value = '2026-09-19';
+  ui.loadDispatch();                  // 9/19
+  ui.__pending['9/19/2026']({ date: '9/19/2026', trips: [] });
+  await Promise.resolve();
+  ui.__pending['9/18/2026']({ date: '9/18/2026', trips: [] });   // arrives last
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(ui.__board().date, '9/19/2026');
+  assert.equal(ui.__cache['9/18/2026'].date, '9/18/2026', 'the older day is still cached');
+});
+
+test('a carry-over lands on the next business day: Saturday skips to Monday', () => {
+  const { sandbox: ui } = loadWeb(['core.js', 'dispatch.js']);
+  assert.equal(ui.mdyNextBusinessDay('9/19/2026'), '9/21/2026');   // Sat -> Mon
+  assert.equal(ui.mdyNextBusinessDay('9/17/2026'), '9/18/2026');   // Thu -> Fri
+});
