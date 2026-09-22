@@ -149,3 +149,20 @@ test('every allow-listed name dispatches to a real function', async () => {
   const missing = RPC_ALLOWED.filter((n) => !mods.some((m) => typeof m[n] === 'function'));
   assert.deepEqual(missing, []);
 });
+
+test('a verified account not in Users can reach only getBootData and logout', async () => {
+  const { api } = authEnv({ 'tok-stranger': { email: 'stranger@gmail.com' } });
+  const token = await signIn(api, 'tok-stranger');
+  for (const fn of ['getDispatchBoardData', 'getWaybillPrefixes', 'getFreightRates', 'getFuelPrices']) {
+    await assert.rejects(() => api.rpc(token, fn, []), /Access denied/, fn);
+  }
+  assert.equal((await api.rpc(token, 'logout', [token])).success, true);
+});
+
+test('the rate matrix and diesel prices need VIEW_BILLING', async () => {
+  const { api } = authEnv({ 'tok-viewer': { email: 'viewer@angeloyal.com' } });
+  const token = await signIn(api, 'tok-viewer');
+  await assert.rejects(() => api.rpc(token, 'getFreightRates', []), /Access denied/);
+  await assert.rejects(() => api.rpc(token, 'getFuelPrices', []), /Access denied/);
+  assert.ok((await api.rpc(token, 'getDispatchBoardData', ['6/1/2026'])).trips);
+});

@@ -13,6 +13,7 @@
 import { runWith, clientId, fetchImpl } from './ctx.js';
 import { one, run, nowPH, toPHTimestamp } from './db.js';
 import { _auditLog } from './internals.js';
+import { currentUser } from './rbac.js';
 import * as readers from './readers.js';
 import * as trips from './writers/trips.js';
 import * as waybills from './writers/waybills.js';
@@ -137,5 +138,15 @@ export async function rpc(sessionToken, fnName, args) {
   const fn = FNS[fnName];
   if (typeof fn !== 'function') throw new Error('Unknown action: ' + fnName);
 
-  return await runWith({ email: session.email }, () => fn(...(args || [])));
+  return await runWith({ email: session.email }, async () => {
+    // Any Google account can sign in, so a session alone proves nothing.
+    // Only these two run without an active users row: getBootData tells the
+    // client "no role", and logout ends the session.
+    if (!NO_ROLE_FNS.includes(fnName) && !(await currentUser())) {
+      throw new Error('Access denied. Your account has no role in this app.');
+    }
+    return await fn(...(args || []));
+  });
 }
+
+const NO_ROLE_FNS = ['getBootData', 'logout'];

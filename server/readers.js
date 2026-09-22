@@ -394,6 +394,7 @@ export async function getRouteFrequencyForDriver(driverId, windowDays) {
  * @returns {Promise<Array<{ id, origin, area, truckType, effectiveDate, bands }>>}
  */
 export async function getFreightRates(origin) {
+  await requirePermission('VIEW_BILLING');
   const want = (Array.isArray(origin) ? origin : [origin]).filter(Boolean).map(_normArea);
 
   // A filtered read narrows in SQL, not in JS: the table holds about 36,750
@@ -450,6 +451,7 @@ export async function getFreightRateOrigins() {
 
 /** Diesel price history, newest effective date first. */
 export async function getFuelPrices() {
+  await requirePermission('VIEW_BILLING');
   const rows = await q(`SELECT * FROM fuel_prices ORDER BY effective_date DESC, id DESC`);
   return rows.map((r) => ({
     id: r.id,

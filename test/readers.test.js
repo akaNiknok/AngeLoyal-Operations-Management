@@ -269,6 +269,7 @@ test('getUsers is Admin-only and lists inactive accounts too', async () => {
 test('getFreightRates rebuilds the 25-band grid per rate block and filters by origin', async () => {
   const bands = Array.from({ length: 25 }, (_, i) => (i === 7 ? 1000 : i === 8 ? 1100 : ''));
   const sheets = {
+    Users: usersSheet(),
     'Freight Rates': [
       HEADERS['Freight Rates'].slice(),
       [1, 'Cabuyao', 'Sta. Rosa', '6W', '1/1/2026', ...bands],
@@ -295,6 +296,7 @@ test('getFreightRates rebuilds the 25-band grid per rate block and filters by or
 
 test('getFuelPrices comes back newest first', async () => {
   const sheets = {
+    Users: usersSheet(),
     'Fuel Prices': [
       HEADERS['Fuel Prices'].slice(),
       [1, '6/2/2026', 60.5, 'a@x', '6/2/2026 08:00:00'],
