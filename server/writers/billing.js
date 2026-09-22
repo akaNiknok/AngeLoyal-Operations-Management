@@ -442,9 +442,13 @@ export async function getBillingLines(from, to) {
       // rarely moved since the last open. Writing a row that already holds
       // these values spends the daily row-write budget for nothing.
       if (cols.every((c) => fields[c] === existing.row[c])) return;
+      // Written only when nobody edited or stamped the line since the read
+      // above: a save in between would otherwise lose its override or charge
+      // to this refresh. A skipped line refreshes on the next open.
       updateStmts.push(stmt(
-        `UPDATE billing_lines SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
-        ...cols.map((c) => fields[c]), existing.id));
+        `UPDATE billing_lines SET ${cols.map((c) => `${c} = ?`).join(', ')}
+         WHERE id = ? AND updated_at IS ? AND COALESCE(billing_number, '') = ''`,
+        ...cols.map((c) => fields[c]), existing.id, existing.row.updated_at));
     });
 
     // A concurrent refresh may have created a line first: its insert returns
@@ -502,56 +506,56 @@ export async function saveBillingLine(lineId, changes) {
     const charges = await q(`SELECT * FROM billing_line_charges WHERE billing_line_id = ?`, row.id);
     const oldVal = billingLineFromRow(row, charges);
 
-    const overrides = Array.isArray(oldVal.overrides) ? oldVal.overrides.slice() : [];
+    // The panel sends one save per cell, so two saves on one line can run at
+    // once. Each statement touches only what THIS call changed, and the total
+    // is summed in SQL last — never written back from the read above, which a
+    // second save may already have made stale. One batch: the amounts, the
+    // charges and the total land together or not at all.
+    const OVR = `COALESCE(NULLIF(overrides, ''), '[]')`;
     const fields = {};
+    const stmts = [];
     Object.keys(OVERRIDABLE).forEach((key) => {
       if (!changes || changes[key] === undefined) return;
-      const at = overrides.indexOf(key);
-      if (changes[key] === null) {
-        if (at !== -1) overrides.splice(at, 1);   // back to the computed value
+      if (changes[key] === null) {   // back to the computed value
+        stmts.push(stmt(
+          `UPDATE billing_lines SET overrides = (SELECT NULLIF(json_group_array(value), '[]')
+             FROM json_each(${OVR}) WHERE value != ?1) WHERE id = ?2`, key, row.id));
         return;
       }
       const n = Number(changes[key]);
       if (!isFinite(n) || n < 0) throw new Error(`${OVERRIDABLE_LABEL[key]} must be a number that is zero or more.`);
       fields[OVERRIDABLE[key]] = n;
-      if (at === -1) overrides.push(key);
+      stmts.push(stmt(
+        `UPDATE billing_lines SET overrides = json_insert(${OVR}, '$[#]', ?1)
+         WHERE id = ?2 AND NOT EXISTS (SELECT 1 FROM json_each(${OVR}) WHERE value = ?1)`, key, row.id));
     });
 
-    const manual = Object.assign({}, oldVal.manualCharges);
-    if (changes && changes.manualCharges !== undefined) {
-      Object.keys(changes.manualCharges || {}).forEach((k) => {
-        const n = Number(changes.manualCharges[k]);
-        if (!isFinite(n)) throw new Error('A manual charge must be a number.');
-        if (n !== 0) manual[String(k)] = n;   // a zero is the same as no charge
-        else delete manual[String(k)];
-      });
-    }
+    Object.keys((changes && changes.manualCharges) || {}).forEach((k) => {
+      const n = Number(changes.manualCharges[k]);
+      if (!isFinite(n)) throw new Error('A manual charge must be a number.');
+      stmts.push(n !== 0
+        ? stmt(`INSERT INTO billing_line_charges (billing_line_id, charge_type_id, amount) VALUES (?, ?, ?)
+                ON CONFLICT (billing_line_id, charge_type_id) DO UPDATE SET amount = excluded.amount`,
+          row.id, Number(k), n)
+        // a zero is the same as no charge
+        : stmt(`DELETE FROM billing_line_charges WHERE billing_line_id = ? AND charge_type_id = ?`, row.id, Number(k)));
+    });
 
     if (changes && changes.notes !== undefined) fields.notes = String(changes.notes);
-    fields.overrides = overrides.length ? JSON.stringify(overrides) : null;
-
-    const haulingRate = fields.hauling_rate !== undefined ? fields.hauling_rate : oldVal.haulingRate;
-    const mano = fields.mano !== undefined ? fields.mano : oldVal.mano;
-    const dropFee = fields.drop_fee !== undefined ? fields.drop_fee : oldVal.dropFee;
-    fields.total = haulingRate + mano + dropFee + _sumManualCharges(manual);
-
     fields.updated_by = currentEmail() || 'unknown';
     fields.updated_at = nowPH();
 
     const cols = Object.keys(fields);
-    // The amounts, the total and the charge set land together or not at all:
-    // a total that disagrees with its charges is a wrong invoice.
-    const chargeStmts = [
+    stmts.push(
       stmt(`UPDATE billing_lines SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
         ...cols.map((c) => fields[c]), row.id),
-      stmt(`DELETE FROM billing_line_charges WHERE billing_line_id = ?`, row.id),
-    ];
-    Object.keys(manual).forEach((chargeTypeId) => {
-      chargeStmts.push(stmt(
-        `INSERT INTO billing_line_charges (billing_line_id, charge_type_id, amount) VALUES (?, ?, ?)`,
-        row.id, Number(chargeTypeId), manual[chargeTypeId]));
-    });
-    await batch(chargeStmts);
+      // A separate statement: SET expressions read the row as it was before
+      // their own UPDATE, so the total must come after the amounts land.
+      stmt(`UPDATE billing_lines SET total = hauling_rate + mano + drop_fee
+              + COALESCE((SELECT SUM(amount) FROM billing_line_charges WHERE billing_line_id = ?1), 0)
+            WHERE id = ?1`, row.id),
+    );
+    await batch(stmts);
 
     await _auditLog('BILLING_LINE_EDIT', 'billing_lines', row.id,
       JSON.stringify({
@@ -626,7 +630,7 @@ export async function setBillingNumber(lineIds, billingNumber) {
     const clearing = num === '';
 
     const marks = ids.map(() => '?').join(',');
-    const found = await q(`SELECT id FROM billing_lines WHERE id IN (${marks})`, ...ids);
+    const found = await q(`SELECT id, billing_number FROM billing_lines WHERE id IN (${marks})`, ...ids);
 
     if (found.length) {
       await batch(found.map((r) => stmt(
@@ -634,8 +638,12 @@ export async function setBillingNumber(lineIds, billingNumber) {
         clearing ? null : num, clearing ? 'Not Billed' : 'Billed', r.id)));
     }
 
-    await _auditLog('BILLING_NUMBER_SET', 'billing_lines', null, '',
-      `${clearing ? '(cleared)' : num} → ${found.length} lines`);
+    // One row per line, with the number it had: a line moved from one
+    // submitted billing to another must show where it came from.
+    await _auditLogBatch(found.map((r) => ({
+      action: 'BILLING_NUMBER_SET', table: 'billing_lines', rowId: r.id,
+      oldValue: r.billing_number || '', newValue: clearing ? '' : num,
+    })));
 
     return { success: true, updated: found.length, billingNumber: num };
   } catch (e) {

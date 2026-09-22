@@ -391,6 +391,37 @@ test('a charge saved alone keeps the charges already on the line', async () => {
   assert.equal(res.line.total, 17670 + 133);
 });
 
+// The same, with both saves in flight at once: each read the line before the
+// other wrote. Neither may write back its stale read.
+test('two saves in flight on one line both land, and the total counts both', async () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api } = await seeded(s);
+  const id = (await api.getBillingLines(DAY, DAY)).lines[0].id;
+
+  await Promise.all([
+    api.saveBillingLine(id, { manualCharges: { 1: 111 } }),
+    api.saveBillingLine(id, { manualCharges: { 2: 22 } }),
+    api.saveBillingLine(id, { haulingRate: 20000 }),
+    api.saveBillingLine(id, { mano: 50 }),
+  ]);
+  const line = (await api.getBillingLines(DAY, DAY)).lines[0];
+  assert.deepEqual({ ...line.manualCharges }, { 1: 111, 2: 22 });
+  assert.deepEqual([...line.overrides].sort(), ['haulingRate', 'mano']);
+  assert.equal(line.haulingRate, 20000);
+  assert.equal(line.mano, 50);
+  assert.equal(line.total, 20000 + 50 + 133);
+
+  // Clearing one override keeps the other.
+  await Promise.all([
+    api.saveBillingLine(id, { haulingRate: null }),
+    api.saveBillingLine(id, { manualCharges: { 1: 0 } }),
+  ]);
+  const after = (await api.getBillingLines(DAY, DAY)).lines[0];
+  assert.deepEqual([...after.overrides], ['mano']);
+  assert.equal(after.haulingRate, 17670);
+  assert.equal(after.total, 17670 + 50 + 22);
+});
+
 test('saveBillingLine refuses a negative override and a non-numeric charge', async () => {
   const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
   const { api } = await seeded(s);
@@ -470,4 +501,16 @@ test('creating, editing, deferring and stamping a line each leave an audit row',
 
   ['BILLING_LINE_CREATE', 'BILLING_LINE_EDIT', 'BILLING_LINE_STATUS_CHANGE',
    'BILLING_NUMBER_SET'].forEach((a) => assert.ok(actions.includes(a), a));
+});
+
+test('stamping a billing number audits each line with the number it had', async () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api, db } = await seeded(s);
+  const id = (await api.getBillingLines(DAY, DAY)).lines[0].id;
+  await api.setBillingNumber([id], 'BILL-0001');
+  await api.setBillingNumber([id], 'BILL-0002');
+
+  const rows = dump(db, 'audit_log').filter((r) => r.action === 'BILLING_NUMBER_SET');
+  assert.deepEqual(rows.map((r) => [r.row_id, r.old_value, r.new_value]),
+    [[id, '', 'BILL-0001'], [id, 'BILL-0001', 'BILL-0002']]);
 });

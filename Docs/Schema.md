@@ -471,7 +471,7 @@ Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (
 - `BILLING_LINE_CREATE` — a billable waybill entered the ledger
 - `BILLING_LINE_EDIT` — manual charges, an override or notes changed on a line
 - `BILLING_LINE_STATUS_CHANGE` — a line was deferred or brought back
-- `BILLING_NUMBER_SET` — a Rebisco billing number was stamped on lines (new value = `BILLING# → n lines`)
+- `BILLING_NUMBER_SET` — a Rebisco billing number was stamped on a line or cleared from it. One row per line: the old value is the number it had, the new value the number it has now (blank = cleared)
 - `DATA_CLEAR` — an Admin wiped every transactional table from the Settings panel (table blank, new value = the cleared tables). It is written *after* the wipe, so it is the first row of the new log
 
 ## Design rationale
