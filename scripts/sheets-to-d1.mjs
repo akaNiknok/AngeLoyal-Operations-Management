@@ -2,6 +2,12 @@
 // Sheets snapshot -> D1 import file + reconciliation report.
 //
 //   node scripts/sheets-to-d1.mjs [data/sheets-snapshot.json] [--out data/d1-import.sql]
+//                                 [--skip-rates]
+//
+// --skip-rates leaves Freight Rates out of the file. Use it when the rates in
+// the target are already correct: they are 36,750 of the 37,059 rows in a load,
+// and the free plan allows 100,000 rows written per day per account. A reload
+// then costs about 1,000 writes instead of about 74,000.
 //
 // 1. Runs server/migrate/transform.js (strict) on the snapshot.
 // 2. Writes one INSERT file in FK-safe order.
@@ -19,6 +25,7 @@ import { transform } from '../server/migrate/transform.js';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 const args = process.argv.slice(2);
+const skipRates = args.includes('--skip-rates');
 const outIdx = args.indexOf('--out');
 const outFile = outIdx !== -1 ? args[outIdx + 1] : path.join(ROOT, 'data', 'd1-import.sql');
 const inFile = args.find((a, i) => !a.startsWith('--') && (outIdx === -1 || i !== outIdx + 1)) || path.join(ROOT, 'data', 'sheets-snapshot.json');
@@ -32,6 +39,11 @@ try {
   console.error(err.message);
   process.exit(1);
 }
+
+// Freight Rates keeps its DELETE and its INSERTs out of the file, so the rows
+// already in the target survive untouched. Nothing points at freight_rates, so
+// the foreign key check stays clean.
+if (skipRates) delete tables.freight_rates;
 
 // ---- SQL file
 const lit = (v) => {
@@ -64,7 +76,10 @@ fs.writeFileSync(outFile, lines.join('\n') + '\n');
 
 // ---- Reconcile against a fresh database loaded from that file
 const db = new DatabaseSync(':memory:');
-for (const f of ['0001_init.sql', '0002_seed.sql']) db.exec(fs.readFileSync(path.join(ROOT, 'migrations', f), 'utf8'));
+const migrations = path.join(ROOT, 'migrations');
+for (const f of fs.readdirSync(migrations).filter((n) => n.endsWith('.sql')).sort()) {
+  db.exec(fs.readFileSync(path.join(migrations, f), 'utf8'));
+}
 db.exec(fs.readFileSync(outFile, 'utf8'));
 
 const count = (sql) => Number(db.prepare(sql).get().n);
@@ -113,7 +128,7 @@ if (snapshot['Billing Lines']) {
 }
 
 // Freight Rates: one row per non-blank band cell.
-if (snapshot['Freight Rates']) {
+if (snapshot['Freight Rates'] && !skipRates) {
   const headers = snapshot['Freight Rates'][0].map((h) => String(h).trim());
   const bandCols = headers.map((h, i) => (/^\d+\.01-\d+$/.test(h) ? i : -1)).filter((i) => i !== -1);
   const droppedIds = new Set(report.dropped.map((d) => (/^Freight Rates ID (\d+):/.exec(d) || [])[1]).filter(Boolean).map(Number));

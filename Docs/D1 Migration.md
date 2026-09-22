@@ -1,7 +1,7 @@
 # D1 Migration Plan — Google Sheets → Cloudflare D1 (v2.0.0)
 
-Status: PHASE 2 IN PROGRESS (2026-09-17): docs, scripts and hooks done; file deletion and the DEV smoke remain. Tick the boxes as work lands. A fresh session reads this file
-and `HANDOFF.md`, not the codebase, to resume.
+Status: PHASE 3 IN PROGRESS (2026-09-22): the row-write cuts are done. The final DEV load and the RTVS/payroll build remain. Tick the boxes as work lands.
+A fresh session reads this file and `HANDOFF.md`, not the codebase, to resume.
 
 ## 1. Decisions (settled, do not re-open)
 
@@ -207,7 +207,8 @@ CREATE INDEX trips_billing_date ON trips(billing_date);
 CREATE INDEX trips_fo           ON trips(trip_date, fo_number);
 CREATE INDEX trips_waybill      ON trips(waybill_id);
 CREATE INDEX waybills_number    ON waybills(waybill_number);
-CREATE INDEX freight_rates_key  ON freight_rates(origin, area_key, truck_type, effective_date);
+-- freight_rates_key was here; 0003 drops it (no query used it, and it cost a third
+-- written row per rate). area_key stays as a column.
 CREATE INDEX rfl_driver_outlet  ON route_frequency_log(driver_id, outlet_id);
 CREATE INDEX audit_ts           ON audit_log(ts);
 CREATE INDEX sessions_expires   ON sessions(expires_at);
@@ -217,7 +218,7 @@ Self-seeding sheets (Route Type Map, Customer Group Colors, Billing Charge
 Types, Billing Categories) become `INSERT OR IGNORE` seed statements in
 `0002_seed.sql`, in `-- @seed <table>` sections the test harness applies one at
 a time. The import file starts with `DELETE FROM` every table, so the seed rows
-never collide with imported ids. Payroll tables come later as `0003_payroll.sql`.
+never collide with imported ids. `0003_drop_freight_rates_key.sql` drops the unused rate index. Payroll tables come later as `0004_payroll.sql`.
 
 ### 3.1 Transform rules (`server/migrate/transform.js`)
 
@@ -320,13 +321,15 @@ independent and start with W2.
 ### Phase 3 — DEV cutover, then Phase 2 features on D1
 
 - [x] Add `https://develop.angeloyal-oms.pages.dev` to the OAuth client's Authorized JavaScript origins. (Done for the Phase 2 smoke.)
-- [ ] Cut D1 row writes before the next full load. The free plan allows 100,000 rows written per day **per account**, shared by every database in it. D1 counts each index entry as a written row, and a `DELETE` writes too. `freight_rates` is 36,750 of the 37,059 rows in a load, with two indexes, so one load costs about 110,000 writes and a reload over existing data about 220,000.
-  - `scripts/sheets-to-d1.mjs --skip-rates`: leave `DELETE`/`INSERT` for `freight_rates` out of the SQL file when the rates have not changed. A reload drops to about 1,000 writes.
-  - New migration: `DROP INDEX freight_rates_key`. No query uses it (`getFreightRates` reads the whole table and the rate lookup runs in JS; the rate seed filters on `effective_date`). Every rate write then costs 2 rows, not 3. `area_key` stays: the seed writes it.
-  - `db:export:prod` for a PROD → DEV copy: add a variant that passes `--table` for every table except `freight_rates`, so the copy leaves the DEV rates in place.
-  - Optional, reads: `getFreightRates(origin)` reads all 36,750 rows and filters the origin in JS. Filter in SQL (the `UNIQUE` index leads with `origin`) to read about a third. Keep the `_normArea` match: read `SELECT DISTINCT origin` first and pass the matching raw spellings.
+- [x] Cut D1 row writes before the next full load. The free plan allows 100,000 rows written per day **per account**, shared by every database in it. D1 counts each index entry as a written row, and a `DELETE` writes too. `freight_rates` was 36,750 of the 37,059 rows in a load, with two indexes, so one load cost about 110,000 writes and a reload over existing data about 220,000.
+  - [x] `migrations/0003_drop_freight_rates_key.sql` drops `freight_rates_key`. No query used it: the two readers scan the whole table, the rate seed filters on `effective_date`, and every other rate read goes by `id` or by the raw `(origin, area, truck_type, effective_date, band)` key the `UNIQUE` constraint already serves. A rate write now costs 2 rows, not 3, so a load on an empty database is about 74,000 writes. `area_key` stays as a column.
+  - [x] `test/harness.js` and `scripts/sheets-to-d1.mjs` read the whole `migrations/` directory in name order, so a new numbered file needs no edit in either. A `*_seed.sql` file still goes to the harness's per-section seeder.
+  - [x] `scripts/sheets-to-d1.mjs --skip-rates` leaves the `DELETE` and the `INSERT`s for `freight_rates` out of the SQL file, and skips the band-cell check that would then compare against zero. A reload drops to about 1,000 writes.
+  - [x] `npm run db:export:prod:norates` dumps PROD with `--no-schema` and a `--table` per table except `freight_rates` and `sessions`, for a PROD → DEV copy that leaves the DEV rates in place. Empty the DEV tables it covers first, or the inserts hit the primary keys.
+  - [x] Reads: `getFreightRates(origin)` now reads `SELECT DISTINCT origin`, matches the spellings with `_normArea`, then filters in SQL through the `UNIQUE` index. One origin reads about a third of the table instead of all of it.
 - [ ] Final DEV snapshot → `sheets-to-d1` → apply to DEV D1. Rename the DEV Sheet `ARCHIVE pre-v2 — DEV`. Archive the DEV Apps Script deployment.
-- [ ] Build the RTVS tab and payroll on D1 (`0003_payroll.sql`). Normal `develop` workflow.
+  - Budget: a load on an empty database is about 74,000 writes and fits the day. A load over existing rows is about 148,000 and does not, because the `DELETE`s write too. Delete and recreate `angeloyal-oms-dev`, put the new id in `wrangler.toml`, migrate, then import. The OAuth origins do not change.
+- [ ] Build the RTVS tab and payroll on D1 (`0004_payroll.sql`). Normal `develop` workflow.
 
 ### Phase 4 — Release v2.0.0 (Opus + owner present)
 

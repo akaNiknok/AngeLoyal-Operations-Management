@@ -375,6 +375,7 @@ test('getFreightRates takes a set of origins, and no filter still means all', as
     'an empty set is no filter, not an empty answer');
   // The filter normalizes the same way the rate lookup does.
   assert.deepEqual(names(await api.getFreightRates(['  tanza '])), ['TANZA']);
+  assert.deepEqual(await api.getFreightRates('DAVAO'), [], 'an origin with no rows reads nothing');
 });
 
 // ── Review fixes ─────────────────────────────────────────────

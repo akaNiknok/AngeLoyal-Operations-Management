@@ -322,13 +322,15 @@ The DOE rate matrix in long format: **one row per band**. A rate revision insert
 | id | INTEGER PK | The client sees the lowest ID of a block; any band row's ID resolves the block |
 | origin | TEXT | Rebisco warehouse, e.g. `TANZA` |
 | area | TEXT | Destination as the workbook spells it |
-| area_key | TEXT (indexed) | `_normArea(area)`: case- and punctuation-free, for matching |
+| area_key | TEXT | `_normArea(area)`: case- and punctuation-free, for matching |
 | truck_type | TEXT | `6W`, `4W`, `L300` |
 | effective_date | TEXT date | First day the block applies |
 | band | INTEGER 1–25 | Diesel price band |
 | rate | REAL | Pesos. A band with no rate has no row |
 
-`UNIQUE (origin, area, truck_type, effective_date, band)`. The key is the raw area, because the DOE workbook names different towns the same ("San Juan" and "SAN JUAN"). The lookup matches on `area_key`, so the first block wins, as in v1. `getFreightRates()` rebuilds the wide grid for the Billing Matrix panel.
+`UNIQUE (origin, area, truck_type, effective_date, band)`. The key is the raw area, because the DOE workbook names different towns the same ("San Juan" and "SAN JUAN"). The lookup matches on `area_key`, so the first block wins, as in v1. `getFreightRates()` rebuilds the wide grid for the Billing Matrix panel, and filters the origin in SQL through the `UNIQUE` index.
+
+The table carries no second index. `0003_drop_freight_rates_key.sql` dropped `freight_rates_key`, because no query used it and it made every rate write cost a third row. The table is about 36,750 rows, so a data load has to stay inside the 100,000 rows written per day the free plan allows.
 
 #### Band indexing
 

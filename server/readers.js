@@ -340,12 +340,26 @@ export async function getRouteFrequencyForDriver(driverId, windowDays) {
  */
 export async function getFreightRates(origin) {
   const want = (Array.isArray(origin) ? origin : [origin]).filter(Boolean).map(_normArea);
-  const rows = await q(`SELECT * FROM freight_rates ORDER BY id`);
+
+  // A filtered read narrows in SQL, not in JS: the table holds about 36,750
+  // rows and one origin is about a third of them. _normArea still does the
+  // matching, so read the spellings first and pass the raw ones the filter hit.
+  let rows;
+  if (want.length) {
+    const origins = (await q(`SELECT DISTINCT origin FROM freight_rates`))
+      .map((r) => r.origin)
+      .filter((o) => want.includes(_normArea(o)));
+    if (!origins.length) return [];
+    rows = await q(
+      `SELECT * FROM freight_rates WHERE origin IN (${origins.map(() => '?').join(', ')}) ORDER BY id`,
+      ...origins);
+  } else {
+    rows = await q(`SELECT * FROM freight_rates ORDER BY id`);
+  }
 
   const groups = [];
   const byKey = {};
   rows.forEach((r) => {
-    if (want.length && !want.includes(_normArea(r.origin))) return;
     // Grouped on the raw area: "San Juan" and "SAN JUAN" are two matrix rows.
     const key = `${r.origin}|${r.area}|${r.truck_type}|${r.effective_date}`;
     let g = byKey[key];

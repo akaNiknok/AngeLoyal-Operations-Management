@@ -94,8 +94,14 @@ class D1Database {
 //  Schema, fixtures, seed
 // ------------------------------------------------------------
 
-const SCHEMA = fs.readFileSync(path.join(ROOT, 'migrations', '0001_init.sql'), 'utf8');
-const SEED = fs.readFileSync(path.join(ROOT, 'migrations', '0002_seed.sql'), 'utf8');
+// Every migration in order, so a new numbered file needs no edit here. A
+// `*_seed.sql` file is held back: the harness applies its sections one at a
+// time, not in bulk.
+const MIGRATIONS = fs.readdirSync(path.join(ROOT, 'migrations')).filter((f) => f.endsWith('.sql')).sort();
+const readMigration = (f) => fs.readFileSync(path.join(ROOT, 'migrations', f), 'utf8');
+
+const SCHEMA = MIGRATIONS.filter((f) => !f.endsWith('_seed.sql')).map(readMigration).join('\n');
+const SEED = MIGRATIONS.filter((f) => f.endsWith('_seed.sql')).map(readMigration).join('\n');
 
 /** { table: sql } from the `-- @seed <table>` sections of 0002_seed.sql. */
 function seedSections() {
