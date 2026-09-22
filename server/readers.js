@@ -368,17 +368,21 @@ export async function getWaybillsForTrip(tripId) {
  * "assigned too often to the same outlet" warning.
  * @param {number} driverId
  * @param {number} [windowDays=21]
+ * @param {number} [exceptTripId]  Leave this trip out (the caller adds it itself).
  * @returns {Promise<Array<{ outletId, count, outletName }>>}
  */
-export async function getRouteFrequencyForDriver(driverId, windowDays) {
+export async function getRouteFrequencyForDriver(driverId, windowDays, exceptTripId) {
   const cutoff = addDays(todayPH(), -(windowDays || 21));
+  // The log is append-only: a driver swap on a trip adds a row and leaves the
+  // old driver's row in place, and re-scheduling a trip logs it again. So a
+  // trip counts once, and only for the driver it has now.
   const rows = await q(
-    `SELECT f.outlet_id, COUNT(*) AS n, o.outlet_name
+    `SELECT f.outlet_id, COUNT(DISTINCT f.trip_id) AS n, o.outlet_name
      FROM route_frequency_log f
-     JOIN trips t ON t.id = f.trip_id
+     JOIN trips t ON t.id = f.trip_id AND t.driver_id = f.driver_id
      LEFT JOIN outlets o ON o.id = f.outlet_id
-     WHERE f.driver_id = ? AND t.trip_date >= ?
-     GROUP BY f.outlet_id`, Number(driverId), cutoff);
+     WHERE f.driver_id = ? AND t.trip_date >= ? AND t.id IS NOT ?
+     GROUP BY f.outlet_id`, Number(driverId), cutoff, numOrNull(exceptTripId));
   return rows.map((r) => ({ outletId: r.outlet_id, count: r.n, outletName: r.outlet_name || '' }));
 }
 

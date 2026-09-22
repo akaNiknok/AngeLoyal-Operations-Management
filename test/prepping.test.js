@@ -160,6 +160,25 @@ test('markDayScheduled marks crewless Prepping trips Backlog and carries them ov
   assert.deepEqual(trips.filter((t) => t.waybill_id).map((t) => t.id), [1]);
 });
 
+test('two markDayScheduled runs in flight promote the day once', async () => {
+  const { api, db } = asDispatcher(
+    preppingSheets([
+      tripRow({ ID: 1, 'FO Number': 'FO-1', 'Truck ID': 3, 'Driver ID': 9, 'Outlet ID': 12 }),
+      tripRow({ ID: 2, 'FO Number': 'FO-2', 'Outlet ID': 13 }),   // no crew
+    ])
+  );
+
+  const [a, b] = await Promise.all([
+    api.markDayScheduled('6/16/2026', 1),
+    api.markDayScheduled('6/16/2026', 1),
+  ]);
+  assert.equal(a.promoted + b.promoted, 1);
+  assert.equal(a.backlogged + b.backlogged, 1);
+  assert.equal(dump(db, 'trips').length, 3, 'one backlog copy, not two');
+  assert.equal(dump(db, 'waybills').length, 1, 'one waybill, not two');
+  assert.equal(dump(db, 'route_frequency_log').length, 1);
+});
+
 test('markDayScheduled gives blank-FO trips their own waybills', async () => {
   const { api, db } = asDispatcher(
     preppingSheets([

@@ -105,3 +105,19 @@ test('setTripConvoyGroup is gated by ASSIGN_CREW permission', async () => {
   });
   await assert.rejects(() => api.setTripConvoyGroup([1, 2], 'group'), /Access denied/);
 });
+
+// Two dispatchers group different trips on one date at the same moment.
+// Each must get its own token, or the two convoys merge into one.
+test('two groupings in flight on one date get two different tokens', async () => {
+  const { api, db } = asDispatcher(
+    convoySheets([tripRow({ ID: 1 }), tripRow({ ID: 2 }), tripRow({ ID: 3 }), tripRow({ ID: 4 })])
+  );
+
+  const [a, b] = await Promise.all([
+    api.setTripConvoyGroup([1, 2], 'group'),
+    api.setTripConvoyGroup([3, 4], 'group'),
+  ]);
+  assert.notEqual(a.group, b.group);
+  const byId = Object.fromEntries(dump(db, 'trips').map((t) => [t.id, t.convoy_group]));
+  assert.deepEqual([byId[1], byId[2], byId[3], byId[4]], [a.group, a.group, b.group, b.group]);
+});

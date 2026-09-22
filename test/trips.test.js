@@ -174,6 +174,22 @@ test('saveTripChanges spawns a carry-over trip on Redeliver', async () => {
   assert.equal(carry.billing_date, '2026-06-16'); // preserved from parent
 });
 
+// Two saves of the same status in flight at once (two dispatchers, or a
+// retry while the first is still running) both read the old status.
+test('two Redeliver saves in flight spawn one carry-over, not two', async () => {
+  const { api, db } = withExistingTrip();
+  const before = dump(db, 'trips').length;
+
+  const [a, b] = await Promise.all([
+    api.saveTripChanges(50, { tripStatus: 'Redeliver' }),
+    api.saveTripChanges(50, { tripStatus: 'Redeliver' }),
+  ]);
+  assert.equal(a.success && b.success, true);
+  assert.equal([a.newTripId, b.newTripId].filter(Boolean).length, 1);
+  assert.equal(dump(db, 'trips').length, before + 1);
+  assert.equal(dump(db, 'audit_log').filter((r) => r.action === 'TRIP_STATUS_CHANGE').length, 1);
+});
+
 test('saveTripChanges does not spawn a carry-over trip on Preload', async () => {
   const { api, db } = withExistingTrip();
   const before = dump(db, 'trips').length;
@@ -200,7 +216,7 @@ function daysAgo(n) {
 // logged trip id needs a real Trips row dated inside the 21-day window.
 function recentTripRows(ids, recentDate) {
   return ids.map((id) => tripRow({
-    ID: id, 'Trip Date': recentDate, 'Billing Date': recentDate, 'Outlet ID': 12, 'Trip Status': 'Delivered',
+    ID: id, 'Trip Date': recentDate, 'Billing Date': recentDate, 'Outlet ID': 12, 'Driver ID': 9, 'Trip Status': 'Delivered',
   }));
 }
 

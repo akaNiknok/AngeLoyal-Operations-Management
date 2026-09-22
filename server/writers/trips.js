@@ -229,14 +229,18 @@ export async function saveTripChanges(tripId, changes) {
     const sets = {};
     if (changes.truckId !== undefined) sets.truck_id = numOrNull(changes.truckId);
     if (changes.driverId !== undefined) sets.driver_id = numOrNull(changes.driverId);
-    if (changes.tripStatus !== undefined) {
-      sets.trip_status = changes.tripStatus;
-      sets.status_changed_by = currentEmail() || 'unknown';
-      sets.status_changed_at = nowPH();
-    }
     if (changes.remarks !== undefined && changes.remarks !== null) sets.remarks = changes.remarks;
 
     const stmts = [];
+    // The status moves only if it is still the one read above. Two saves in
+    // flight at once both pass the no-op check, and each would spawn its own
+    // carry-over; the loser of this compare-and-set acts as a no-op instead.
+    if (changes.tripStatus !== undefined) {
+      stmts.push(stmt(
+        `UPDATE trips SET trip_status = ?, status_changed_by = ?, status_changed_at = ?
+         WHERE id = ? AND trip_status = ? RETURNING id`,
+        changes.tripStatus, currentEmail() || 'unknown', nowPH(), id, oldStatus));
+    }
     const cols = Object.keys(sets);
     if (cols.length) {
       stmts.push(stmt(`UPDATE trips SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
@@ -248,7 +252,10 @@ export async function saveTripChanges(tripId, changes) {
       helperSlots(raw).forEach((h) => stmts.push(stmt(
         `INSERT INTO trip_helpers (trip_id, employee_id, slot) VALUES (?, ?, ?)`, id, h.employee_id, h.slot)));
     }
-    if (stmts.length) await batch(stmts);
+    if (stmts.length) {
+      const res = await batch(stmts);
+      if (changes.tripStatus !== undefined && !res[0].results.length) delete changes.tripStatus;
+    }
 
     if (changes.truckId !== undefined || changes.driverId !== undefined || changes.helperIds !== undefined) {
       await _auditLog('TRIP_REASSIGN', 'trips', id,
@@ -265,14 +272,17 @@ export async function saveTripChanges(tripId, changes) {
 
     const newStatus = row.trip_status;
     const newDriverId = numOrNull(row.driver_id);
-    const justScheduled = oldStatus === 'Prepping' && newStatus !== 'Prepping';
+    // Only the save that moved the status acts on the move.
+    const justScheduled = changes.tripStatus !== undefined && oldStatus === 'Prepping' && newStatus !== 'Prepping';
     const driverChanged = changes.driverId !== undefined && numOrNull(changes.driverId) !== oldDriverId;
 
     let routeFrequencyWarning = null;
     if (newStatus !== 'Prepping' && newDriverId && (justScheduled || driverChanged)) {
       const outletId = numOrNull(row.outlet_id);
       if (outletId) {
-        const freq = await getRouteFrequencyForDriver(newDriverId);
+        // This trip is counted by the +1 below, whether or not it was
+        // logged for this driver before (a swap back to them).
+        const freq = await getRouteFrequencyForDriver(newDriverId, null, id);
         const existing = freq.find((f) => f.outletId === Number(outletId));
         const newCount = (existing ? existing.count : 0) + 1;
         if (newCount > 5) {
@@ -437,34 +447,35 @@ export async function markDayScheduled(tripDate, prefixId) {
       throw new Error(`Waybill prefix ID ${prefixId} not found.`);
     }
 
-    const day = fromClientDate(tripDate) || tripDate;
+    const day = fromClientDate(tripDate);
+    if (!day) throw new Error('Trip date is required, in M/d/yyyy format.');
     const rows = await q(
       `SELECT id, fo_number, truck_id, driver_id, outlet_id, waybill_id FROM trips
        WHERE trip_status = 'Prepping' AND trip_date = ?`, day);
 
-    const promoted = [];
-    const backlogged = [];
-    rows.forEach((r) => {
-      const rec = {
-        tripId: r.id, foNumber: String(r.fo_number || ''),
-        truckId: numOrNull(r.truck_id), driverId: numOrNull(r.driver_id),
-        outletId: numOrNull(r.outlet_id), waybillId: r.waybill_id,
-      };
-      (rec.truckId || rec.driverId ? promoted : backlogged).push(rec);
-    });
-
-    if (!promoted.length && !backlogged.length) {
-      return { success: true, promoted: 0, waybillsSuggested: 0, backlogged: 0, newTripIds: [] };
-    }
-
-    const email = currentEmail() || 'unknown';
-    const now = nowPH();
-    const touched = promoted.concat(backlogged);
+    const recs = rows.map((r) => ({
+      tripId: r.id, foNumber: String(r.fo_number || ''),
+      truckId: numOrNull(r.truck_id), driverId: numOrNull(r.driver_id),
+      outletId: numOrNull(r.outlet_id), waybillId: r.waybill_id,
+    }));
     const statusOf = (p) => (p.truckId || p.driverId ? 'Scheduled' : 'Backlog');
 
-    await batch(touched.map((p) => stmt(
-      `UPDATE trips SET trip_status = ?, status_changed_by = ?, status_changed_at = ? WHERE id = ?`,
+    // Each trip moves only if it is still Prepping. A second run at the same
+    // moment (two dispatchers, one day) finds them gone and does nothing,
+    // instead of spawning a second backlog copy and a second waybill.
+    const email = currentEmail() || 'unknown';
+    const now = nowPH();
+    const res = await batch(recs.map((p) => stmt(
+      `UPDATE trips SET trip_status = ?, status_changed_by = ?, status_changed_at = ?
+       WHERE id = ? AND trip_status = 'Prepping' RETURNING id`,
       statusOf(p), email, now, p.tripId)));
+    const touched = recs.filter((p, i) => res[i].results.length);
+    const promoted = touched.filter((p) => statusOf(p) === 'Scheduled');
+    const backlogged = touched.filter((p) => statusOf(p) === 'Backlog');
+
+    if (!touched.length) {
+      return { success: true, promoted: 0, waybillsSuggested: 0, backlogged: 0, newTripIds: [] };
+    }
 
     await _auditLogBatch(touched.map((p) => ({
       action: 'TRIP_STATUS_CHANGE', table: 'trips', rowId: p.tripId, oldValue: 'Prepping', newValue: statusOf(p),
@@ -536,18 +547,28 @@ export async function setTripConvoyGroup(tripIds, action) {
 
     let group = '';
     if (action === 'group') {
-      const maxRow = await one(
-        `SELECT MAX(CAST(convoy_group AS INTEGER)) AS m FROM trips
-         WHERE trip_date = ? AND convoy_group IS NOT NULL AND convoy_group != ''`, tripDate);
-      group = String(((maxRow && maxRow.m) || 0) + 1);
+      // The token is minted inside the batch, not read first and written
+      // after: two groupings on one date at once would take the same number
+      // and merge into one convoy. The first trip takes max + 1, and the rest
+      // copy it.
+      const [first, ...rest] = ids;
+      const res = await batch([
+        stmt(`UPDATE trips SET convoy_group = (
+                SELECT CAST(COALESCE(MAX(CAST(convoy_group AS INTEGER)), 0) + 1 AS TEXT) FROM trips
+                WHERE trip_date = ? AND convoy_group IS NOT NULL AND convoy_group != '')
+              WHERE id = ? RETURNING convoy_group`, tripDate, first),
+        ...rest.map((id) => stmt(
+          `UPDATE trips SET convoy_group = (SELECT convoy_group FROM trips WHERE id = ?) WHERE id = ?`, first, id)),
+      ]);
+      group = String(res[0].results[0].convoy_group);
+    } else {
+      await batch(ids.map((id) => stmt(`UPDATE trips SET convoy_group = '' WHERE id = ?`, id)));
     }
 
-    const audits = ids.map((id) => ({
+    await _auditLogBatch(ids.map((id) => ({
       action: 'TRIP_CONVOY_CHANGE', table: 'trips', rowId: id,
       oldValue: byId[id].convoy_group || '', newValue: group,
-    }));
-    await batch(ids.map((id) => stmt(`UPDATE trips SET convoy_group = ? WHERE id = ?`, group, id)));
-    await _auditLogBatch(audits);
+    })));
 
     return { success: true, group };
   } catch (e) {

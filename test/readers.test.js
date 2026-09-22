@@ -168,10 +168,10 @@ test('getRouteFrequencyForDriver counts only in-window trips and joins outlet na
   const sheets = {
     Trips: [
       HEADERS.Trips.slice(),
-      tripRow({ ID: 101, 'Trip Date': today, 'Billing Date': today }),
-      tripRow({ ID: 102, 'Trip Date': today, 'Billing Date': today }),
-      tripRow({ ID: 103, 'Trip Date': '1/1/2020', 'Billing Date': '1/1/2020' }),
-      tripRow({ ID: 104, 'Trip Date': today, 'Billing Date': today }),
+      tripRow({ ID: 101, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 9 }),
+      tripRow({ ID: 102, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 9 }),
+      tripRow({ ID: 103, 'Trip Date': '1/1/2020', 'Billing Date': '1/1/2020', 'Driver ID': 9 }),
+      tripRow({ ID: 104, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 99 }),
     ],
     'Route Frequency Log': [
       HEADERS['Route Frequency Log'].slice(),
@@ -189,6 +189,31 @@ test('getRouteFrequencyForDriver counts only in-window trips and joins outlet na
   assert.equal(freq[0].outletId, 12);
   assert.equal(freq[0].count, 2);
   assert.equal(freq[0].outletName, 'SM Dasma');
+});
+
+// The log only grows: a swap adds a row for the new driver and keeps the old
+// one, and a re-scheduled trip is logged again. A trip counts once, for the
+// driver it has now.
+test('getRouteFrequencyForDriver counts each trip once, for its current driver', async () => {
+  const { api: helperApi } = makeEnv();
+  const today = helperApi.toClientDate(helperApi.todayPH());
+  const t = (id, driver) => tripRow({ ID: id, 'Trip Date': today, 'Billing Date': today, 'Driver ID': driver });
+
+  const sheets = {
+    Trips: [HEADERS.Trips.slice(), t(101, 9), t(102, 9), t(105, 10)],
+    'Route Frequency Log': [
+      HEADERS['Route Frequency Log'].slice(),
+      [1, 101, today, 9, 12], [2, 101, today, 10, 12], [3, 101, today, 9, 12],   // 9 -> 10 -> 9
+      [4, 102, today, 9, 12], [5, 102, today, 9, 12],                           // logged twice
+      [6, 105, today, 9, 12], [7, 105, today, 10, 12],                          // 9 -> 10
+    ],
+    Outlets: [HEADERS.Outlets.slice(), [12, 'SM Dasma', 'Cavite', '', '', '', '6/1/2026']],
+  };
+  const { api } = makeEnv({ sheets, userEmail: EMAIL.Viewer });
+
+  assert.equal((await api.getRouteFrequencyForDriver(9))[0].count, 2);
+  assert.equal((await api.getRouteFrequencyForDriver(10))[0].count, 1);
+  assert.equal((await api.getRouteFrequencyForDriver(9, 21, 101))[0].count, 1, 'the caller\'s own trip is left out');
 });
 
 // ---------------- getBootData and the master shapes ----------------
