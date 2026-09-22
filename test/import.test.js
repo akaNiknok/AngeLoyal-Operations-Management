@@ -319,3 +319,38 @@ test('_resolveOrCreateOutlet returns existing id (case-insensitive) or creates o
 
   assert.equal(await api._resolveOrCreateOutlet('', 'X', 'Y'), ''); // empty name -> ''
 });
+
+// Another request lands a trip and an outlet between the import's reads and
+// its batch. The import must not have claimed their ids in advance.
+test('importRouteFile survives trips and outlets written while it runs', async () => {
+  const { api, db } = asDispatcher(importSheets());
+  const [imp, manual] = await Promise.all([
+    api.importRouteFile('6/16/2026', ROWS),
+    api.createTrip({ tripDate: '6/16/2026', foNumber: 'FO-M', outletName: 'Outlet Beta', area: 'Laguna' }),
+  ]);
+  assert.equal(imp.success, true, (imp.errors || []).join());
+  assert.equal(manual.success, true, manual.error);
+  assert.equal(imp.imported, 3);
+
+  const trips = dump(db, 'trips');
+  assert.equal(trips.length, 4);
+  const beta = dump(db, 'outlets').filter((o) => o.outlet_name === 'Outlet Beta');
+  assert.equal(beta.length, 1, 'one Outlet Beta, shared by both writers');
+  assert.equal(trips.find((t) => t.fo_number === 'FO-2').outlet_id, beta[0].id);
+  assert.equal(imp.newOutlets.find((o) => o.outletName === 'Outlet Beta').id, beta[0].id);
+
+  // Helpers land on their own trip, found inside the batch.
+  const t1 = trips.find((t) => t.fo_number === 'FO-1');
+  assert.deepEqual(helperIdsOf(db, t1.id), [21, 22]);
+  // The audit rows name the real trip ids.
+  const audited = dump(db, 'audit_log').filter((r) => r.action === 'TRIP_CREATE').map((r) => r.row_id).sort();
+  assert.deepEqual(audited, trips.map((t) => t.id).sort());
+});
+
+test('importRouteFile refuses a trip date it cannot read', async () => {
+  const { api, db } = asDispatcher(importSheets());
+  const res = await api.importRouteFile('16/6/2026', ROWS);
+  assert.equal(res.success, false);
+  assert.match(res.errors[0], /M\/d\/yyyy/);
+  assert.equal(dump(db, 'trips').length, 0);
+});

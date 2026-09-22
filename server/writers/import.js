@@ -65,12 +65,13 @@ export async function _resolveOrCreateOutlet(outletName, area, address) {
 export async function importRouteFile(tripDate, rowData, origin) {
   await requirePermission('ADD_MANUAL_TRIP');
   origin = String(origin || '').trim();
-  const day = fromClientDate(tripDate) || tripDate;
+  const day = fromClientDate(tripDate);
 
   try {
-    const [defaults, trucks, typeToCategory, outlets, existingTrips, maxTrip] = await Promise.all([
+    if (!day) throw new Error('Trip date is required, in M/d/yyyy format.');
+    const [defaults, trucks, typeToCategory, outlets, existingTrips] = await Promise.all([
       getDefaultAssignments(), getTrucks(), getRouteTypeCategoryLookup(), getOutlets(),
-      getTrips(tripDate, tripDate), one(`SELECT MAX(id) AS maxId FROM trips`),
+      getTrips(tripDate, tripDate),
     ]);
 
     // Pool of available (active) trucks per uppercased billing category,
@@ -117,42 +118,41 @@ export async function importRouteFile(tripDate, rowData, origin) {
     const email = currentEmail() || 'unknown';
     const now = nowPH();
 
+    // No ids are computed here. D1 runs each batch whole, but another request
+    // can write between the reads above and the batch below, so an id taken
+    // from MAX(id) could already be gone. SQLite assigns every id: a new
+    // outlet is found by its unique name, and a trip's helpers by MAX(id)
+    // right after that trip's insert, inside the same atomic batch.
+
     // --- Outlets: resolved in memory, extended as new ones show up ---
-    const outletNameToId = {};
-    outlets.forEach((o) => { outletNameToId[o.outletName.trim().toLowerCase()] = o.id; });
-    let nextOutletId = outlets.reduce((m, o) => Math.max(m, o.id), 0) + 1;
+    // { id } for an outlet that exists, { name } for one this file adds.
+    const outletByName = {};
+    outlets.forEach((o) => { outletByName[o.outletName.trim().toLowerCase()] = { id: o.id }; });
     const newOutletStmts = [];
     // Returned to the client so it can merge these into its cached outlet
-    // list without a full reboot.
+    // list without a full reboot. The ids are filled in after the batch.
     const newOutlets = [];
 
     const resolveOutlet = (rd) => {
       if (!rd.outletName) return null;
       const nameLower = rd.outletName.trim().toLowerCase();
-      if (outletNameToId[nameLower] !== undefined) return outletNameToId[nameLower];
-      const id = nextOutletId++;
-      outletNameToId[nameLower] = id;
+      if (outletByName[nameLower]) return outletByName[nameLower];
       const name = rd.outletName.trim();
       const area = rd.area || '';
       const address = rd.address || '';
       const customerGroup = rd.customer || '';
+      // DO NOTHING: another request may have added the same outlet since the
+      // read above. The trips then attach to that row by name.
       newOutletStmts.push(stmt(
-        `INSERT INTO outlets (id, outlet_name, area, address, customer_group, notes, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        id, name, area, address, customerGroup, '', now));
-      newOutlets.push({ id, outletName: name, area, address, customerGroup, notes: '' });
-      return id;
+        `INSERT INTO outlets (outlet_name, area, address, customer_group, notes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (outlet_name) DO NOTHING RETURNING id`,
+        name, area, address, customerGroup, '', now));
+      newOutlets.push({ id: null, outletName: name, area, address, customerGroup, notes: '' });
+      return (outletByName[nameLower] = { name });
     };
 
-    // ponytail: the trip id counter comes from one MAX(id) read at the top
-    // of this request, not a per-row RETURNING. That is safe only because D1
-    // serializes writes per database, so nothing else can land a trip
-    // between this read and the batch() below. Revisit with per-row
-    // RETURNING if D1 ever parallelizes writes within one database.
-    let nextTripId = (maxTrip && maxTrip.maxId ? maxTrip.maxId : 0) + 1;
-
-    const tripStmts = [];
-    const helperStmts = [];
+    const tripStmts = [];   // each trip insert, followed by its helper inserts
+    const tripAt = [];      // the index in tripStmts of each trip insert
     const auditEntries = [];
     let imported = 0;
     let skipped = 0;
@@ -162,40 +162,37 @@ export async function importRouteFile(tripDate, rowData, origin) {
     // Creates one trip row. No waybill yet — imported trips land in
     // 'Prepping'; markDayScheduled suggests the waybills once the
     // dispatcher promotes the day.
-    const emitTrip = (rd, outletId, slotTruck, category) => {
+    const emitTrip = (rd, outlet, slotTruck, category) => {
       const truckId = slotTruck ? slotTruck.id : null;
       const def = slotTruck ? defaultByTruck[slotTruck.id] : null;
       const driverId = def ? def.defaultDriverId : null;
       const helperIds = def ? def.defaultHelperIds : [];
+      const byName = !!(outlet && outlet.name);
 
-      const tripId = nextTripId++;
+      tripAt.push(tripStmts.length);
       tripStmts.push(stmt(
         `INSERT INTO trips (
-           id, trip_date, billing_date, fo_number, fo_split_suffix, outlet_id,
+           trip_date, billing_date, fo_number, fo_split_suffix, outlet_id,
            quantity, cbm, restrictions, truck_id, driver_id, truck_billing_category,
            trip_status, parent_trip_id, source, tier, remarks,
            status_changed_by, status_changed_at, added_by, added_at,
            convoy_group, sort_order, origin
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        tripId, day, day, rd.foNumber || '', '', outletId,
+         ) VALUES (?,?,?,?,${byName ? '(SELECT id FROM outlets WHERE outlet_name = ?)' : '?'},
+           ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+        day, day, rd.foNumber || '', '', outlet ? (byName ? outlet.name : outlet.id) : null,
         numOrNull(rd.quantity), numOrNull(rd.cbm), rd.restrictions || '', truckId, driverId, category || '',
         'Prepping', null, 'Import', numOrNull(rd.tier), '',
         '', null, email, now,
         rd.convoyGroup ? String(convoyTokenBase + Number(rd.convoyGroup)) : '', null, origin));
 
       helperSlots(helperIds).forEach((h) => {
-        helperStmts.push(stmt(
-          `INSERT INTO trip_helpers (trip_id, employee_id, slot) VALUES (?, ?, ?)`,
-          tripId, h.employee_id, h.slot));
+        tripStmts.push(stmt(
+          `INSERT INTO trip_helpers (trip_id, employee_id, slot) VALUES ((SELECT MAX(id) FROM trips), ?, ?)`,
+          h.employee_id, h.slot));
       });
 
-      auditEntries.push({
-        action: 'TRIP_CREATE', table: 'trips', rowId: tripId, oldValue: '',
-        newValue: JSON.stringify({ foNumber: rd.foNumber || '', outletId, tripDate }),
-      });
-
+      auditEntries.push({ foNumber: rd.foNumber || '', outlet });
       imported++;
-      return tripId;
     };
 
     // --- Group rows by FO (first-seen order). Rows with no FO each stand alone. ---
@@ -239,16 +236,13 @@ export async function importRouteFile(tripDate, rowData, origin) {
         const primary = slots[0];
 
         // Primary truck visits every outlet row — one multi-drop load.
-        g.rows.forEach((rd) => {
-          const outletId = resolveOutlet(rd);
-          emitTrip(rd, outletId, primary.truck, primary.category);
-        });
+        g.rows.forEach((rd) => emitTrip(rd, resolveOutlet(rd), primary.truck, primary.category));
 
         // Additional trucks (split load) ride the first outlet.
         const firstRow = g.rows[0];
-        const firstOutletId = resolveOutlet(firstRow);
+        const firstOutlet = resolveOutlet(firstRow);
         for (let s = 1; s < slots.length; s++) {
-          emitTrip(firstRow, firstOutletId, slots[s].truck, slots[s].category);
+          emitTrip(firstRow, firstOutlet, slots[s].truck, slots[s].category);
         }
       } catch (rowErr) {
         errors.push(`FO ${g.foNumber || '(none)'}: ${rowErr.message}`);
@@ -256,9 +250,22 @@ export async function importRouteFile(tripDate, rowData, origin) {
       }
     });
 
-    const stmts = [...newOutletStmts, ...tripStmts, ...helperStmts];
-    if (stmts.length) await batch(stmts);
-    await _auditLogBatch(auditEntries);
+    const res = await batch([...newOutletStmts, ...tripStmts]);
+    const tripRes = res.slice(newOutletStmts.length);
+
+    for (let i = 0; i < newOutlets.length; i++) {
+      const row = res[i].results[0];
+      // No row back: a concurrent request added the outlet first.
+      newOutlets[i].id = row ? row.id
+        : (await one(`SELECT id FROM outlets WHERE outlet_name = ?`, newOutlets[i].outletName)).id;
+    }
+    const outletIdOf = (o) => (!o ? null
+      : o.id || newOutlets.find((n) => n.outletName.toLowerCase() === o.name.toLowerCase()).id);
+
+    await _auditLogBatch(auditEntries.map((a, i) => ({
+      action: 'TRIP_CREATE', table: 'trips', rowId: tripRes[tripAt[i]].results[0].id, oldValue: '',
+      newValue: JSON.stringify({ foNumber: a.foNumber, outletId: outletIdOf(a.outlet), tripDate }),
+    })));
 
     return { success: true, imported, skipped, duplicates, errors, newOutlets };
   } catch (e) {
