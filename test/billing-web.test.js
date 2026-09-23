@@ -5,9 +5,17 @@
 //  the parts that would merely look wrong on screen.
 // ============================================================
 
+// The office runs on Manila time, 8 hours ahead of UTC. A UTC date slip only
+// shows in a zone east of UTC, so pin the zone the operators actually use.
+// node:test runs each file in its own process, so this reaches no other file.
+process.env.TZ = 'Asia/Manila';
+
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadWeb, fakeEl } = require('./webharness');
+
+/** Lets pending promise callbacks run — call() settles on a microtask. */
+const tick = () => new Promise((r) => setImmediate(r));
 
 /**
  * Loads the billing scripts with a stub document that answers real values for
@@ -47,7 +55,8 @@ function loadBilling(fields = {}) {
       '   .map((l) => l.id);' +
       '};' +
       'globalThis.__order = () => billingOrder.slice();' +
-      'globalThis.__bands = () => FUEL_BANDS.slice();'
+      'globalThis.__bands = () => FUEL_BANDS.slice();' +
+      'globalThis.__setRates = (rows) => { rateMatrix = rows; };'
   );
   return { ui: sandbox, els };
 }
@@ -126,6 +135,83 @@ test('the subcon filter matches the waybill prefix', () => {
   const visible = ui.visibleBillingLines();
   assert.equal(visible.length, 1);
   assert.equal(visible[0].waybillNumber, 'GL-0451');
+});
+
+test('a short prefix does not match a longer prefix that starts with it', () => {
+  const { ui } = loadBilling({ 'bl-prefix': 'G' });
+  ui.__setLines([
+    line({ id: 1, waybillNumber: 'G-0100' }),
+    line({ id: 2, waybillNumber: 'GL-0451' }),
+  ]);
+
+  assert.deepEqual(
+    Array.from(ui.visibleBillingLines().map((l) => l.waybillNumber)),
+    ['G-0100']
+  );
+});
+
+// ── The default week ──────────────────────────────────────────
+
+test('the default week is Monday to today in Manila time, also before 8 AM', () => {
+  const { ui } = loadBilling();
+  // Monday 7:00 AM in Manila is still Sunday in UTC.
+  const mondayMorning = new Date(2026, 8, 21, 7, 0);
+  assert.deepEqual(
+    { ...ui.billingDefaultRange(mondayMorning) },
+    { from: '2026-09-21', to: '2026-09-21' }
+  );
+  // Thursday 6:30 AM: the week still starts on Monday the 21st.
+  assert.deepEqual(
+    { ...ui.billingDefaultRange(new Date(2026, 8, 24, 6, 30)) },
+    { from: '2026-09-21', to: '2026-09-24' }
+  );
+  // Sunday belongs to the week that started the Monday before.
+  assert.deepEqual(
+    { ...ui.billingDefaultRange(new Date(2026, 8, 27, 7, 0)) },
+    { from: '2026-09-21', to: '2026-09-27' }
+  );
+});
+
+// ── Stamping a billing number ─────────────────────────────────
+
+test('stamping skips ticked lines that the filter now hides', async () => {
+  const { ui } = loadBilling({ 'bl-number': 'B-0042' });
+  ui.__setLines([
+    line({ id: 1, waybillNumber: 'AY-11801', origin: 'TANZA' }),
+    line({ id: 2, waybillNumber: 'AY-11802', origin: 'LINGUNAN' }),
+  ]);
+  ui.toggleBillingRow(1, true);
+  ui.toggleBillingRow(2, true);
+  // The dispatcher narrows the view to one warehouse after ticking both.
+  ui.document.getElementById('bl-origin').value = 'TANZA';
+
+  const sent = [];
+  ui.confirm = () => true;
+  ui.loadBilling = () => {};
+  ui.call = (fn, ...args) => {
+    sent.push({ fn, args });
+    return Promise.resolve({ success: true, updated: args[0].length });
+  };
+  ui.stampBillingNumber();
+  await tick();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].fn, 'setBillingNumber');
+  assert.deepEqual(Array.from(sent[0].args[0]), [1]);
+  assert.equal(sent[0].args[1], 'B-0042');
+});
+
+test('stamping with every ticked line filtered away sends nothing', () => {
+  const { ui } = loadBilling({ 'bl-status': 'billed', 'bl-number': 'B-0042' });
+  ui.__setLines([line({ id: 1, waybillNumber: 'AY-11801' })]);
+  ui.toggleBillingRow(1, true);
+
+  let called = false;
+  ui.confirm = () => true;
+  ui.call = () => { called = true; return new Promise(() => {}); };
+  ui.stampBillingNumber();
+
+  assert.equal(called, false);
 });
 
 test('the origin filter keeps one warehouse', () => {
@@ -240,6 +326,78 @@ test('a workbook column midpoint maps onto its band', () => {
   assert.equal(ui.bandLabelForPrice(32.5), '30.01-35');
   assert.equal(ui.bandLabelForPrice(67.5), '65.01-70');
   assert.equal(ui.bandLabelForPrice(152.5), '150.01-155');
+});
+
+// ── The rates in force ────────────────────────────────────────
+// The default matrix view shows the rate billing uses today: per origin, area
+// and truck type, the newest block that has started — as _indexRates() does.
+
+function rate(o) {
+  return Object.assign(
+    { id: 1, origin: 'TANZA', area: 'Calamba', truckType: '4W', effectiveDate: '1/6/2026', bands: {} },
+    o
+  );
+}
+
+test('the in-force view keeps every origin, each on its own newest block', () => {
+  const { ui } = loadBilling();
+  const rows = [
+    rate({ id: 1, origin: 'TANZA', effectiveDate: '1/6/2026' }),
+    rate({ id: 2, origin: 'TANZA', effectiveDate: '9/1/2026' }),
+    // LINGUNAN was never re-seeded: its January block is still the one in force.
+    rate({ id: 3, origin: 'LINGUNAN', effectiveDate: '1/6/2026' }),
+  ];
+
+  const ids = [...ui.ratesInForce(rows, '2026-09-23')].map((r) => r.id).sort();
+  assert.deepEqual(ids, [2, 3]);
+});
+
+test('a block that has not started yet is not in force', () => {
+  const { ui } = loadBilling();
+  const rows = [
+    rate({ id: 1, effectiveDate: '9/1/2026' }),
+    rate({ id: 2, effectiveDate: '9/29/2026' }),
+  ];
+
+  const ids = [...ui.ratesInForce(rows, '2026-09-23')].map((r) => r.id);
+  assert.deepEqual(ids, [1]);
+});
+
+test('areas match the way the server matches them, ignoring case and spacing', () => {
+  const { ui } = loadBilling();
+  const rows = [
+    rate({ id: 1, area: 'San Juan', effectiveDate: '1/6/2026' }),
+    rate({ id: 2, area: 'SAN JUAN', effectiveDate: '9/1/2026' }),
+    rate({ id: 3, area: 'San Juan', truckType: '6W', effectiveDate: '1/6/2026' }),
+  ];
+
+  const ids = [...ui.ratesInForce(rows, '2026-09-23')].map((r) => r.id).sort();
+  assert.deepEqual(ids, [2, 3]);
+});
+
+test('All origins with the default view renders every warehouse', () => {
+  const { ui, els } = loadBilling({ 'bm-origin': '', 'bm-effective': '', 'bm-type': '', 'bm-search': '' });
+  // Dates well in the past: this test renders against the real today.
+  ui.__setRates([
+    rate({ id: 1, origin: 'TANZA', effectiveDate: '6/3/2025' }),
+    rate({ id: 2, origin: 'LINGUNAN', effectiveDate: '1/7/2025' }),
+  ]);
+  ui.populateEffectiveDates();
+  ui.renderRateMatrix();
+
+  const html = els['rate-matrix-tbody'].innerHTML;
+  assert.match(html, /TANZA/);
+  assert.match(html, /LINGUNAN/);
+  assert.equal(els['bm-count'].textContent, '2 rates');
+});
+
+test('the effective-date list offers the in-force view first and defaults to it', () => {
+  const { ui, els } = loadBilling({ 'bm-effective': '' });
+  ui.__setRates([rate({ effectiveDate: '9/1/2026' }), rate({ id: 2, effectiveDate: '1/6/2026' })]);
+  ui.populateEffectiveDates();
+
+  assert.match(els['bm-effective'].innerHTML, /^<option value="">In force today<\/option>/);
+  assert.equal(els['bm-effective'].value, '');
 });
 
 // ── The DOE price week ────────────────────────────────────────

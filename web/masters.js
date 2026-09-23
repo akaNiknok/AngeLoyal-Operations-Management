@@ -145,17 +145,18 @@
                 const catFilterEl = document.getElementById(
                     "trucks-category-filter",
                 );
-                if (catFilterEl.options.length <= 1) {
-                    catFilterEl.innerHTML =
-                        `<option value="">All categories</option>` +
-                        billingCategories
-                            .filter((c) => c.active !== false)
-                            .map(
-                                (c) =>
-                                    `<option value="${esc(c.name)}">${esc(c.name)}</option>`,
-                            )
-                            .join("");
-                }
+                // Rebuilt every render, so a category added, renamed or
+                // removed since the last one shows up here too.
+                const catNames = billingCategories
+                    .filter((c) => c.active !== false)
+                    .map((c) => c.name);
+                const keepCat = catFilterEl.value;
+                catFilterEl.innerHTML =
+                    `<option value="">All categories</option>` +
+                    catNames
+                        .map((n) => `<option value="${esc(n)}">${esc(n)}</option>`)
+                        .join("");
+                catFilterEl.value = catNames.includes(keepCat) ? keepCat : "";
                 const catFilter = catFilterEl.value;
                 const tbody = document.getElementById("trucks-tbody");
                 const isAdmin = currentUser.role === "Admin";

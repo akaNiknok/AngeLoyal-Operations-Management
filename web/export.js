@@ -17,6 +17,13 @@
                 if (dd) dd.classList.remove("open");
             });
 
+            // The day the exported rows belong to, as yyyy-mm-dd. Read off the
+            // loaded board, not the date picker: while a newly picked day is
+            // still loading, the board still holds the last one.
+            function exportDateIso() {
+                return mdyToIso(dispatchData && dispatchData.date);
+            }
+
             // Maps a Truck Billing Category back to one of the route file's
             // type-count columns. Exact name match first, else the first
             // active Route Type Map entry pointing at that category.
@@ -110,7 +117,7 @@
                     showToast("No trips to export for this date.", "warning");
                     return;
                 }
-                const dateVal = document.getElementById("dispatch-date").value;
+                const dateVal = exportDateIso();
 
                 const header = [
                     "ORIGINAL RDD", "REVISED RDD", "STATUS", "Sold-to party",
@@ -414,7 +421,7 @@
 
             function printDriverShare(mode) {
                 const isJpg = mode === "jpg";
-                const dateVal = document.getElementById("dispatch-date").value;
+                const dateVal = exportDateIso();
                 const cards = driverShareCards
                     .map((c) => driverShareCardHtml(c, true))
                     .join("");
@@ -507,7 +514,7 @@
                     showToast("No trips to print for this date.", "warning");
                     return;
                 }
-                const dateVal = document.getElementById("dispatch-date").value;
+                const dateVal = exportDateIso();
 
                 // Cycle print-safe convoy colors in model order — the stripe on
                 // the Convoy cell is the convoy indicator (kept as-is).

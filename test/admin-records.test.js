@@ -230,3 +230,47 @@ test('the signed-in admin gets no role dropdown and no Remove on their own row',
   assert.match(html, /toggleUserActive\(2\)/);
   assert.match(html, /<option value="Viewer" selected>/);
 });
+
+// ---------------- Trucks panel ----------------
+
+// The category filter used to fill itself once and never again, so a category
+// added in Settings was missing from it until a page reload.
+test('the trucks category filter picks up a category added after the first render', () => {
+  const els = {};
+  const el = (id) => (els[id] = els[id] || { value: '', checked: true, innerHTML: '', textContent: '', options: { length: 0 } });
+  const { sandbox } = loadMasters({
+    document: { getElementById: el, createElement: () => el('tmp'), querySelectorAll: () => [] },
+  });
+  sandbox.billingCategories.push({ id: 1, name: '4W', active: true });
+  sandbox.renderTrucksAdmin();
+  // A browser select now has its options; the old code saw that and stopped.
+  els['trucks-category-filter'].options = { length: 2 };
+
+  sandbox.billingCategories.push({ id: 2, name: '10W', active: true });
+  sandbox.renderTrucksAdmin();
+
+  assert.match(els['trucks-category-filter'].innerHTML, /<option value="10W">/);
+});
+
+test('the trucks category filter keeps its choice, and drops one that is gone', () => {
+  const els = {};
+  const el = (id) => (els[id] = els[id] || { value: '', checked: true, innerHTML: '', textContent: '', options: { length: 0 } });
+  const { sandbox } = loadMasters({
+    document: { getElementById: el, createElement: () => el('tmp'), querySelectorAll: () => [] },
+  });
+  sandbox.billingCategories.push({ id: 1, name: '4W', active: true }, { id: 2, name: '6W', active: true });
+  sandbox.trucks.push(
+    { id: 1, plate: 'AAA-111', billingCategory: '4W', active: true },
+    { id: 2, plate: 'BBB-222', billingCategory: '6W', active: true },
+  );
+
+  el('trucks-category-filter').value = '6W';
+  sandbox.renderTrucksAdmin();
+  assert.equal(els['trucks-category-filter'].value, '6W');
+  assert.equal(els['trucks-count'].textContent, '1 trucks');
+
+  sandbox.billingCategories[1].active = false; // 6W removed in Settings
+  sandbox.renderTrucksAdmin();
+  assert.equal(els['trucks-category-filter'].value, '');
+  assert.equal(els['trucks-count'].textContent, '2 trucks');
+});

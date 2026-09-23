@@ -165,18 +165,31 @@
                         if (opts.revert) opts.revert();
                         // A dropped connection (fetch rejects with TypeError)
                         // says nothing about the write: it may have landed.
-                        // Reload the board instead of trusting the revert.
+                        // Reload instead of trusting the revert.
                         if (e instanceof TypeError) {
                             showToast(
                                 "Connection lost during the save. Reloading to show what saved.",
                                 "error",
                             );
-                            loadDispatch(true);
+                            resyncOpenPanel();
                             return;
                         }
                         showToast("Error: " + (e && e.message), "error");
                     },
                 );
+            }
+
+            // Re-reads the server's truth for whichever panel is open. bgSave
+            // serves every panel, not just the board: the master data comes
+            // from getBootData, and re-opening the panel re-renders it (and
+            // re-fetches the board, billing lines or rates it owns).
+            function resyncOpenPanel() {
+                const open = document.querySelector(".panel.active");
+                const name = open ? open.id.replace("panel-", "") : "dispatch";
+                call("getBootData").then((boot) => {
+                    applyBootData(boot);
+                    switchPanel(name);
+                }, toastError);
             }
 
             // ── BOOT ──────────────────────────────────────────────────
@@ -201,10 +214,6 @@
             // forced the old server-side redirect flow is gone: Google Identity
             // Services can render its button inline and hand us an ID token,
             // which we POST to login() to trade for an app session.
-            //
-            // Set right after a sign-in so the next loadAppData() skips the
-            // cached paint (see loadAppData).
-            let justSignedIn = false;
 
             // Called by the GIS script's onload (see index.html).
             function initGis() {
@@ -250,15 +259,15 @@
                             );
                             return;
                         }
-                        sessionToken = r.sessionToken;
-                        storeSet("oms_session", sessionToken);
+                        storeSet("oms_session", r.sessionToken);
                         // Another account's cached boot data must never flash
                         // on screen for this one.
-                        justSignedIn = true;
                         storeDel("oms_boot");
-                        document.getElementById("auth-overlay").style.display =
-                            "none";
-                        loadAppData();
+                        // A fresh page, not loadAppData(): the last account's
+                        // unhidden menus, tables and loaded billing lines live
+                        // in this page, and a reload is the one reset that
+                        // cannot miss any of them. bootApp resumes the session.
+                        location.reload();
                     },
                     () => showSignIn("Sign-in failed. Please try again."),
                 );
@@ -276,11 +285,10 @@
             // ── DATA LOAD (after sign-in) ─────────────────────────────
             // SWR boot: paint instantly from the last visit's boot data in
             // localStorage, then getBootData() revalidates in the background.
-            // Skipped right after a fresh sign-in, so one account's cached UI
+            // A sign-in deletes that cache first, so one account's cached UI
             // never flashes for another account.
             function loadAppData() {
-                const cachedRaw = justSignedIn ? null : storeGet("oms_boot");
-                justSignedIn = false;
+                const cachedRaw = storeGet("oms_boot");
                 let painted = false;
                 if (cachedRaw) {
                     try {
@@ -748,14 +756,25 @@
                     .replace(/>/g, "&gt;")
                     .replace(/"/g, "&quot;");
             }
-            function todayStr() {
-                const d = new Date();
+            // A Date as yyyy-mm-dd in the browser's own time zone. Never
+            // toISOString(): that is UTC, which runs 8 hours behind Manila,
+            // so before 8 AM it names yesterday.
+            function isoDate(d) {
                 return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            }
+            function todayStr() {
+                return isoDate(new Date());
             }
             function isoToMDY(iso) {
                 if (!iso) return "";
                 const [y, m, d] = iso.split("-");
                 return `${Number(m)}/${Number(d)}/${y}`;
+            }
+            /** M/d/yyyy → yyyy-mm-dd, the format a date input wants. */
+            function mdyToIso(mdy) {
+                const [m, d, y] = String(mdy || "").split("/");
+                if (!y) return "";
+                return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
             }
 
             function setSyncing(on) {

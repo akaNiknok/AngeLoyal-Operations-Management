@@ -41,14 +41,7 @@
             function latestTuesdayIso(iso) {
                 const d = iso ? new Date(iso + "T00:00:00") : new Date();
                 d.setDate(d.getDate() - ((d.getDay() + 5) % 7)); // Tue (2) → 0
-                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-            }
-
-            /** M/d/yyyy → yyyy-mm-dd, the format a date input wants. */
-            function mdyToIso(mdy) {
-                const [m, d, y] = String(mdy || "").split("/");
-                if (!y) return "";
-                return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                return isoDate(d);
             }
 
             // ── Panel entry ───────────────────────────────────────────
@@ -107,10 +100,31 @@
                 const dates = [...new Set(rateMatrix.map((r) => r.effectiveDate))]
                     .filter(Boolean)
                     .sort((a, b) => new Date(b) - new Date(a));
-                sel.innerHTML = dates
-                    .map((d) => `<option value="${esc(d)}">${esc(d)}</option>`)
-                    .join("");
-                if (keep && dates.includes(keep)) sel.value = keep;
+                // "" is the default: the rates billing would use today. One
+                // date picked for every origin hides each warehouse whose
+                // newest block is older than that date.
+                sel.innerHTML =
+                    '<option value="">In force today</option>' +
+                    dates
+                        .map((d) => `<option value="${esc(d)}">${esc(d)}</option>`)
+                        .join("");
+                sel.value = keep && dates.includes(keep) ? keep : "";
+            }
+
+            // The rows in force on `iso`: per origin, area and truck type, the
+            // newest block that has started. Mirrors _indexRates() in
+            // server/internals.js, key normalization included, so the screen
+            // shows the rate billing actually uses.
+            function ratesInForce(rows, iso) {
+                const norm = (s) => String(s == null ? "" : s).toUpperCase().replace(/[^A-Z0-9]/g, "");
+                const best = {};
+                rows.forEach((r) => {
+                    const d = mdyToIso(r.effectiveDate);
+                    if (!d || d > iso) return;
+                    const key = norm(r.origin) + "|" + norm(r.area) + "|" + norm(r.truckType);
+                    if (!best[key] || d > best[key].d) best[key] = { d, r };
+                });
+                return new Set(Object.values(best).map((b) => b.r));
             }
 
             function populateTruckTypes() {
@@ -305,8 +319,9 @@
                     document.getElementById("bm-focus-band").checked && liveBand;
                 const cols = focus ? [liveBand] : FUEL_BANDS;
 
+                const inForce = effective ? null : ratesInForce(rateMatrix, todayStr());
                 const rows = rateMatrix
-                    .filter((r) => !effective || r.effectiveDate === effective)
+                    .filter((r) => (effective ? r.effectiveDate === effective : inForce.has(r)))
                     .filter((r) => !truckType || r.truckType === truckType)
                     .filter((r) => !search || r.area.toUpperCase().includes(search))
                     .sort(

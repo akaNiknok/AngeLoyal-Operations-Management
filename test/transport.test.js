@@ -12,6 +12,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const vm = require('node:vm');
 const { loadWeb } = require('./webharness');
 
 const API = '/api';
@@ -115,4 +116,81 @@ test('toastError surfaces the message and stops the spinner', () => {
 
   sandbox.toastError(undefined);
   assert.equal(toasts[1].msg, 'Something went wrong');
+});
+
+// ── Sign-in and a lost connection ─────────────────────────────
+
+/** Lets pending promise callbacks run — call() settles on a microtask. */
+const tick = () => new Promise((r) => setImmediate(r));
+
+// A sign-in can follow another account's sign-out in the same page. That
+// account's unhidden menus and loaded tables live in the page, so the only
+// reset that cannot miss one is a fresh page.
+test('a sign-in stores the session and reloads the page', async () => {
+  const store = {};
+  let reloads = 0;
+  const { sandbox: ui } = loadWeb(['core.js'], {
+    API_URL: API,
+    location: { hostname: 'localhost', reload: () => { reloads++; } },
+    localStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = v; },
+      removeItem: (k) => { delete store[k]; },
+    },
+    fetch: () => Promise.resolve({
+      json: () => Promise.resolve({ ok: true, data: { success: true, sessionToken: 'sess-new' } }),
+    }),
+  });
+  store.oms_boot = '{"session":{"role":"Admin"}}'; // the last account's cache
+
+  ui.handleCredentialResponse({ credential: 'google-id-token' });
+  await tick();
+
+  assert.equal(reloads, 1);
+  assert.equal(store.oms_session, 'sess-new');
+  assert.equal('oms_boot' in store, false, 'the last account\'s boot cache must go');
+});
+
+// A dropped connection says nothing about whether the write landed, so the
+// open panel re-reads the truth — whichever panel it is, not only the board.
+test('a save lost to the network re-reads the open panel, not just the board', async () => {
+  let ui;
+  const seen = [];
+  ({ sandbox: ui } = loadWeb(['core.js'], {
+    API_URL: API,
+    document: {
+      createElement: () => ({}),
+      getElementById: () => ({ classList: { toggle() {}, add() {}, remove() {} }, style: {} }),
+      querySelector: (sel) => (sel === '.panel.active' ? { id: 'panel-billing' } : null),
+      querySelectorAll: () => [],
+      addEventListener() {},
+      head: { appendChild() {} },
+    },
+    fetch: (url, init) => {
+      const { fn } = JSON.parse(init.body);
+      seen.push(fn);
+      // A real fetch rejects with the page's own TypeError on a dropped line.
+      if (fn === 'saveBillingLine') {
+        const PageTypeError = vm.runInContext('TypeError', ui);
+        return Promise.reject(new PageTypeError('Failed to fetch'));
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true, data: { session: { role: 'Admin' } } }) });
+    },
+  }));
+  const applied = [];
+  const opened = [];
+  let reverted = 0;
+  ui.applyBootData = (boot) => applied.push(boot);
+  ui.switchPanel = (name) => opened.push(name);
+  ui.loadDispatch = () => opened.push('dispatch-only');
+  ui.showToast = () => {};
+
+  ui.bgSave('saveBillingLine', [7, { mano: 100 }], { revert: () => { reverted++; } });
+  await tick();
+  await tick();
+
+  assert.equal(reverted, 1);
+  assert.deepEqual(seen, ['saveBillingLine', 'getBootData']);
+  assert.equal(applied.length, 1);
+  assert.deepEqual(opened, ['billing']);
 });

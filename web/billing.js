@@ -38,18 +38,22 @@
                 const from = document.getElementById("bl-from");
                 const to = document.getElementById("bl-to");
                 if (!from.value) {
-                    // Default to the current week, which is how the company
-                    // bills: one submission covers Monday to Saturday.
-                    const today = new Date();
-                    const monday = new Date(today);
-                    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-                    from.value = monday.toISOString().slice(0, 10);
-                    to.value = today.toISOString().slice(0, 10);
+                    const range = billingDefaultRange(new Date());
+                    from.value = range.from;
+                    to.value = range.to;
                 }
                 const docDate = document.getElementById("bl-doc-date");
                 if (!docDate.value) docDate.value = todayStr();
                 populateBillingFilters();
                 loadBilling();
+            }
+
+            // The current week, which is how the company bills: one
+            // submission covers Monday to Saturday.
+            function billingDefaultRange(today) {
+                const monday = new Date(today);
+                monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+                return { from: isoDate(monday), to: isoDate(today) };
             }
 
             function populateBillingFilters() {
@@ -127,8 +131,9 @@
                         if (status === "billed" && l.status !== "Billed") return false;
                         if (status === "deferred" && l.status !== "Deferred") return false;
                         if (origin && l.origin !== origin) return false;
-                        // A prefix matches the leading token of the number.
-                        if (prefix && !l.waybillNumber.startsWith(prefix)) return false;
+                        // A prefix matches the leading token of the number,
+                        // up to its dash — "G" must not match "GL-0451".
+                        if (prefix && !l.waybillNumber.startsWith(prefix + "-")) return false;
                         return true;
                     });
             }
@@ -366,7 +371,10 @@
 
             function stampBillingNumber() {
                 const num = document.getElementById("bl-number").value.trim();
-                const ids = [...billingSelected];
+                // Only ticked rows the filter still shows: a tick survives a
+                // filter change, and the printout covers only what is visible.
+                const visible = new Set(visibleBillingLines().map((l) => l.id));
+                const ids = [...billingSelected].filter((id) => visible.has(id));
                 if (!ids.length) {
                     showToast("Tick the lines this billing covers.", "warning");
                     return;

@@ -866,7 +866,10 @@
                 }
                 const suggested = t.waybillSuggested || "";
                 if (canE && t.suggestedWaybillId) {
-                    return `<span class="wb-inline"><input id="wb-in-${t.id}" type="text" class="cell-input wb-in" value="${esc(suggested)}" placeholder="AY-…" onchange="saveSuggestedWaybill(${t.id}, this.value)"><button class="row-confirm" onclick="confirmWaybillInline(${t.id})">✓</button></span>`;
+                    // mousedown keeps focus in the box: a blur would fire its
+                    // change, and that rename would race the confirm — which
+                    // already carries the typed number — and lose.
+                    return `<span class="wb-inline"><input id="wb-in-${t.id}" type="text" class="cell-input wb-in" value="${esc(suggested)}" placeholder="AY-…" onchange="saveSuggestedWaybill(${t.id}, this.value)"><button class="row-confirm" onmousedown="event.preventDefault()" onclick="confirmWaybillInline(${t.id})">✓</button></span>`;
                 }
                 return suggested
                     ? `<span class="wb-suggested">${esc(suggested)}</span>`

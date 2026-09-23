@@ -17,7 +17,7 @@
                     const d = new Date();
                     to.value = todayStr();
                     d.setDate(d.getDate() - 6);
-                    from.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                    from.value = isoDate(d);
                 }
                 loadAudit(0);
             }

@@ -158,6 +158,7 @@ export function _fuelPriceOn(prices, onDate) {
  * Indexes rate rows for lookup by origin, area and truck type. Only rows in
  * force on `onDate` are kept, and the newest block wins — that is the date
  * lock: a revision published today never re-prices last week's billing.
+ * ratesInForce() in web/billing-matrix.js mirrors this for the matrix view.
  * @param {Object[]} rates   From getFreightRates().
  * @param {string}   onDate  'YYYY-MM-DD' or client 'M/d/yyyy'.
  * @returns {Object} Map of 'ORIGIN|AREA|TYPE' -> rate row.
