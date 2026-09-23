@@ -219,7 +219,7 @@ One row per delivery drop. Several rows share an FO number on a multi-drop route
 | driver_id | INTEGER FK → employees | |
 | truck_billing_category | TEXT | Snapshot of the truck's category at dispatch |
 | trip_status | TEXT | CHECK: `Prepping`, `Backlog`, `Scheduled`, `Preload`, `Delivered`, `Undelivered`, `Foul Trip - No Redeliver`, `Foul Trip - For Redeliver`, `Redeliver`, `Two-Day Trip` |
-| parent_trip_id | INTEGER FK → trips | The trip a carry-over came from |
+| parent_trip_id | INTEGER FK → trips (partial index) | The trip a carry-over came from |
 | source | TEXT | CHECK: `Import`, `Manual`, `Carry-over` |
 | tier | INTEGER | Client priority 1–3; null for manual trips |
 | remarks | TEXT | |
@@ -268,7 +268,7 @@ Append-only. One row each time a driver is scheduled to an outlet. It feeds the 
 | Column | Type | Notes |
 | :-- | :-- | :-- |
 | id | INTEGER PK | |
-| trip_id | INTEGER FK → trips | The date comes from this join |
+| trip_id | INTEGER FK → trips (indexed) | The date comes from this join |
 | driver_id | INTEGER FK → employees | |
 | outlet_id | INTEGER FK → outlets | |
 
@@ -286,10 +286,10 @@ One row per **load**: the trips that share one number on one FO. The trips point
 | :-- | :-- | :-- |
 | id | INTEGER PK | |
 | waybill_number | TEXT (nocase, indexed) | e.g. `AY-10761`, `AY-10761-R`. **Not unique**: a hand-typed number can land on two loads, and each load bills on its own |
-| prefix_id | INTEGER FK → waybill_prefixes | |
+| prefix_id | INTEGER FK → waybill_prefixes | Indexed with `sequence_number`, so the counter reads the highest sequence as one row |
 | sequence_number | INTEGER | The numeric part |
 | waybill_type | TEXT | CHECK: `Regular`, `Redeliver`, `Foul Trip` |
-| parent_waybill_id | INTEGER FK → waybills | A `-R`/`-FT` waybill points at the original |
+| parent_waybill_id | INTEGER FK → waybills (partial index) | A `-R`/`-FT` waybill points at the original |
 | status | TEXT | CHECK: `Suggested`, `Confirmed`. `Confirmed` is locked: the server refuses to change it |
 | confirmed_by, confirmed_at | TEXT | Email and timestamp of confirmation |
 
@@ -328,7 +328,7 @@ The DOE rate matrix in long format: **one row per band**. A rate revision insert
 | band | INTEGER 1–25 | Diesel price band |
 | rate | REAL | Pesos. A band with no rate has no row |
 
-`UNIQUE (origin, area, truck_type, effective_date, band)`. The key is the raw area, because the DOE workbook names different towns the same ("San Juan" and "SAN JUAN"). The lookup matches on `area_key`, so the first block wins, as in v1. `getFreightRates()` rebuilds the wide grid for the Billing Matrix panel, and filters the origin in SQL through the `UNIQUE` index.
+`UNIQUE (origin, area, truck_type, effective_date, band)`. The key is the raw area, because the DOE workbook names different towns the same ("San Juan" and "SAN JUAN"). The lookup matches on `area_key`, so the first block wins, as in v1. `getFreightRates()` rebuilds the wide grid for the Billing Matrix panel, and filters the origin in SQL through the `UNIQUE` index. The origin list is a skip-scan of that index, one row for each origin: `SELECT DISTINCT origin` would read the whole table on every boot.
 
 The table carries no second index. `0003_drop_freight_rates_key.sql` dropped `freight_rates_key`, because no query used it and it made every rate write cost a third row. The table is about 36,750 rows, so a data load has to stay inside the 100,000 rows written per day the free plan allows.
 
@@ -504,6 +504,14 @@ A Rebisco route file has one drop per row. One Freight Order (FO) can span sever
 - **One waybill per truck.** The FO's first truck visits every outlet row of the FO, and those trips share one waybill. Each extra truck gets its own waybill.
 - **No double-booking.** Trucks come from the pool of the resolved category, in ID order, skipping trucks already used on that date. When the pool runs out, the trip stays unassigned with its category recorded.
 - **Convoys from fill colors.** Rebisco highlights the type count columns in alternating yellow and blue runs. Each run is one truck batch and can span several FOs. The importer reads only those columns' fills, starts a batch at each color change, folds uncolored rows into the batch of a colored row with the same FO, and stores batches that need 2 or more trucks in `trips.convoy_group`. Tokens are numbers, unique within a trip date (a re-import starts past the date's highest token). If the fills are missing, the import runs with no groups.
+
+### The row budget
+
+The Workers free plan allows 5,000,000 rows read and 100,000 rows written a day. D1 counts every row a query visits, not the rows it returns, and every index entry a write changes.
+
+- **No full scan on a large or growing table.** `freight_rates` is about 36,750 rows. `trips`, `waybills` and `route_frequency_log` grow every day. A lookup on them goes through an index. `test/scans.test.js` reads the query plans and fails on a scan.
+- **An index costs one written row per insert.** Add one only for a query that runs. A partial index (`WHERE … IS NOT NULL`) holds only the rows that need it, so it costs almost nothing on the other inserts.
+- **A foreign key needs an index on the child column.** D1 enforces foreign keys, so a parent delete looks up its children. Without an index, that lookup reads the whole child table.
 
 ### Route frequency is its own table
 

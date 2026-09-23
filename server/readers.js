@@ -406,9 +406,7 @@ export async function getFreightRates(origin) {
   // matching, so read the spellings first and pass the raw ones the filter hit.
   let rows;
   if (want.length) {
-    const origins = (await q(`SELECT DISTINCT origin FROM freight_rates`))
-      .map((r) => r.origin)
-      .filter((o) => want.includes(_normArea(o)));
+    const origins = (await _rawOrigins()).filter((o) => want.includes(_normArea(o)));
     if (!origins.length) return [];
     rows = await q(
       `SELECT * FROM freight_rates WHERE origin IN (${origins.map(() => '?').join(', ')}) ORDER BY id`,
@@ -442,12 +440,26 @@ export async function getFreightRates(origin) {
   return groups;
 }
 
+/**
+ * Every raw origin spelling in the matrix. SELECT DISTINCT walks all ~36,750
+ * index entries, and D1 bills each one as a row read. This skip-scan seeks
+ * the next origin in the UNIQUE index instead: one row read per origin.
+ */
+async function _rawOrigins() {
+  const rows = await q(
+    `WITH RECURSIVE o(v) AS (
+       SELECT MIN(origin) FROM freight_rates
+       UNION ALL
+       SELECT (SELECT MIN(origin) FROM freight_rates WHERE origin > o.v) FROM o WHERE o.v IS NOT NULL)
+     SELECT v AS origin FROM o WHERE v IS NOT NULL`);
+  return rows.map((r) => r.origin);
+}
+
 /** Distinct warehouse names in the matrix, sorted, one spelling per key. */
 export async function getFreightRateOrigins() {
-  const rows = await q(`SELECT DISTINCT origin FROM freight_rates`);
   const seen = {};
-  rows.forEach((r) => {
-    const v = String(r.origin || '').trim();
+  (await _rawOrigins()).forEach((o) => {
+    const v = String(o || '').trim();
     if (v && !seen[_normArea(v)]) seen[_normArea(v)] = v;
   });
   return Object.values(seen).sort();
