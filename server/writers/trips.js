@@ -433,7 +433,8 @@ export async function bulkDeleteTrips(tripIds) {
  * it still has no crew, carrying that one over as a fresh Prepping trip for
  * the next business day) and suggests waybills for the promoted trips,
  * grouped by (FO Number, Truck ID) — a truck's several drops on one FO share
- * one waybill. Trips that already have a waybill are skipped.
+ * one waybill, and a drop with no truck joins its FO's first truck. Trips that
+ * already have a waybill are skipped.
  * @param {string} tripDate  'M/d/yyyy'
  * @param {number} prefixId  Waybill prefix for the suggested numbers.
  * @returns {Promise<{ success: true, promoted: number, waybillsSuggested: number,
@@ -495,12 +496,20 @@ export async function markDayScheduled(tripDate, prefixId) {
         p.tripId, p.driverId, p.outletId)));
     }
 
-    // Suggest waybills: skip trips that already have one.
+    // Suggest waybills: skip trips that already have one. A stop with no truck
+    // rides its FO's first truck: blank means not yet seated, not a separate
+    // load (that minted a second number for one load).
+    const firstTruckByFO = {};
+    promoted.forEach((p) => {
+      if (p.foNumber && p.truckId && !firstTruckByFO[p.foNumber]) firstTruckByFO[p.foNumber] = p.truckId;
+    });
     const groups = [];
     const byKey = {};
     promoted.forEach((p) => {
       if (p.waybillId) return;
-      const key = p.foNumber ? `${p.foNumber}|${p.truckId || ''}` : `solo|${p.tripId}`;
+      const key = p.foNumber
+        ? `${p.foNumber}|${p.truckId || firstTruckByFO[p.foNumber] || ''}`
+        : `solo|${p.tripId}`;
       if (!byKey[key]) { byKey[key] = { foNumber: p.foNumber, tripIds: [] }; groups.push(byKey[key]); }
       byKey[key].tripIds.push(p.tripId);
     });

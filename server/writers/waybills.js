@@ -236,8 +236,9 @@ export async function _suggestWaybillsForGroups(prefixId, groups) {
  * Waybill for one trip promoted out of Prepping by hand (saveTripChanges) or
  * a carry-over, honoring the one-waybill-per-truck-load rule:
  * - the trip already has a waybill_id -> null (nothing to do);
- * - a sibling stop of the same load (same Trip Date + FO Number + Truck ID)
- *   already points at a Suggested waybill of the same type -> this trip is
+ * - a sibling stop of the same load (same Trip Date + FO Number + Truck ID,
+ *   where a blank truck on either side is a stop not yet seated and matches
+ *   any truck) already points at a Suggested waybill of the same type -> this trip is
  *   pointed at that SAME row (no new row, no number spent — the row already
  *   covers the whole load now, unlike the old one-row-per-stop sheet);
  * - otherwise, if a prefixId is given -> a new number is reserved.
@@ -268,7 +269,7 @@ export async function _suggestWaybillForScheduledTrip(tripId, foNumber, truckId,
       `SELECT w.id AS waybill_id, w.waybill_number
        FROM trips t JOIN waybills w ON w.id = t.waybill_id
        WHERE t.fo_number = ? AND t.trip_date = ? AND t.id != ?
-         AND (t.truck_id = ? OR (t.truck_id IS NULL AND ? IS NULL))
+         AND (t.truck_id = ? OR t.truck_id IS NULL OR ? IS NULL)
          AND w.status = 'Suggested' AND w.waybill_type = ?
        LIMIT 1`,
       fo, tripDate, id, truck, truck, wbType);

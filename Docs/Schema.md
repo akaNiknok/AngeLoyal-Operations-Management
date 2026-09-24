@@ -501,7 +501,7 @@ v1 serialized every writer behind the Apps Script lock, because two executions c
 A Rebisco route file has one drop per row. One Freight Order (FO) can span several rows (one truck, several stops) and can ask for several trucks (a split load, through counts in the type columns). The import groups rows by FO:
 
 - **Truck type** comes from the type count columns (10W/6WF/6WC/4WC/L300), **not** the Restrictions column. A continuation row with no count rides the FO's truck and takes its type.
-- **One waybill per truck.** The FO's first truck visits every outlet row of the FO, and those trips share one waybill. Each extra truck gets its own waybill.
+- **One waybill per truck.** The FO's first truck visits every outlet row of the FO, and those trips share one waybill. A trip with no truck joins that waybill. Each extra truck gets its own waybill.
 - **No double-booking.** Trucks come from the pool of the resolved category, in ID order, skipping trucks already used on that date. When the pool runs out, the trip stays unassigned with its category recorded.
 - **Convoys from fill colors.** Rebisco highlights the type count columns in alternating yellow and blue runs. Each run is one truck batch and can span several FOs. The importer reads only those columns' fills, starts a batch at each color change, folds uncolored rows into the batch of a colored row with the same FO, and stores batches that need 2 or more trucks in `trips.convoy_group`. Tokens are numbers, unique within a trip date (a re-import starts past the date's highest token). If the fills are missing, the import runs with no groups.
 

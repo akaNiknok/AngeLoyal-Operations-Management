@@ -338,6 +338,34 @@ test('saveTripChanges joins the load\'s suggested waybill instead of reserving a
   assert.equal(dump(db, 'waybill_prefixes')[0].last_sequence_number, 5);
 });
 
+// PROD bug, 9/24/2026: FO 6100075004 had one stop with no truck and one on
+// truck 20. The blank truck read as a different truck, so the load got
+// RJM-129 and RJM-130. A blank truck is a stop not yet seated: it joins the load.
+function twoStopLoad(truckA, truckB) {
+  const row = (id, truck) => tripRow({ ID: id, 'Trip Date': '6/16/2026', 'Billing Date': '6/16/2026', 'FO Number': 'FO-500', 'Outlet ID': 12, 'Truck ID': truck, 'Trip Status': 'Prepping', Source: 'Import' });
+  return withExistingTrip({ Trips: [HEADERS.Trips.slice(), row(34, truckA), row(35, truckB)] });
+}
+const numbersOf = (db) => [34, 35].map((id) =>
+  (dump(db, 'waybills').find((w) => w.id === trip(db, id).waybill_id) || {}).waybill_number);
+
+test('bulkSetTripStatus gives one number to a load whose first stop has no truck', async () => {
+  const { api, db } = twoStopLoad('', 3);
+  assert.equal((await api.bulkSetTripStatus([34, 35], 'Scheduled', 1)).updated, 2);
+  assert.deepEqual(numbersOf(db), ['AL-6', 'AL-6']);
+});
+
+test('bulkSetTripStatus gives one number to a load whose later stop has no truck', async () => {
+  const { api, db } = twoStopLoad(3, '');
+  await api.bulkSetTripStatus([34, 35], 'Scheduled', 1);
+  assert.deepEqual(numbersOf(db), ['AL-6', 'AL-6']);
+});
+
+test('bulkSetTripStatus still gives each truck of a split load its own number', async () => {
+  const { api, db } = twoStopLoad(3, 4);
+  await api.bulkSetTripStatus([34, 35], 'Scheduled', 1);
+  assert.deepEqual(numbersOf(db), ['AL-6', 'AL-7']);
+});
+
 test('saveTripChanges without a prefix schedules the trip but suggests no waybill', async () => {
   const { api, db } = await withPreppingTrip();
   const res = await api.saveTripChanges(50, { tripStatus: 'Scheduled' });
