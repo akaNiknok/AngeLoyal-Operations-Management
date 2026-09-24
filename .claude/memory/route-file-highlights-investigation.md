@@ -21,4 +21,4 @@ Anomalies (rare, ignorable): `FFFF0000` red = one-off PRIORITY/alert tags; FINAL
 
 **Parser limitation lifted (2026-08-26):** SheetJS is gone. `web/import.js` now reads grid *and* fills from one **ExcelJS** load (`sheetToGrid` + `parseConvoyFills`, both in `web/import.js`; ExcelJS is vendored at `web/vendor/exceljs.min.js`). Trap found doing it: ExcelJS drops `result` from a formula cell's `value` when the cached number is 0, so read `cell.result` — the route file's TOTAL is a shared `SUM` that is 0 on every convoy rider.
 
-Implication: color-based truck batching is now viable to implement and would capture multi-FO loads that FO-grouping misses. Import logic lives in `Import.html` (parser) and `importRouteFile` in `DataWriters.gs`. See [[clasp-deploy-setup]] for deploy.
+Color-based truck batching is built: `parseConvoyFills` in `web/import.js` reads the cols R–V runs, and `importRouteFile` in `server/writers/import.js` writes the result. See [[project-clasp-deploy]] for deploy.

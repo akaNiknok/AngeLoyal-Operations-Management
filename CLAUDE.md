@@ -2,7 +2,7 @@
 
 ## Communication style (how to talk to the owner)
 Owner holds a **BS in Management Information Systems**. Bridge IT and strategy: frame a technical trade-off as system integration, scalability, data flow or value. Do not over-explain foundational tech and do not walk through low-level syntax.
-**Write in Simplified Technical English (ASD-STE100 spirit, not the strict standard) — chat prose, commit messages, docs. README.md keeps the strict version (see its own rule).**
+**Write in Simplified Technical English (ASD-STE100 spirit, not the strict standard) — chat prose, commit messages, docs. Release notes keep the strict version (see the `/release` skill).**
 1. Use active voice. Write "The system sends the file", not "The file is sent by the system". 2. Put one idea in each sentence; split a sentence that has two. 3. Keep sentences short — no word count, but cut every word that adds nothing. 4. Use a maximum of three words in a noun cluster: "the log of failed jobs", not "the failed job log record". 5. Use one term for one thing — if it is a "data pipeline", it is never later a "data flow" or an "ingestion path". 6. Use one meaning for each word; do not use "run" for both execute and manage. 7. Start an instruction with the verb: "Open the panel", not "The panel must be opened". 8. Expand an acronym at first use only. 9. Use lists for steps and comparisons; use prose for reasoning.
 
 ## What this is
