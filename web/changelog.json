@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.7.4",
+      "date": "2026-09-24",
+      "title": "",
+      "body": "### Fixes\n\n- **All the stops of one load get one waybill number.** Before, a stop with no truck got its own number when you set the load to Scheduled.\n- **Each truck of a split load still gets its own waybill number.**\n\n### Check your data\n\nThe app does not change waybill numbers from before this version. Look at the Suggested waybills on today's dispatch board. If one load shows two numbers, change the second number to the first number before you confirm it."
+    },
+    {
       "version": "v1.7.3",
       "date": "2026-09-17",
       "title": "",
