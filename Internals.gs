@@ -411,8 +411,8 @@ function _suggestWaybillsForGroups(prefixId, groups) {
  * honoring the one-waybill-per-truck-load rule now that suggestions reserve
  * sequence numbers:
  * - the trip already has a waybill row → null (nothing to do);
- * - a sibling stop of the same load (same Trip Date + FO Number + Truck ID)
- *   has a Suggested 'Regular' waybill → append a row sharing its number
+ * - a sibling stop of the same load (same Trip Date + FO Number + Truck ID,
+ *   where a blank Truck ID matches any truck) has a Suggested 'Regular' waybill → append a row sharing its number
  *   (no new number reserved);
  * - otherwise, if a prefixId is given → reserve the next number.
  *
@@ -448,7 +448,10 @@ function _suggestWaybillForScheduledTrip(tripRows, tripHeaders, tripRow, tripId,
       const id = _numOrNull(_val(r, tripHeaders, 'ID'));
       if (id === null || Number(id) === Number(tripId)) return;
       if (String(_val(r, tripHeaders, 'FO Number') || '') !== fo) return;
-      if ((_numOrNull(_val(r, tripHeaders, 'Truck ID')) || '') !== truck) return;
+      // A blank truck is a stop not yet seated, not a different truck: it
+      // belongs to its FO's load. Two set trucks that differ are a split load.
+      const rTruck = _numOrNull(_val(r, tripHeaders, 'Truck ID')) || '';
+      if (truck && rTruck && rTruck !== truck) return;
       if (_formatDate(_readDateCell(_val(r, tripHeaders, 'Trip Date'))) !== date) return;
       siblings[id] = true;
     });
