@@ -71,6 +71,26 @@ test('markDayScheduled promotes Prepping trips of the date and suggests grouped 
   assert.deepEqual(Object.values(byTrip).sort(), ['AL-41', 'AL-41', 'AL-42', 'AL-43'].sort());
 });
 
+test('markDayScheduled puts a stop with no truck on its FO truck load', () => {
+  // Trip 1 has a driver but no truck; it rides FO-1's truck 3, not a load of its own.
+  const { api, ss } = asDispatcher(
+    preppingSheets([
+      tripRow({ ID: 1, 'FO Number': 'FO-1', 'Driver ID': 9 }),
+      tripRow({ ID: 2, 'FO Number': 'FO-1', 'Truck ID': 3 }),
+      tripRow({ ID: 3, 'FO Number': 'FO-1', 'Truck ID': 4 }),
+    ])
+  );
+
+  const res = api.markDayScheduled('6/16/2026', 1);
+  assert.equal(res.waybillsSuggested, 2);
+
+  const byTrip = {};
+  dump(ss, 'Waybills').rows.map((r) => rowObject(HEADERS.Waybills, r))
+    .forEach((w) => { byTrip[w['Trip ID']] = w['Waybill Number']; });
+  assert.equal(byTrip[1], byTrip[2]);
+  assert.notEqual(byTrip[2], byTrip[3]);   // split truck still gets its own
+});
+
 test('markDayScheduled logs route frequency for promoted trips with a driver + outlet', () => {
   const { api, ss } = asDispatcher(
     preppingSheets([

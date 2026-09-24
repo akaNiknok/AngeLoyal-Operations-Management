@@ -878,7 +878,8 @@ function bulkDeleteTrips(tripIds) {
  * (as fresh Prepping trips), so they don't get a waybill or count as scheduled.
  *
  * Waybills are grouped by (FO Number, Truck ID): a truck's several drops on
- * one FO share one waybill; each truck of a split FO gets its own. Trips
+ * one FO share one waybill; each truck of a split FO gets its own. A stop
+ * with no truck joins its FO's first truck. Trips
  * with no FO Number each get their own waybill. Trips that already have a
  * waybill row are skipped, so a second click is a no-op.
  *
@@ -970,11 +971,20 @@ function markDayScheduled(tripDate, prefixId) {
       if (t !== null) hasWaybill[t] = true;
     });
 
+    // A stop with no truck rides its FO's first truck: blank means not yet
+    // seated, not a separate load (that minted a second number for one load).
+    const firstTruckByFO = {};
+    promoted.forEach(p => {
+      if (p.foNumber && p.truckId && !firstTruckByFO[p.foNumber]) firstTruckByFO[p.foNumber] = p.truckId;
+    });
+
     const groups  = [];
     const byKey   = {};
     promoted.forEach(p => {
       if (hasWaybill[p.tripId]) return;
-      const key = p.foNumber ? `${p.foNumber}|${p.truckId || ''}` : `solo|${p.tripId}`;
+      const key = p.foNumber
+        ? `${p.foNumber}|${p.truckId || firstTruckByFO[p.foNumber] || ''}`
+        : `solo|${p.tripId}`;
       if (!byKey[key]) {
         byKey[key] = { foNumber: p.foNumber, tripIds: [] };
         groups.push(byKey[key]);
