@@ -107,9 +107,11 @@ function createTrip(tripData) {
  * - If a 'Prepping' trip is promoted to 'Scheduled' by hand (rather than via
  *   markDayScheduled) and `prefixId` is given, suggests its waybill too —
  *   unless the trip already has a waybill row.
+ * - `outletId` moves the trip to another existing outlet: the dispatcher's
+ *   override when the route file named the wrong store.
  *
  * @param {number} tripId
- * @param {Object} changes  Any of: { truckId, driverId, helperIds, tripStatus, remarks, prefixId }
+ * @param {Object} changes  Any of: { truckId, driverId, helperIds, tripStatus, remarks, outletId, prefixId }
  * @returns {{ success: boolean, trip: Object, newTripId: number|null,
  *             routeFrequencyWarning: {outletName: string, count: number}|null }
  *           | { success: false, error: string }}
@@ -128,16 +130,28 @@ function saveTripChanges(tripId, changes) {
     const oldDriverId = _numOrNull(_val(row, headers, 'Driver ID'));
     const oldTruckId  = _numOrNull(_val(row, headers, 'Truck ID'));
     const oldStatus   = _val(row, headers, 'Trip Status');
+    const oldOutletId = _numOrNull(_val(row, headers, 'Outlet ID'));
 
     // Setting the status a trip already has is a no-op. A board that lost a
     // save's response shows the old status, and the dispatcher sets it again:
     // without this guard every repeat of Redeliver spawned another carry-over.
+    changes = Object.assign({}, changes);
     if (changes.tripStatus !== undefined && changes.tripStatus === oldStatus) {
-      changes = Object.assign({}, changes);
       delete changes.tripStatus;
+    }
+    if (changes.outletId !== undefined && _numOrNull(changes.outletId) === oldOutletId) {
+      delete changes.outletId;
     }
 
     const updates = {};
+
+    if (changes.outletId !== undefined) {
+      const outletId = _numOrNull(changes.outletId);
+      if (!outletId || !getOutlets().some(o => o.id === outletId)) {
+        throw new Error('Pick an existing outlet.');
+      }
+      updates['Outlet ID'] = outletId;
+    }
 
     if (changes.truckId !== undefined) {
       updates['Truck ID'] = changes.truckId;
@@ -177,6 +191,9 @@ function saveTripChanges(tripId, changes) {
     if (changes.tripStatus !== undefined) {
       _auditLog('TRIP_STATUS_CHANGE', SHEET_TRIPS, tripId, oldStatus, changes.tripStatus);
     }
+    if (changes.outletId !== undefined) {
+      _auditLog('TRIP_OUTLET_CHANGE', SHEET_TRIPS, tripId, oldOutletId || '', updates['Outlet ID']);
+    }
 
     // Route frequency check + log. A trip only counts once it's out of Prepping:
     // imported trips land Prepping and get reassigned freely, so logging earlier
@@ -186,9 +203,11 @@ function saveTripChanges(tripId, changes) {
     const newDriverId   = changes.driverId   !== undefined ? changes.driverId   : oldDriverId;
     const justScheduled = oldStatus === 'Prepping' && newStatus !== 'Prepping';
     const driverChanged = changes.driverId !== undefined && changes.driverId !== oldDriverId;
+    // A scheduled driver sent to another outlet visits that one now.
+    const outletChanged = changes.outletId !== undefined;
 
     let routeFrequencyWarning = null;
-    if (newStatus !== 'Prepping' && newDriverId && (justScheduled || driverChanged)) {
+    if (newStatus !== 'Prepping' && newDriverId && (justScheduled || driverChanged || outletChanged)) {
       const outletId = _numOrNull(_val(row, headers, 'Outlet ID'));
       const tripDate = _formatDate(_readDateCell(_val(row, headers, 'Trip Date')));
       if (outletId) {
@@ -234,6 +253,7 @@ function saveTripChanges(tripId, changes) {
       truckBillingCategory: _val(row, headers, 'Truck Billing Category') || '',
       tripStatus:           _val(row, headers, 'Trip Status') || 'Scheduled',
       remarks:              _val(row, headers, 'Remarks') || '',
+      outletId:             _numOrNull(_val(row, headers, 'Outlet ID')),
       statusChangedBy:      _val(row, headers, 'Status Changed By') || '',
       statusChangedAt:      _valDateTime(row, headers, 'Status Changed At'),
     };

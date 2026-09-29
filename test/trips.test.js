@@ -179,6 +179,36 @@ test('saveTripChanges does not spawn a carry-over trip on Preload', () => {
   assert.equal(rowObject(after.headers, after.rows[0])['Trip Status'], 'Preload');
 });
 
+// The route file can name the wrong store; the dispatcher moves the trip to
+// the right one. A scheduled driver now visits the new outlet, so it is logged.
+test('saveTripChanges moves a trip to another existing outlet', () => {
+  const { api, ss } = withExistingTrip({
+    Outlets: [HEADERS.Outlets.slice(),
+      [12, 'SM Dasma', 'Cavite', '', '', '', '6/1/2026'],
+      [13, 'SM Bacoor', 'Cavite', '', '', '', '6/1/2026']],
+  });
+  const res = api.saveTripChanges(50, { outletId: 13 });
+  assert.equal(res.success, true);
+  assert.equal(res.trip.outletId, 13);
+  assert.equal(Number(rowObject(...firstRow(ss, 'Trips'))['Outlet ID']), 13);
+
+  const audit = dump(ss, 'Audit Log');
+  const row = audit.rows.map((r) => rowObject(audit.headers, r)).find((r) => r.Action === 'TRIP_OUTLET_CHANGE');
+  assert.equal(String(row['Old Value']), '12');
+  assert.equal(String(row['New Value']), '13');
+
+  const freq = dump(ss, 'Route Frequency Log');
+  assert.equal(freq.rows.length, 1);
+  assert.equal(Number(rowObject(freq.headers, freq.rows[0])['Outlet ID']), 13);
+});
+
+test('saveTripChanges refuses an outlet that does not exist', () => {
+  const { api, ss } = withExistingTrip();
+  const res = api.saveTripChanges(50, { outletId: 99 });
+  assert.equal(res.success, false);
+  assert.equal(Number(rowObject(...firstRow(ss, 'Trips'))['Outlet ID']), 12);
+});
+
 // The route-frequency window is measured against the real clock (new Date()),
 // so fixtures must be dated relative to now — a hardcoded date ages out of it.
 function daysAgo(n) {
