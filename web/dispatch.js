@@ -1025,7 +1025,7 @@
                 );
                 if (!outlet || outlet.id === trip.outletId) {
                     if (!outlet)
-                        showToast("Pick an existing outlet from the list.", "warning");
+                        showToast("Pick an existing outlet, or add it in Outlets.", "warning");
                     renderDispatch();
                     return;
                 }

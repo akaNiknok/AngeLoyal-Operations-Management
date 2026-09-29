@@ -105,14 +105,14 @@ export async function updateDefaultAssignment(truckId, changes) {
 }
 
 // ============================================================
-//  Outlets (Admin only)
+//  Outlets (Admin and Dispatcher)
 // ============================================================
 
 const OUTLET_COLS = { outletName: 'outlet_name', area: 'area', address: 'address', customerGroup: 'customer_group', notes: 'notes' };
 
 /** @param {Object} data  { outletName, area, address, customerGroup, notes } */
 export async function createOutlet(data) {
-  await requirePermission('EDIT_MASTER_RECORDS');
+  await requirePermission('EDIT_OUTLETS');
   return writerResult(async () => {
     const outletName = String(data.outletName || '').trim();
     if (!outletName) throw new Error('Outlet name is required.');
@@ -134,7 +134,7 @@ export async function createOutlet(data) {
 
 /** @param {Object} changes  Any of { outletName, area, address, customerGroup, notes } */
 export async function updateOutlet(outletId, changes) {
-  await requirePermission('EDIT_MASTER_RECORDS');
+  await requirePermission('EDIT_OUTLETS');
   return writerResult(async () => {
     const row = await one(`SELECT * FROM outlets WHERE id = ?`, Number(outletId));
     if (!row) throw new Error(`Outlet ID ${outletId} not found.`);

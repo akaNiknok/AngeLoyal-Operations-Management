@@ -45,10 +45,16 @@ test('updateOutlet rejects a blank name and unknown ids', async () => {
   assert.match((await api.updateOutlet(999, { area: 'X' })).error, /not found/);
 });
 
-test('updateOutlet is gated by EDIT_MASTER_RECORDS', async () => {
+// Dispatchers fix outlets themselves: the route file can name a store the
+// system does not know yet.
+test('updateOutlet is gated by EDIT_OUTLETS (Admin and Dispatcher)', async () => {
   const sheets = base({ Outlets: [HEADERS.Outlets.slice(), [5, 'Old', '', '', '', '', '']] });
   const { api } = makeEnv({ sheets, userEmail: EMAIL.Dispatcher });
-  await assert.rejects(() => api.updateOutlet(5, { area: 'X' }), /Access denied/);
+  assert.equal((await api.updateOutlet(5, { area: 'X' })).success, true);
+  assert.equal((await api.createOutlet({ outletName: 'New' })).success, true);
+  const { api: payroll } = makeEnv({ sheets, userEmail: EMAIL.Payroll });
+  await assert.rejects(() => payroll.updateOutlet(5, { area: 'Y' }), /Access denied/);
+  await assert.rejects(() => payroll.createOutlet({ outletName: 'Other' }), /Access denied/);
 });
 
 // ---------------- updateEmployee ----------------

@@ -23,6 +23,7 @@ const MATRIX = {
   FLAG_TRIP_STATUS: ['Admin', 'Dispatcher'],
   CONFIRM_WAYBILL: ['Admin', 'Dispatcher'],
   EDIT_MASTER_RECORDS: ['Admin'],
+  EDIT_OUTLETS: ['Admin', 'Dispatcher'],
   EDIT_WAYBILL_PREFIXES: ['Admin', 'Dispatcher'],
   EDIT_USERS: ['Admin'],
   VIEW_AUDIT: ['Admin'],

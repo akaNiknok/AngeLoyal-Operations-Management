@@ -66,7 +66,7 @@ Maps a Google account email to a role.
 | Flag trip status | ✓ | ✓ | — | — |
 | Confirm waybill numbers | ✓ | ✓ | — | — |
 | Edit the truck roster | ✓ | ✓ | — | — |
-| Edit outlets | ✓ | — | — | — |
+| Edit outlets | ✓ | ✓ | — | — |
 | Edit billing categories | ✓ | — | — | — |
 | Edit waybill prefixes | ✓ | ✓ | — | — |
 | Edit users | ✓ | — | — | — |
@@ -186,7 +186,7 @@ The roster helpers of a truck, 0–3 rows.
 
 ### outlets
 
-Empty at first. The route-file import inserts every outlet name it does not know. An Admin then adds the address, group and notes.
+Empty at first. The route-file import inserts every outlet name it does not know. An Admin or Dispatcher then adds the address, group and notes (`EDIT_OUTLETS`).
 
 | Column | Type | Notes |
 | :-- | :-- | :-- |
@@ -452,7 +452,7 @@ Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (
 - `WAYBILL_SUGGEST` — a waybill number was reserved as Suggested
 - `WAYBILL_CONFIRM` — a waybill was confirmed and locked
 - `WAYBILL_OVERRIDE` — a user changed a suggested number
-- `OUTLET_CREATE` — an outlet was added (import or Admin)
+- `OUTLET_CREATE` — an outlet was added (import, Admin or Dispatcher)
 - `OUTLET_EDIT` — an outlet was edited
 - `DEFAULT_ASSIGN_CHANGE` — a truck's roster crew changed (table `trucks`)
 - `TRUCK_CREATE`, `TRUCK_EDIT` — a truck was added or edited (including active and category)
