@@ -1,6 +1,12 @@
 {
   "releases": [
     {
+      "version": "v1.7.5",
+      "date": "2026-09-29",
+      "title": "",
+      "body": "### New\n\n- **You can change the outlet of a trip on the dispatch board.** Click the outlet name. Then type or pick the correct outlet from the list.\n- The list shows only the outlets that are in the app. If you type a name that is not in the list, the board shows the old outlet again.\n- **Dispatchers can now open the Outlets tab.** You can add an outlet there. You can also change the name, area, address, group and notes of an outlet.\n\n### How to fix a wrong outlet\n\n- If the correct outlet is not in the list, open the **Outlets** tab and click **+ Add outlet** first.\n- Then go back to the dispatch board and change the outlet of the trip."
+    },
+    {
       "version": "v1.7.4",
       "date": "2026-09-24",
       "title": "",
