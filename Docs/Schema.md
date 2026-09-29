@@ -44,7 +44,7 @@ Maps Google account emails to specific system roles to manage access control.
 | Flag trip status | ✓ | ✓ | — | — |
 | Confirm waybill numbers | ✓ | ✓ | — | — |
 | Edit the truck roster (Default Assignments) | ✓ | ✓ | — | — |
-| Edit Outlets | ✓ | — | — | — |
+| Edit Outlets | ✓ | ✓ | — | — |
 | Edit Billing Categories | ✓ | — | — | — |
 | Edit Waybill Prefixes | ✓ | ✓ | — | — |
 | Edit Users sheet | ✓ | — | — | — |
@@ -186,7 +186,7 @@ The **truck roster**: the permanent, baseline crew configuration for each vehicl
 
 ### **Sheet 7: Outlets**
 
-Created empty. On first import of a Rebisco route file, the backend scans all outlet names in the file and inserts any that don't already exist as new rows. Admin can then enrich the records (add address, notes, etc.).
+Created empty. On first import of a Rebisco route file, the backend scans all outlet names in the file and inserts any that don't already exist as new rows. An Admin or Dispatcher can then enrich the records (add address, notes, etc.).
 
 | Column | Type | Notes |
 |---|---|---|

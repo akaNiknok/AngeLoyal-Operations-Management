@@ -1185,7 +1185,7 @@ function updateDefaultAssignment(defaultAssignId, changes) {
 
 
 // ============================================================
-//  Outlets (Admin only)
+//  Outlets (Admin and Dispatcher)
 // ============================================================
 
 const OUTLET_FIELDS = {
@@ -1202,7 +1202,7 @@ const OUTLET_FIELDS = {
  * @returns {{ success: boolean, outlet: Object } | { success: false, error: string }}
  */
 function createOutlet(data) {
-  _requirePermission('EDIT_MASTER_RECORDS');
+  _requirePermission('EDIT_OUTLETS');
   return _writerResult(() => {
     const outletName = String(data.outletName || '').trim();
     if (!outletName) throw new Error('Outlet name is required.');
@@ -1228,7 +1228,7 @@ function createOutlet(data) {
  * @returns {{ success: boolean } | { success: false, error: string }}
  */
 function updateOutlet(outletId, changes) {
-  _requirePermission('EDIT_MASTER_RECORDS');
+  _requirePermission('EDIT_OUTLETS');
   return _writerResult(() => {
     const ctx    = _openRow(SHEET_OUTLETS, outletId, 'Outlet');
     const oldVal = _readFields(ctx.row, ctx.headers, OUTLET_FIELDS);

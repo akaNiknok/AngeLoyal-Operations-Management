@@ -388,7 +388,7 @@
                     document.getElementById("outlets-search").value || ""
                 ).toLowerCase();
                 const tbody = document.getElementById("outlets-tbody");
-                const isAdmin = currentUser.role === "Admin";
+                const editable = canEdit();
                 const filtered = outlets.filter(
                     (o) =>
                         !q ||
@@ -400,7 +400,7 @@
                 tbody.innerHTML = filtered
                     .map((o) => {
                         const f = (field, val) =>
-                            isAdmin
+                            editable
                                 ? `<input class="cell-input" value="${esc(val)}" onchange="updateOutletField(${o.id},'${field}',this.value)">`
                                 : esc(val) || "—";
                         return `<tr>
@@ -408,9 +408,9 @@
     <td>${f("outletName", o.outletName)}</td>
     <td>${f("area", o.area)}</td>
     <td>${f("address", o.address)}</td>
-    <td>${isAdmin ? f("customerGroup", o.customerGroup) : colorChip(o.customerGroup)}</td>
+    <td>${editable ? f("customerGroup", o.customerGroup) : colorChip(o.customerGroup)}</td>
     <td>${
-        isAdmin
+        editable
             ? `<input class="cell-input" title="${esc(o.notes || "")}" value="${esc(o.notes || "")}" onchange="this.title=this.value; updateOutletField(${o.id},'notes',this.value)">`
             : esc(o.notes) || "—"
     }</td>
