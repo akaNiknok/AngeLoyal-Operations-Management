@@ -12,6 +12,10 @@
             // would otherwise make a row jump out from under the cursor.
             let billingOrder = [];
             let billingSelected = new Set();
+            // The last line ticked by hand: a shift-click ticks from here.
+            let billingTickAnchor = null;
+            // The status chip in force; a key of BILLING_STATUS_CHIPS.
+            let billingStatus = "unbilled";
             // Lines whose "how it was built" row is open.
             let billingExpanded = new Set();
             // The document in the preview: a draft, a billing about to be
@@ -50,6 +54,7 @@
                     const range = billingDefaultRange(new Date());
                     from.value = range.from;
                     to.value = range.to;
+                    document.getElementById("bl-preset").value = "this";
                 }
                 const docDate = document.getElementById("bl-doc-date");
                 if (!docDate.value) docDate.value = todayStr();
@@ -63,6 +68,35 @@
                 const monday = new Date(today);
                 monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
                 return { from: isoDate(monday), to: isoDate(today) };
+            }
+
+            // The range presets. Last week runs Monday to Sunday, as the
+            // default week does. The DOE week starts on the Tuesday the
+            // current diesel price took effect.
+            function billingPresetRange(name, today) {
+                const week = billingDefaultRange(today);
+                if (name === "this") return week;
+                if (name === "doe") return { from: latestTuesdayIso(isoDate(today)), to: isoDate(today) };
+                if (name !== "last") return null;
+                const monday = new Date(week.from + "T00:00:00");
+                monday.setDate(monday.getDate() - 7);
+                const sunday = new Date(monday);
+                sunday.setDate(monday.getDate() + 6);
+                return { from: isoDate(monday), to: isoDate(sunday) };
+            }
+
+            function applyBillingPreset(name) {
+                const range = billingPresetRange(name, new Date());
+                if (!range) return;
+                document.getElementById("bl-from").value = range.from;
+                document.getElementById("bl-to").value = range.to;
+                loadBilling();
+            }
+
+            // A date typed by hand no longer matches the preset.
+            function billingRangeEdited() {
+                document.getElementById("bl-preset").value = "";
+                loadBilling();
             }
 
             function populateBillingFilters() {
@@ -108,6 +142,7 @@
                             .sort(byWaybillNumber)
                             .map((l) => l.id);
                         billingSelected = new Set();
+                        billingTickAnchor = null;
                         billingExpanded = new Set();
                         renderBilling();
                     },
@@ -120,8 +155,24 @@
 
             // ── Filtering ─────────────────────────────────────────────
 
-            function visibleBillingLines() {
-                const status = document.getElementById("bl-status").value;
+            // Each chip filters the table to the lines its test passes. A
+            // warning on a stamped line needs no action, so it is not counted.
+            const BILLING_STATUS_CHIPS = {
+                unbilled: ["Not billed", (l) => l.status === "Not Billed"],
+                attention: ["Needs attention", (l) => !!l.warning && l.status !== "Billed"],
+                deferred: ["Deferred", (l) => l.status === "Deferred"],
+                billed: ["Billed", (l) => l.status === "Billed"],
+                all: ["All", () => true],
+            };
+
+            function setBillingStatus(key) {
+                billingStatus = key;
+                renderBilling();
+            }
+
+            // The lines in the origin and subcon filters, in order. The chips
+            // count these, so a count always matches what a click shows.
+            function scopedBillingLines() {
                 const origin = document.getElementById("bl-origin").value;
                 const prefix = document.getElementById("bl-prefix").value;
 
@@ -131,15 +182,36 @@
                     .map((id) => byId[id])
                     .filter((l) => l)
                     .filter((l) => {
-                        if (status === "unbilled" && l.status !== "Not Billed") return false;
-                        if (status === "billed" && l.status !== "Billed") return false;
-                        if (status === "deferred" && l.status !== "Deferred") return false;
                         if (origin && l.origin !== origin) return false;
                         // A prefix matches the leading token of the number,
                         // up to its dash — "G" must not match "GL-0451".
                         if (prefix && !l.waybillNumber.startsWith(prefix + "-")) return false;
                         return true;
                     });
+            }
+
+            function visibleBillingLines() {
+                return scopedBillingLines().filter(BILLING_STATUS_CHIPS[billingStatus][1]);
+            }
+
+            const PESO_SHORT = new Intl.NumberFormat("en-PH", {
+                notation: "compact",
+                maximumFractionDigits: 1,
+            });
+
+            function renderBillingChips() {
+                const scoped = scopedBillingLines();
+                document.getElementById("bl-chips").innerHTML = Object.entries(BILLING_STATUS_CHIPS)
+                    .map(([key, [label, test]]) => {
+                        const rows = scoped.filter(test);
+                        const amount =
+                            key === "unbilled"
+                                ? ` · ₱${PESO_SHORT.format(rows.reduce((s, l) => s + Number(l.total || 0), 0))}`
+                                : "";
+                        const warn = key === "attention" && rows.length ? " bl-chip-warn" : "";
+                        return `<button class="pill${key === billingStatus ? " active" : ""}${warn}" onclick="setBillingStatus('${key}')">${label} ${rows.length}${amount}</button>`;
+                    })
+                    .join("");
             }
 
             // ── Render ────────────────────────────────────────────────
@@ -175,7 +247,7 @@
 
                 tbody.innerHTML = rows.map(billingRowHtml).join("");
 
-                renderBillingWarnings(rows);
+                renderBillingChips();
                 renderBillingFooter(rows);
             }
 
@@ -203,13 +275,13 @@
 
                 const open = billingExpanded.has(l.id);
                 return `<tr data-line="${l.id}"${l.warning ? ' style="background:var(--amber-bg)"' : ""}>
-  <td style="white-space:nowrap"><input type="checkbox" ${billingSelected.has(l.id) ? "checked" : ""} onchange="toggleBillingRow(${l.id},this.checked)"><button class="bl-caret" title="${open ? "Hide" : "Show"} how this line was priced" onclick="toggleBillingDetail(${l.id})">${open ? "▾" : "▸"}</button></td>
+  <td style="white-space:nowrap"><input type="checkbox" title="Shift-click to tick a range" ${billingSelected.has(l.id) ? "checked" : ""} onclick="tickBillingRow(${l.id},this.checked,event.shiftKey)"><button class="bl-caret" title="${open ? "Hide" : "Show"} how this line was priced" onclick="toggleBillingDetail(${l.id})">${open ? "▾" : "▸"}</button></td>
   <td>${esc(l.tripDate)}</td>
   <td>${esc(l.plateNumber) || "—"}</td>
   <td style="font-family:'DM Mono',monospace">${esc(l.waybillNumber)}</td>
   <td style="font-family:'DM Mono',monospace">${esc(l.foNumber) || "—"}</td>
   <td>${esc(l.truckType)}</td>
-  <td>${esc(l.area) || "—"}${l.drops > 1 ? ` <span class="tb-label">×${l.drops}</span>` : ""}</td>
+  <td>${esc(l.area) || "—"}${l.drops > 1 ? ` <span class="tb-label">×${l.drops}</span>` : ""}${l.warning ? `<div class="bl-warn">${esc(l.warning)}</div>` : ""}</td>
   ${charges}
   ${money("mano")}
   ${money("dropFee")}
@@ -338,24 +410,50 @@
                     if (detail) detail.outerHTML = billingDetailHtml(line);
                 }
 
+                renderBillingChips();
                 renderBillingFooter(visibleBillingLines());
             }
 
-            function renderBillingWarnings(rows) {
-                const host = document.getElementById("bl-warnings");
-                const flagged = rows.filter((l) => l.warning);
-                host.innerHTML = flagged.length
-                    ? `<div class="settings-section-hint" style="padding:8px 12px">
-  <strong>${flagged.length} line${flagged.length === 1 ? "" : "s"} could not be priced in full:</strong>
-  ${flagged.map((l) => `<div>${esc(l.waybillNumber)} — ${esc(l.warning)}</div>`).join("")}
-</div>`
-                    : "";
+            // Enter moves to the same cell one row down, as in Excel;
+            // Shift+Enter moves up. A stamped row has no input and is skipped.
+            // Leaving the cell fires its change, so the move also saves.
+            function billingGridKey(e) {
+                const inp = e.target;
+                if (e.key !== "Enter" || !inp.matches || !inp.matches("input.cell-input")) return;
+                const same = inp.dataset.field
+                    ? `input[data-field="${inp.dataset.field}"]`
+                    : `input[data-charge="${inp.dataset.charge}"]`;
+                const rows = Array.from(document.querySelectorAll("#billing-tbody tr[data-line]"));
+                const step = e.shiftKey ? -1 : 1;
+                for (let i = rows.indexOf(inp.closest("tr")) + step; i >= 0 && i < rows.length; i += step) {
+                    const next = rows[i].querySelector(same);
+                    if (next) {
+                        e.preventDefault();
+                        next.focus();
+                        next.select();
+                        return;
+                    }
+                }
             }
 
             // Totals are recomputed from what is on screen so the footer always
             // matches the filter, and are never editable.
             function renderBillingFooter(rows) {
-                const gross = rows.reduce((s, l) => s + Number(l.total || 0), 0);
+                const sum = (f) => rows.reduce((s, l) => s + Number(f(l) || 0), 0);
+                const cell = (n) => `<td style="text-align:right;font-family:'DM Mono',monospace"><strong>${PESO(n)}</strong></td>`;
+                // The totals row of the table, as the company workbook has it.
+                // It sticks to the bottom of the scroller with the header.
+                document.getElementById("billing-tfoot").innerHTML = rows.length
+                    ? `<tr><td colspan="7"><strong>Total waybills: ${rows.length}</strong></td>` +
+                      billingChargeCols.map((c) => cell(sum((l) => l.manualCharges[String(c.id)]))).join("") +
+                      cell(sum((l) => l.mano)) +
+                      cell(sum((l) => l.dropFee)) +
+                      cell(sum((l) => l.haulingRate)) +
+                      cell(sum((l) => l.total)) +
+                      `<td></td></tr>`
+                    : "";
+
+                const gross = sum((l) => l.total);
                 const lessVat = (gross / 1.12) * 0.12;
                 const net = gross - lessVat;
                 const ewt = net * 0.02;
@@ -383,6 +481,21 @@
 
             function toggleAllBilling(on) {
                 visibleBillingLines().forEach((l) => toggleBillingRow(l.id, on));
+                renderBilling();
+            }
+
+            // A tick by hand. With Shift held, every visible line from the
+            // last hand tick to this one takes the same state.
+            function tickBillingRow(lineId, on, shift) {
+                const ids = visibleBillingLines().map((l) => l.id);
+                const a = ids.indexOf(billingTickAnchor);
+                const b = ids.indexOf(lineId);
+                billingTickAnchor = lineId;
+                if (!shift || a < 0 || b < 0) {
+                    toggleBillingRow(lineId, on);
+                    return;
+                }
+                ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((id) => toggleBillingRow(id, on));
                 renderBilling();
             }
 

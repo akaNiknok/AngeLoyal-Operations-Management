@@ -937,20 +937,27 @@
   ══════════════════════════════════════ -->
             <div class="panel" id="panel-billing">
                 <div class="toolbar">
-                    <input type="date" id="bl-from" onchange="loadBilling()" />
-                    <span class="tb-label">to</span>
-                    <input type="date" id="bl-to" onchange="loadBilling()" />
                     <select
-                        id="bl-status"
+                        id="bl-preset"
                         class="cell-select"
-                        onchange="renderBilling()"
+                        onchange="applyBillingPreset(this.value)"
                         style="width: 120px"
                     >
-                        <option value="unbilled">Not billed</option>
-                        <option value="billed">Billed</option>
-                        <option value="deferred">Deferred</option>
-                        <option value="all">All</option>
+                        <option value="">Custom range</option>
+                        <option value="this">This week</option>
+                        <option value="last">Last week</option>
+                        <option value="doe">DOE week</option>
                     </select>
+                    <!-- The range filters on trips.trip_date. Client question 5
+                         may move it to the billing date: change this label then. -->
+                    <span
+                        class="tb-label"
+                        title="A line falls in the range by the day its trip was delivered"
+                        >Delivery date</span
+                    >
+                    <input type="date" id="bl-from" onchange="billingRangeEdited()" />
+                    <span class="tb-label">to</span>
+                    <input type="date" id="bl-to" onchange="billingRangeEdited()" />
                     <select
                         id="bl-origin"
                         class="cell-select"
@@ -963,7 +970,6 @@
                         onchange="renderBilling()"
                         style="width: 140px"
                     ></select>
-                    <span class="tb-label" id="bl-count"></span>
                     <div class="tb-spacer"></div>
                     <input
                         type="text"
@@ -1002,14 +1008,19 @@
                         Billings
                     </button>
                 </div>
+                <div class="toolbar">
+                    <div class="pill-group" id="bl-chips"></div>
+                    <span class="tb-label" id="bl-count"></span>
+                </div>
+                <!-- One scroller for both axes: an inner overflow box would
+                     become the sticky header's scroller and the header would
+                     never stick. -->
                 <div class="admin-scroll">
-                    <div id="bl-warnings"></div>
-                    <div style="overflow-x: auto">
-                        <table class="data-table" id="billing-table">
-                            <thead id="billing-thead"></thead>
-                            <tbody id="billing-tbody"></tbody>
-                        </table>
-                    </div>
+                    <table class="data-table" id="billing-table">
+                        <thead id="billing-thead"></thead>
+                        <tbody id="billing-tbody" onkeydown="billingGridKey(event)"></tbody>
+                        <tfoot id="billing-tfoot"></tfoot>
+                    </table>
                     <div id="billing-footer" style="padding: 12px"></div>
                 </div>
             </div>

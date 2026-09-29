@@ -2300,6 +2300,31 @@
                 font-size: 13px;
             }
 
+            /* Billing: why a line could not be priced in full, on the line */
+            .bl-warn {
+                color: var(--amber);
+                font-size: 11px;
+            }
+            .pill.bl-chip-warn:not(.active) {
+                color: var(--amber);
+                border-color: var(--amber);
+            }
+            /* The totals row stays on screen, as the header does. Sticky
+               offsets count from inside the scroller's padding, so a vertical
+               padding would show rows above the header and below the totals. */
+            #panel-billing .admin-scroll {
+                padding-top: 0;
+                padding-bottom: 0;
+            }
+            #billing-table tfoot td {
+                position: sticky;
+                bottom: 0;
+                z-index: 2;
+                background: var(--surface);
+                border-top: 2px solid var(--border);
+                padding: 8px 10px;
+            }
+
             /* Billing: the "how it was priced" row under a line */
             .bl-caret {
                 border: none;

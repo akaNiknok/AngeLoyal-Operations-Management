@@ -62,6 +62,8 @@ function loadBilling(fields = {}) {
       'globalThis.__setRates = (rows) => { rateMatrix = rows; };' +
       'globalThis.__excelReady = () => { excelJsReady = true; };'
   );
+  // The status filter is a chip now; 'bl-status' names the chip to start on.
+  sandbox.setBillingStatus(values['bl-status']);
   return { ui: sandbox, els };
 }
 
@@ -155,6 +157,92 @@ test('the status filter separates billed, deferred and not billed', () => {
       }
     }
   );
+});
+
+test('the chips count the lines in scope and show what they count', () => {
+  const { ui, els } = loadBilling({ 'bl-status': 'attention', 'bl-origin': 'TANZA' });
+  ui.__setLines([
+    line({ id: 1, waybillNumber: 'AY-11801', total: 300000, warning: 'No rate for Calamba' }),
+    line({ id: 2, waybillNumber: 'AY-11802', total: 10000 }),
+    line({ id: 3, waybillNumber: 'AY-11803', status: 'Deferred' }),
+    // Stamped: its warning needs no action.
+    line({ id: 4, waybillNumber: 'AY-11804', status: 'Billed', warning: 'No rate' }),
+    // Out of the origin filter: in no count.
+    line({ id: 5, waybillNumber: 'AY-11805', origin: 'LINGUNAN', warning: 'No rate' }),
+  ]);
+  ui.renderBilling();
+
+  const chips = els['bl-chips'].innerHTML;
+  assert.match(chips, /Not billed 2 · ₱310K/);
+  assert.match(chips, /class="pill active bl-chip-warn"[^>]*>Needs attention 1</);
+  assert.match(chips, />Deferred 1</);
+  assert.match(chips, />Billed 1</);
+  assert.match(chips, />All 4</);
+  assert.deepEqual(Array.from(ui.visibleBillingLines().map((l) => l.id)), [1]);
+  // The reason shows on the line, not in a list above the table.
+  assert.match(els['billing-tbody'].innerHTML, /class="bl-warn">No rate for Calamba/);
+});
+
+test('the totals row sums each money column of the lines shown', () => {
+  const { ui, els } = loadBilling();
+  ui.__setLines([
+    line({ id: 1, waybillNumber: 'AY-11801', mano: 392, haulingRate: 17670, total: 18212, manualCharges: { 1: 150 } }),
+    line({ id: 2, waybillNumber: 'AY-11802', dropFee: 560, haulingRate: 17670, total: 18230 }),
+  ], [{ id: 1, label: 'Parking' }]);
+  ui.renderBilling();
+
+  const html = els['billing-tfoot'].innerHTML;
+  assert.match(html, /Total waybills: 2/);
+  assert.match(html, /150\.00[\s\S]*392\.00[\s\S]*560\.00[\s\S]*35,340\.00[\s\S]*36,442\.00/);
+});
+
+// ── Ticking ───────────────────────────────────────────────────
+
+test('a shift-click ticks every visible line from the last tick', () => {
+  const { ui } = loadBilling({ 'bl-status': 'unbilled' });
+  ui.__setLines([
+    line({ id: 1, waybillNumber: 'AY-11801' }),
+    line({ id: 2, waybillNumber: 'AY-11802', status: 'Billed' }), // hidden
+    line({ id: 3, waybillNumber: 'AY-11803' }),
+    line({ id: 4, waybillNumber: 'AY-11804' }),
+    line({ id: 5, waybillNumber: 'AY-11805' }),
+  ]);
+  ui.tickBillingRow(4, true, false);
+  ui.tickBillingRow(1, true, true); // upward
+  assert.deepEqual(Array.from(ui.tickedBillingLines().map((l) => l.id)), [1, 3, 4]);
+
+  // A shift-click that unticks clears the range the same way.
+  ui.tickBillingRow(3, false, true);
+  assert.deepEqual(Array.from(ui.tickedBillingLines().map((l) => l.id)), [4]);
+});
+
+test('a shift-click with no earlier tick ticks one line', () => {
+  const { ui } = loadBilling();
+  ui.__setLines([line({ id: 1 }), line({ id: 2, waybillNumber: 'AY-11802' })]);
+  ui.tickBillingRow(2, true, true);
+  assert.deepEqual(Array.from(ui.tickedBillingLines().map((l) => l.id)), [2]);
+});
+
+// ── Range presets ─────────────────────────────────────────────
+
+test('the presets give this week, last week and the DOE week', () => {
+  const { ui } = loadBilling();
+  const wed = new Date(2026, 8, 30, 7, 0); // Wednesday 9/30, before 8 AM
+  const range = (name, d = wed) => ({ ...ui.billingPresetRange(name, d) });
+
+  assert.deepEqual(range('this'), { from: '2026-09-28', to: '2026-09-30' });
+  assert.deepEqual(range('last'), { from: '2026-09-21', to: '2026-09-27' });
+  assert.deepEqual(range('doe'), { from: '2026-09-29', to: '2026-09-30' });
+  // On a Monday the DOE week began the Tuesday before, in last week.
+  assert.deepEqual(range('doe', new Date(2026, 8, 28, 7, 0)), { from: '2026-09-22', to: '2026-09-28' });
+  assert.equal(ui.billingPresetRange('', wed), null);
+});
+
+test('a date typed by hand clears the preset', () => {
+  const { ui, els } = loadBilling({ 'bl-preset': 'this' });
+  ui.loadBilling = () => {};
+  ui.billingRangeEdited();
+  assert.equal(els['bl-preset'].value, '');
 });
 
 test('the subcon filter matches the waybill prefix', () => {
