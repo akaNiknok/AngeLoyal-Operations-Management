@@ -101,6 +101,12 @@
                 const outletMap = indexById(outlets);
                 const empMap = indexById(employees);
                 const truckMap = indexById(trucks);
+                // One shared list feeds every row's outlet input.
+                if (canEdit())
+                    document.getElementById("outlet-options").innerHTML =
+                        outlets
+                            .map((o) => `<option value="${esc(o.outletName)}">`)
+                            .join("");
 
                 // Stats (always computed from full data, not filtered)
                 const all = dispatchData.trips || [];
@@ -279,6 +285,10 @@
                             ? `<select class="cell-select ${statusChipClass(t.tripStatus)}" onchange="changeStatus(${t.id}, this.value, ${statusSpan[i] > 1})">${statusSelectOptions(t.tripStatus)}</select>`
                             : `<span class="status-chip ${statusChipClass(t.tripStatus)}">${shortStatus(t.tripStatus)}</span>`;
 
+                        const outletCell = canE
+                            ? `<input class="cell-input outlet-in" type="text" list="outlet-options" value="${esc(outletName)}" placeholder="—" onchange="changeOutlet(${t.id}, this.value)">`
+                            : esc(outletName) || "—";
+
                         const remarksCell = canE
                             ? `<input class="cell-input remarks-in" type="text" title="${esc(t.remarks || "")}" value="${esc(t.remarks || "")}" placeholder="—" onchange="this.title=this.value; changeRemarks(${t.id}, this.value)">`
                             : `<span class="crew-helper" title="${esc(t.remarks || "")}">${esc(t.remarks || "")}</span>`;
@@ -332,7 +342,7 @@
       <td class="td-fo">${dragHandle}${esc(foFull) || "—"}</td>
       <td class="td-rdd">${esc(t.billingDate) || "—"}</td>
       <td>${colorChip(custGroup)}</td>
-      <td class="td-outlet" title="${esc(outletName)}">${esc(outletName) || "—"}</td>
+      <td class="td-outlet" title="${esc(outletName)}">${outletCell}</td>
       <td class="td-address" title="${esc(address)}">${esc(address) || "—"}</td>
       <td class="td-area">${esc(t.area) || "—"}</td>
       <td class="td-qty">${t.quantity || "—"}</td>
@@ -997,6 +1007,42 @@
                     },
                     revert: () => {
                         trip.remarks = old;
+                        renderDispatch();
+                    },
+                });
+            }
+
+            // The route file can name the wrong store. Only an existing outlet
+            // is accepted, so a typo cannot seed a new one.
+            function changeOutlet(tripId, val) {
+                const trip = (dispatchData.trips || []).find(
+                    (t) => t.id === tripId,
+                );
+                if (!trip) return;
+                const name = val.trim().toLowerCase();
+                const outlet = outlets.find(
+                    (o) => String(o.outletName).trim().toLowerCase() === name,
+                );
+                if (!outlet || outlet.id === trip.outletId) {
+                    if (!outlet)
+                        showToast("Pick an existing outlet from the list.", "warning");
+                    renderDispatch();
+                    return;
+                }
+                const old = trip.outletId;
+                trip.outletId = outlet.id;
+                renderDispatch();
+                bgSave("saveTripChanges", [tripId, { outletId: outlet.id }], {
+                    onOk: (r) => {
+                        if (r.routeFrequencyWarning) {
+                            showToast(
+                                `⚠ Driver assigned to ${r.routeFrequencyWarning.outletName} ${r.routeFrequencyWarning.count}× in last 21 days`,
+                                "warning",
+                            );
+                        }
+                    },
+                    revert: () => {
+                        trip.outletId = old;
                         renderDispatch();
                     },
                 });

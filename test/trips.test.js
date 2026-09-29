@@ -203,6 +203,54 @@ test('saveTripChanges does not spawn a carry-over trip on Preload', async () => 
   assert.equal(after[0].trip_status, 'Preload');
 });
 
+// The route file can name the wrong store; the dispatcher moves the trip to
+// the right one. A scheduled driver now visits the new outlet, so it is logged.
+const twoOutlets = {
+  Outlets: [HEADERS.Outlets.slice(),
+    [12, 'SM Dasma', 'Cavite', '', '', '', '6/1/2026'],
+    [13, 'SM Bacoor', 'Cavite', '', '', '', '6/1/2026']],
+};
+
+test('saveTripChanges moves a trip to another existing outlet', async () => {
+  const { api, db } = withExistingTrip(twoOutlets);
+  const res = await api.saveTripChanges(50, { outletId: 13 });
+  assert.equal(res.success, true);
+  assert.equal(res.trip.outletId, 13);
+  assert.equal(trip(db, 50).outlet_id, 13);
+
+  const audit = dump(db, 'audit_log').find((r) => r.action === 'TRIP_OUTLET_CHANGE');
+  assert.equal(audit.old_value, '12');
+  assert.equal(audit.new_value, '13');
+
+  const freq = dump(db, 'route_frequency_log');
+  assert.equal(freq.length, 1);
+  assert.equal(freq[0].outlet_id, 13);
+});
+
+test('saveTripChanges refuses an outlet that does not exist', async () => {
+  const { api, db } = withExistingTrip();
+  const res = await api.saveTripChanges(50, { outletId: 99 });
+  assert.equal(res.success, false);
+  assert.equal(trip(db, 50).outlet_id, 12);
+});
+
+// A billing number freezes the line and the area it was priced from.
+test('saveTripChanges refuses an outlet change once the load is billed', async () => {
+  const { api, db, raw } = withExistingTrip(twoOutlets);
+  raw.exec(`INSERT INTO waybills (id, waybill_number, prefix_id, sequence_number, waybill_type, status)
+            VALUES (70, 'AL-6', 1, 6, 'Regular', 'Confirmed');
+            UPDATE trips SET waybill_id = 70 WHERE id = 50;
+            INSERT INTO billing_lines (waybill_id, trip_date, billing_date, drops, cartons, added_by, added_at)
+            VALUES (70, '2026-06-16', '2026-06-16', 1, 0, 'x', '2026-06-16 00:00:00');`);
+
+  assert.equal((await api.saveTripChanges(50, { outletId: 13 })).success, true); // not billed yet
+  raw.exec(`UPDATE billing_lines SET billing_number = 'B-1', status = 'Billed'`);
+  const res = await api.saveTripChanges(50, { outletId: 12 });
+  assert.equal(res.success, false);
+  assert.match(res.error, /billed/);
+  assert.equal(trip(db, 50).outlet_id, 13);
+});
+
 // The route-frequency window is measured against the real clock (todayPH()),
 // so fixtures must be dated relative to now — a hardcoded date ages out of it.
 function daysAgo(n) {

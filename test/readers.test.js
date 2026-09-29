@@ -168,10 +168,10 @@ test('getRouteFrequencyForDriver counts only in-window trips and joins outlet na
   const sheets = {
     Trips: [
       HEADERS.Trips.slice(),
-      tripRow({ ID: 101, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 9 }),
-      tripRow({ ID: 102, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 9 }),
-      tripRow({ ID: 103, 'Trip Date': '1/1/2020', 'Billing Date': '1/1/2020', 'Driver ID': 9 }),
-      tripRow({ ID: 104, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 99 }),
+      tripRow({ ID: 101, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 9, 'Outlet ID': 12 }),
+      tripRow({ ID: 102, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 9, 'Outlet ID': 12 }),
+      tripRow({ ID: 103, 'Trip Date': '1/1/2020', 'Billing Date': '1/1/2020', 'Driver ID': 9, 'Outlet ID': 12 }),
+      tripRow({ ID: 104, 'Trip Date': today, 'Billing Date': today, 'Driver ID': 99, 'Outlet ID': 12 }),
     ],
     'Route Frequency Log': [
       HEADERS['Route Frequency Log'].slice(),
@@ -197,7 +197,7 @@ test('getRouteFrequencyForDriver counts only in-window trips and joins outlet na
 test('getRouteFrequencyForDriver counts each trip once, for its current driver', async () => {
   const { api: helperApi } = makeEnv();
   const today = helperApi.toClientDate(helperApi.todayPH());
-  const t = (id, driver) => tripRow({ ID: id, 'Trip Date': today, 'Billing Date': today, 'Driver ID': driver });
+  const t = (id, driver) => tripRow({ ID: id, 'Trip Date': today, 'Billing Date': today, 'Driver ID': driver, 'Outlet ID': 12 });
 
   const sheets = {
     Trips: [HEADERS.Trips.slice(), t(101, 9), t(102, 9), t(105, 10)],

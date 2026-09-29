@@ -272,7 +272,7 @@ Append-only. One row each time a driver is scheduled to an outlet. It feeds the 
 | driver_id | INTEGER FK → employees | |
 | outlet_id | INTEGER FK → outlets | |
 
-A trip is logged when it **leaves Prepping**: through `markDayScheduled`, a manual status change, or creation at another status (manual trips and carry-overs). The import logs nothing, because the crew during Prepping is only the roster default and the dispatcher still changes it. A driver change on a scheduled trip appends another row.
+A trip is logged when it **leaves Prepping**: through `markDayScheduled`, a manual status change, or creation at another status (manual trips and carry-overs). The import logs nothing, because the crew during Prepping is only the roster default and the dispatcher still changes it. A driver or outlet change on a scheduled trip appends another row. A trip counts once, and only for the driver and outlet it has now.
 
 **Warning rule:** more than **5** rows for one driver and outlet in the **last 21 days** shows a warning in the UI.
 
@@ -446,6 +446,7 @@ Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (
 - `TRIP_CREATE` — a trip was created (manual, import or carry-over)
 - `TRIP_STATUS_CHANGE` — a trip status changed
 - `TRIP_REASSIGN` — a trip's driver or truck changed
+- `TRIP_OUTLET_CHANGE` — a dispatcher moved a trip to another existing outlet (values = the outlet IDs). A billed load refuses it.
 - `TRIP_CONVOY_CHANGE` — trips were grouped or ungrouped as a convoy (values = the convoy token)
 - `TRIP_DELETE` — an imported trip was deleted
 - `WAYBILL_SUGGEST` — a waybill number was reserved as Suggested

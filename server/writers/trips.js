@@ -204,8 +204,11 @@ export async function createTrip(tripData) {
  *   the next-day carry-over trip.
  * - A hand-promoted Prepping → Scheduled trip gets its waybill suggested too
  *   (markDayScheduled covers the whole-day path), unless it already has one.
+ * - `outletId` moves the trip to another existing outlet: the dispatcher's
+ *   override when the route file named the wrong store. A billed load
+ *   refuses it — the billing number froze the area it was priced from.
  * @param {number} tripId
- * @param {Object} changes  Any of { truckId, driverId, helperIds, tripStatus, remarks, prefixId }
+ * @param {Object} changes  Any of { truckId, driverId, helperIds, tripStatus, remarks, outletId, prefixId }
  * @returns {Promise<{ success: true, trip: Object, newTripId: number|null,
  *   routeFrequencyWarning: {outletName: string, count: number}|null }
  *   | { success: false, error: string }>}
@@ -230,6 +233,18 @@ export async function saveTripChanges(tripId, changes) {
     if (changes.truckId !== undefined) sets.truck_id = numOrNull(changes.truckId);
     if (changes.driverId !== undefined) sets.driver_id = numOrNull(changes.driverId);
     if (changes.remarks !== undefined && changes.remarks !== null) sets.remarks = changes.remarks;
+    const oldOutletId = numOrNull(before.outlet_id);
+    if (changes.outletId !== undefined && numOrNull(changes.outletId) === oldOutletId) delete changes.outletId;
+    if (changes.outletId !== undefined) {
+      const outletId = numOrNull(changes.outletId);
+      const check = await one(
+        `SELECT (SELECT 1 FROM outlets WHERE id = ?) AS found,
+                (SELECT 1 FROM billing_lines WHERE waybill_id = ? AND COALESCE(billing_number, '') <> '') AS billed`,
+        outletId, numOrNull(before.waybill_id));
+      if (!check.found) throw new Error('Pick an existing outlet.');
+      if (check.billed) throw new Error('This load is already billed, so its outlet cannot change.');
+      sets.outlet_id = outletId;
+    }
 
     const stmts = [];
     // The status moves only if it is still the one read above. Two saves in
@@ -265,6 +280,9 @@ export async function saveTripChanges(tripId, changes) {
     if (changes.tripStatus !== undefined) {
       await _auditLog('TRIP_STATUS_CHANGE', 'trips', id, oldStatus, changes.tripStatus);
     }
+    if (changes.outletId !== undefined) {
+      await _auditLog('TRIP_OUTLET_CHANGE', 'trips', id, oldOutletId || '', sets.outlet_id);
+    }
 
     // Re-read: every branch below needs the row as it stands after the
     // update above (mirrors the .gs in-memory row it kept mutating).
@@ -275,9 +293,11 @@ export async function saveTripChanges(tripId, changes) {
     // Only the save that moved the status acts on the move.
     const justScheduled = changes.tripStatus !== undefined && oldStatus === 'Prepping' && newStatus !== 'Prepping';
     const driverChanged = changes.driverId !== undefined && numOrNull(changes.driverId) !== oldDriverId;
+    // A scheduled driver sent to another outlet visits that one now.
+    const outletChanged = changes.outletId !== undefined;
 
     let routeFrequencyWarning = null;
-    if (newStatus !== 'Prepping' && newDriverId && (justScheduled || driverChanged)) {
+    if (newStatus !== 'Prepping' && newDriverId && (justScheduled || driverChanged || outletChanged)) {
       const outletId = numOrNull(row.outlet_id);
       if (outletId) {
         // This trip is counted by the +1 below, whether or not it was
@@ -315,6 +335,7 @@ export async function saveTripChanges(tripId, changes) {
       truckBillingCategory: row.truck_billing_category || '',
       tripStatus: row.trip_status || 'Scheduled',
       remarks: row.remarks || '',
+      outletId: numOrNull(row.outlet_id),
       statusChangedBy: row.status_changed_by || '',
       statusChangedAt: toClientDateTime(row.status_changed_at),
     };

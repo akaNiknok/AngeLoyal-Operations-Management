@@ -1106,6 +1106,10 @@
                 font-weight: 500;
                 max-width: 200px !important;
             }
+            .td-outlet .outlet-in {
+                font-weight: 500;
+                text-overflow: ellipsis;
+            }
             .td-address {
                 max-width: 220px !important;
                 color: var(--muted);
