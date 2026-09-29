@@ -514,3 +514,128 @@ test('stamping a billing number audits each line with the number it had', async 
   assert.deepEqual(rows.map((r) => [r.row_id, r.old_value, r.new_value]),
     [[id, '', 'BILL-0001'], [id, 'BILL-0001', 'BILL-0002']]);
 });
+
+// ── Submitted billings ────────────────────────────────────────
+
+test('stamping records the billing with its header, and a reprint reads it back as stored', async () => {
+  const s = sheets(
+    [trip({ id: 1 }), trip({ id: 2, fo: 'FO-2', area: 'Cabuyao' })],
+    [waybill(1, 'AY-11801', 1), waybill(2, 'AY-11802', 2)]
+  );
+  const { api } = await seeded(s);
+  const ids = (await api.getBillingLines(DAY, DAY)).lines.map((l) => l.id);
+
+  const res = await api.setBillingNumber(ids, 'B-0042', { docDate: '7/8/2026', from: '6/29/2026', to: '7/4/2026' });
+  assert.equal(res.success, true);
+
+  const list = (await api.getBillings()).billings;
+  assert.equal(list.length, 1);
+  assert.deepEqual(
+    [list[0].billingNumber, list[0].docDate, list[0].from, list[0].to, list[0].lineCount, list[0].total],
+    ['B-0042', '7/8/2026', '6/29/2026', '7/4/2026', 2, 17670 + 17290]);
+
+  const one = await api.getBilling(list[0].id);
+  assert.equal(one.success, true);
+  assert.deepEqual(one.lines.map((l) => l.waybillNumber).sort(), ['AY-11801', 'AY-11802']);
+  assert.ok(one.lines.every((l) => l.billingNumber === 'B-0042' && l.status === 'Billed'));
+});
+
+test('a reprint does not depend on the trips still being billable', async () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api, raw } = await seeded(s);
+  const id = (await api.getBillingLines(DAY, DAY)).lines[0].id;
+  await api.setBillingNumber([id], 'B-1');
+  raw.exec(`UPDATE trips SET trip_status = 'Undelivered'`);
+
+  const billingId = (await api.getBillings()).billings[0].id;
+  assert.equal((await api.getBilling(billingId)).lines.length, 1);
+});
+
+test('without a header the billing spans its lines, and a second stamp on the number widens it', async () => {
+  const s = sheets(
+    [trip({ id: 1 }), trip({ id: 2, fo: 'FO-2', tripDate: '7/3/2026', billingDate: '7/3/2026' })],
+    [waybill(1, 'AY-11801', 1), waybill(2, 'AY-11802', 2)]
+  );
+  const { api } = await seeded(s);
+  const lines = (await api.getBillingLines(DAY, '7/3/2026')).lines;
+  const byWb = Object.fromEntries(lines.map((l) => [l.waybillNumber, l.id]));
+
+  await api.setBillingNumber([byWb['AY-11801']], 'B-1');
+  let b = (await api.getBillings()).billings[0];
+  assert.deepEqual([b.from, b.to, b.docDate], ['7/2/2026', '7/2/2026', '']);
+
+  await api.setBillingNumber([byWb['AY-11802']], 'b-1', { docDate: '7/9/2026' });   // same billing, any case
+  const all = (await api.getBillings()).billings;
+  assert.equal(all.length, 1);
+  b = all[0];
+  assert.deepEqual([b.from, b.to, b.docDate, b.lineCount], ['7/2/2026', '7/3/2026', '7/9/2026', 2]);
+});
+
+test('a billing disappears when its last line is cleared or moved to another number', async () => {
+  const s = sheets(
+    [trip({ id: 1 }), trip({ id: 2, fo: 'FO-2' })],
+    [waybill(1, 'AY-11801', 1), waybill(2, 'AY-11802', 2)]
+  );
+  const { api, db } = await seeded(s);
+  const [a, b] = (await api.getBillingLines(DAY, DAY)).lines.map((l) => l.id);
+
+  await api.setBillingNumber([a, b], 'B-1');
+  await api.setBillingNumber([a], 'B-2');
+  assert.deepEqual(dump(db, 'billings').map((r) => r.billing_number).sort(), ['B-1', 'B-2']);
+
+  await api.setBillingNumber([b], 'B-2');
+  assert.deepEqual(dump(db, 'billings').map((r) => r.billing_number), ['B-2']);
+
+  await api.setBillingNumber([a, b], '');
+  assert.deepEqual(dump(db, 'billings'), []);
+  assert.ok((await api.getBillingLines(DAY, DAY)).lines.every((l) => l.status === 'Not Billed' && !l.billingNumber));
+});
+
+test('stamping audits the billing once, with the header it was given', async () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api, db } = await seeded(s);
+  const id = (await api.getBillingLines(DAY, DAY)).lines[0].id;
+  await api.setBillingNumber([id], 'B-1', { docDate: '7/8/2026' });
+
+  const rows = dump(db, 'audit_log').filter((r) => r.action === 'BILLING_STAMP');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].table_name, 'billings');
+  assert.deepEqual(JSON.parse(rows[0].new_value), { billingNumber: 'B-1', header: { docDate: '7/8/2026' }, lines: 1 });
+});
+
+test('a Viewer cannot list or reprint billings', async () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const admin = await seeded(s);
+  const id = (await admin.api.getBillingLines(DAY, DAY)).lines[0].id;
+  await admin.api.setBillingNumber([id], 'B-1');
+
+  const viewer = makeEnv({ sheets: s, userEmail: EMAIL.Viewer });
+  await assert.rejects(() => viewer.api.getBillings());
+  await assert.rejects(() => viewer.api.getBilling(1));
+});
+
+// ── How a line was built ──────────────────────────────────────
+
+test('each line carries its stops and the computed amounts, even when typed over', async () => {
+  const s = sheets(
+    [trip({ id: 1, area: 'Cabuyao', qty: 250 }), trip({ id: 2, area: 'Calamba', qty: 20 })],
+    [waybill(1, 'AY-11801', 1), waybill(2, 'AY-11801', 2)]
+  );
+  const { api } = await seeded(s);
+  const id = (await api.getBillingLines(DAY, DAY)).lines[0].id;
+  await api.saveBillingLine(id, { haulingRate: 20000 });
+
+  const line = (await api.getBillingLines(DAY, DAY)).lines[0];
+  assert.deepEqual(line.stops.map((st) => [st.outlet, st.area, st.quantity, st.rate, st.mano]), [
+    ['Outlet Cabuyao', 'Cabuyao', 250, 17290, 784],
+    ['Outlet Calamba', 'Calamba', 20, 17670, 0],
+  ]);
+  assert.equal(line.haulingRate, 20000);
+  assert.deepEqual({ ...line.computed }, { haulingRate: 17670, mano: 784, dropFee: 0, area: 'Calamba' });
+});
+
+test('a stop with no rate shows a blank rate, not zero', async () => {
+  const s = sheets([trip({ id: 1, area: 'Nowhere' })], [waybill(1, 'AY-11801', 1)]);
+  const { api } = await seeded(s);
+  assert.equal((await api.getBillingLines(DAY, DAY)).lines[0].stops[0].rate, null);
+});

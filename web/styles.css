@@ -2299,3 +2299,49 @@
                 color: var(--muted);
                 font-size: 13px;
             }
+
+            /* Billing: the "how it was priced" row under a line */
+            .bl-caret {
+                border: none;
+                background: none;
+                color: var(--muted);
+                cursor: pointer;
+                padding: 0 4px;
+                font-size: 12px;
+            }
+            .bl-caret:hover {
+                color: var(--text);
+            }
+            #billing-table tr.bl-detail > td {
+                background: var(--bg);
+                padding: 10px 16px 12px 48px;
+            }
+            .bl-detail-meta {
+                color: var(--muted);
+                font-size: 12px;
+                margin-bottom: 8px;
+            }
+            .bl-stops {
+                border-collapse: collapse;
+                font-size: 12px;
+                margin-bottom: 8px;
+            }
+            .bl-stops th,
+            .bl-stops td {
+                padding: 3px 12px 3px 0;
+                text-align: left;
+                border-bottom: 1px solid var(--border);
+            }
+            .bl-stops .n {
+                text-align: right;
+                font-family: "DM Mono", monospace;
+            }
+            .bl-stops tr.bl-top td {
+                font-weight: 600;
+            }
+            .bl-rules {
+                margin: 0;
+                padding-left: 18px;
+                font-size: 12px;
+                line-height: 1.6;
+            }

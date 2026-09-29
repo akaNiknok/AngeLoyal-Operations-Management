@@ -48,9 +48,9 @@ function seedSheets() {
     'Billing Lines': [
       [
         'ID', 'Waybill Number', 'Waybill ID', 'Trip Date', 'Billing Date', 'Drops', 'Cartons',
-        'Hauling Rate', 'Mano', 'Drop Fee', 'Manual Charges', 'Total', 'Status', 'Added By', 'Added At',
+        'Hauling Rate', 'Mano', 'Drop Fee', 'Manual Charges', 'Total', 'Billing Number', 'Status', 'Added By', 'Added At',
       ],
-      [1, 'A-0001', 1, '7/15/2026', '7/15/2026', 1, 10, 1000, 0, 0, JSON.stringify({ 10: 50 }), 1050, 'Not Billed', 'admin@angeloyal.com', '7/15/2026'],
+      [1, 'A-0001', 1, '7/15/2026', '7/15/2026', 1, 10, 1000, 0, 0, JSON.stringify({ 10: 50 }), 1050, 'B-1', 'Billed', 'admin@angeloyal.com', '7/15/2026'],
     ],
     'Billing Charge Types': [['ID', 'Label', 'Sort Order', 'Active'], [10, 'Toll Fee', 10, true]],
   };
@@ -68,7 +68,7 @@ test('clearAllData: an Admin with the exact phrase clears every transactional ta
   assert.deepEqual(result.cleared, ['Trips', 'Outlets', 'Route Frequency Log', 'Waybills', 'Billing Lines', 'Audit Log']);
 
   for (const table of ['trips', 'trip_helpers', 'outlets', 'route_frequency_log', 'waybills',
-    'billing_lines', 'billing_line_charges']) {
+    'billing_lines', 'billing_line_charges', 'billings']) {
     assert.equal(dump(db, table).length, 0, `${table} must be empty`);
   }
   // Master data survives, sequence counter included.

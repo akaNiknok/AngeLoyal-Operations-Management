@@ -38,7 +38,8 @@ v1 kept the same data in Google Sheets. [`Docs/D1 Migration.md`](D1%20Migration.
 | 17 | `billing_charge_types` | Billing | Master (seeded) |
 | 18 | `billing_lines` | Billing | Billing ledger |
 | 19 | `billing_line_charges` | Billing | Manual charges per line |
-| 20 | `audit_log` | Audit | Append-only |
+| 20 | `billings` | Billing | Submitted billings |
+| 21 | `audit_log` | Audit | Append-only |
 
 `0002_seed.sql` holds the defaults for the seeded tables as `INSERT OR IGNORE`. A database that already has rows keeps them.
 
@@ -385,7 +386,7 @@ One row per billable waybill. The server creates it the first time a billing ran
 | mano | REAL | One `MANO_FEE` for each full 100 cartons at one store, summed over drops |
 | drop_fee | REAL | `DROP_FEE` when the load has 3 or more drops, else 0 |
 | total | REAL | Hauling rate + mano + drop fee + every manual charge. The server computes it; the client cannot write it |
-| billing_number | TEXT | The Rebisco billing document; null until billed |
+| billing_id | INTEGER FK → billings | The submitted billing; null until billed. Partial index where not null |
 | status | TEXT | CHECK: `Not Billed`, `Billed`, `Deferred` |
 | overrides | TEXT | JSON array of the computed fields a user typed over, e.g. `["haulingRate"]`. A recompute skips them |
 | notes | TEXT | |
@@ -403,9 +404,23 @@ The manual charges of a line. Readers rebuild the client's `manualCharges` objec
 | charge_type_id | INTEGER FK → billing_charge_types | |
 | amount | REAL | PK is `(billing_line_id, charge_type_id)` |
 
+### billings
+
+One submitted billing: the number Rebisco receives, the DATE: line, and the week the printout names. `0006_billings.sql` added it. Before that, the number was text on each line, so a reprint had to rebuild the header by hand and find the lines by filter.
+
+| Column | Type | Notes |
+| :-- | :-- | :-- |
+| id | INTEGER PK | |
+| billing_number | TEXT, unique (nocase) | |
+| doc_date | TEXT date | The DATE: line. Null for a billing stamped before 0006 |
+| period_from, period_to | TEXT date | The week the printout names. A second stamp on the same number widens it |
+| stamped_by, stamped_at | TEXT | The first stamp. For a billing moved in by 0006: the lines' last edit |
+
+`setBillingNumber(lineIds, number, header)` upserts the billing, points the lines at it, and deletes a billing whose last line moved away, all in one batch. A blank number clears the stamp. `getBillings` lists them with the line count and total; `getBilling(id)` reads one back as stored, with no recompute. The Billing panel's Stamp & print flow stamps and then prints what `getBilling` returns, so a printout always matches a stamp.
+
 #### Line eligibility
 
-A waybill becomes a billing line when it is Confirmed and its trips are Delivered. A Deferred line leaves the current billing and stays eligible for a later one.
+A waybill becomes a billing line when it is Confirmed and its trips are Delivered. A Deferred line leaves the current billing and stays eligible for a later one. A line is Billed exactly when `billing_id` is set.
 
 #### Split-load area rule
 
@@ -473,6 +488,7 @@ Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (
 - `BILLING_LINE_EDIT` — manual charges, an override or notes changed on a line
 - `BILLING_LINE_STATUS_CHANGE` — a line was deferred or brought back
 - `BILLING_NUMBER_SET` — a Rebisco billing number was stamped on a line or cleared from it. One row per line: the old value is the number it had, the new value the number it has now (blank = cleared)
+- `BILLING_STAMP` — lines were stamped onto a billing (table `billings`, new value = JSON of the number, the header it was given and the line count)
 - `DATA_CLEAR` — an Admin wiped every transactional table from the Settings panel (table blank, new value = the cleared tables). It is written *after* the wipe, so it is the first row of the new log
 
 ## Design rationale

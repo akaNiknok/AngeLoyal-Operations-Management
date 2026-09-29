@@ -213,13 +213,17 @@ export function _computeBillingLine(trips, rateIndex, bandIndex) {
   let cartons = 0;
   let mano = 0;
   const unpriced = [];
+  // What each stop contributed, so the panel can show how the line was built.
+  const stops = [];
 
   trips.forEach((t) => {
     const qty = Number(t.quantity) || 0;
+    const stopMano = Math.floor(qty / MANO_CARTON_STEP) * MANO_FEE;
     cartons += qty;
-    mano += Math.floor(qty / MANO_CARTON_STEP) * MANO_FEE;
+    mano += stopMano;
 
     const rate = _rateFor(rateIndex, origin, t.area, truckType, bandIndex);
+    stops.push({ outlet: t.outletName || '', area: t.area || '', quantity: qty, rate, mano: stopMano });
     if (rate === null) { unpriced.push(t.area || '(blank)'); return; }
     if (haulingRate === null || rate > haulingRate) { haulingRate = rate; area = t.area; }
   });
@@ -239,6 +243,7 @@ export function _computeBillingLine(trips, rateIndex, bandIndex) {
     mano,
     dropFee: trips.length >= DROP_FEE_MIN ? DROP_FEE : 0,
     warning,
+    stops,
   };
 }
 

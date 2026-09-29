@@ -119,7 +119,7 @@ export function transform(snapshot, opts = {}) {
     users: [], billing_categories: [], route_type_map: [], customer_group_colors: [],
     waybill_prefixes: [], employees: [], trucks: [], truck_default_helpers: [], outlets: [],
     waybills: [], trips: [], trip_helpers: [], route_frequency_log: [], freight_rates: [],
-    fuel_prices: [], billing_charge_types: [], billing_lines: [], billing_line_charges: [],
+    fuel_prices: [], billing_charge_types: [], billings: [], billing_lines: [], billing_line_charges: [],
     audit_log: [],
   };
 
@@ -361,6 +361,24 @@ export function transform(snapshot, opts = {}) {
   // ---- billing lines
   const waybillByNumber = {};
   T.waybills.forEach((w) => { const k = w.waybill_number.toUpperCase(); if (!waybillByNumber[k]) waybillByNumber[k] = w.id; });
+  // A Billing Number becomes a billings row (0006_billings.sql). The Sheet
+  // never held the DATE: line or the typed range, so the period is the span
+  // of the billing's lines.
+  const billingByNumber = {};
+  const billingFor = (number, tripDate, by, at) => {
+    const k = number.toUpperCase();
+    let b = billingByNumber[k];
+    if (!b) {
+      b = billingByNumber[k] = {
+        id: T.billings.length + 1, billing_number: number, doc_date: null,
+        period_from: tripDate, period_to: tripDate, stamped_by: by, stamped_at: at,
+      };
+      T.billings.push(b);
+    }
+    if (tripDate < b.period_from) b.period_from = tripDate;
+    if (tripDate > b.period_to) b.period_to = tripDate;
+    return b.id;
+  };
   rows('Billing Lines').forEach((r) => {
     const id = int(r.ID);
     const oldWb = int(r['Waybill ID']);
@@ -370,6 +388,9 @@ export function transform(snapshot, opts = {}) {
       if (strict) { errors.push(`Billing Lines ID ${id}: waybill "${str(r['Waybill Number'])}" not found`); return; }
     }
     const tripDate = date(r['Trip Date']);
+    const addedBy = str(r['Added By']) || 'unknown';
+    const addedAt = timestamp(r['Added At']) || `${tripDate} 00:00:00`;
+    const number = str(r['Billing Number']);
     T.billing_lines.push({
       id, waybill_id: waybillId === undefined ? oldWb : waybillId,
       trip_date: tripDate, billing_date: date(r['Billing Date']) || tripDate,
@@ -378,10 +399,12 @@ export function transform(snapshot, opts = {}) {
       drops: int(r.Drops) || 0, cartons: int(r.Cartons) || 0,
       diesel_price: num(r['Diesel Price']), rate_band: _fuelBandFromLabel(r['Rate Band']),
       hauling_rate: num(r['Hauling Rate']) || 0, mano: num(r.Mano) || 0, drop_fee: num(r['Drop Fee']) || 0,
-      total: num(r.Total) || 0, billing_number: strOrNull(r['Billing Number']),
+      total: num(r.Total) || 0,
+      billing_id: number ? billingFor(number, tripDate, str(r['Updated By']) || addedBy,
+        timestamp(r['Updated At']) || addedAt) : null,
       status: str(r.Status) || 'Not Billed',
       overrides: strOrNull(r.Overrides), notes: strOrNull(r.Notes),
-      added_by: str(r['Added By']) || 'unknown', added_at: timestamp(r['Added At']) || `${tripDate} 00:00:00`,
+      added_by: addedBy, added_at: addedAt,
       updated_by: strOrNull(r['Updated By']), updated_at: timestamp(r['Updated At']),
     });
     const charges = _parseJsonCell(r['Manual Charges'], {});

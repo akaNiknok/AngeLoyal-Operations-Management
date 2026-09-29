@@ -46,7 +46,10 @@ function loadBilling(fields = {}) {
   const { sandbox } = loadWeb(
     ['config.js', 'core.js', 'dispatch.js', 'export.js', 'crewboard.js',
      'import.js', 'roster.js', 'masters.js', 'billing.js', 'billing-matrix.js'],
-    { document },
+    // URL and a full location: the print document resolves the letterhead.
+    // The host Date: ExcelJS checks `instanceof Date`, which a date built in
+    // the sandbox's own realm fails. In the browser both share one realm.
+    { document, URL, Date, location: { hostname: 'localhost', href: 'http://localhost:8788/' } },
     'globalThis.__setLines = (lines, cols) => {' +
       ' billingLines = lines;' +
       ' billingChargeCols = cols || [];' +
@@ -56,7 +59,8 @@ function loadBilling(fields = {}) {
       '};' +
       'globalThis.__order = () => billingOrder.slice();' +
       'globalThis.__bands = () => FUEL_BANDS.slice();' +
-      'globalThis.__setRates = (rows) => { rateMatrix = rows; };'
+      'globalThis.__setRates = (rows) => { rateMatrix = rows; };' +
+      'globalThis.__excelReady = () => { excelJsReady = true; };'
   );
   return { ui: sandbox, els };
 }
@@ -72,6 +76,34 @@ function line(o) {
     },
     o
   );
+}
+
+/**
+ * Stubs the stamp flow's edges: every server call, the modal, and the print.
+ * getBilling answers with `billed` as the lines of billing 77.
+ */
+function stubStampCalls(ui, billed = []) {
+  const sent = [];
+  const opened = [];
+  const printed = [];
+  ui.confirm = () => true;
+  ui.loadBilling = () => {};
+  ui.openModal = (id) => opened.push(id);
+  ui.printHtmlDocument = (html) => printed.push(html);
+  ui.call = (fn, ...args) => {
+    sent.push({ fn, args });
+    if (fn === 'setBillingNumber') return Promise.resolve({ success: true, updated: args[0].length, billingId: 77 });
+    if (fn === 'getBilling') {
+      return Promise.resolve({
+        success: true,
+        billing: { id: 77, billingNumber: 'B-0042', docDate: '7/8/2026', from: '6/29/2026', to: '7/4/2026' },
+        lines: billed,
+        chargeTypes: [],
+      });
+    }
+    return Promise.resolve({ success: true });
+  };
+  return { sent, opened, printed };
 }
 
 // ── The footer ────────────────────────────────────────────────
@@ -185,33 +217,153 @@ test('stamping skips ticked lines that the filter now hides', async () => {
   // The dispatcher narrows the view to one warehouse after ticking both.
   ui.document.getElementById('bl-origin').value = 'TANZA';
 
-  const sent = [];
-  ui.confirm = () => true;
-  ui.loadBilling = () => {};
-  ui.call = (fn, ...args) => {
-    sent.push({ fn, args });
-    return Promise.resolve({ success: true, updated: args[0].length });
-  };
-  ui.stampBillingNumber();
+  const { sent } = stubStampCalls(ui);
+  ui.openStampPreview();
+  await ui.confirmStampAndPrint();
   await tick();
 
-  assert.equal(sent.length, 1);
   assert.equal(sent[0].fn, 'setBillingNumber');
   assert.deepEqual(Array.from(sent[0].args[0]), [1]);
   assert.equal(sent[0].args[1], 'B-0042');
 });
 
-test('stamping with every ticked line filtered away sends nothing', () => {
+test('stamping with every ticked line filtered away opens nothing and sends nothing', () => {
   const { ui } = loadBilling({ 'bl-status': 'billed', 'bl-number': 'B-0042' });
   ui.__setLines([line({ id: 1, waybillNumber: 'AY-11801' })]);
   ui.toggleBillingRow(1, true);
 
-  let called = false;
-  ui.confirm = () => true;
-  ui.call = () => { called = true; return new Promise(() => {}); };
-  ui.stampBillingNumber();
+  const { sent, opened } = stubStampCalls(ui);
+  ui.openStampPreview();
+  ui.confirmStampAndPrint();
 
-  assert.equal(called, false);
+  assert.deepEqual(opened, []);
+  assert.equal(sent.length, 0);
+});
+
+test('stamping needs a billing number before it opens the preview', () => {
+  const { ui } = loadBilling({ 'bl-number': '  ' });
+  ui.__setLines([line({ id: 1 })]);
+  ui.toggleBillingRow(1, true);
+
+  const { opened } = stubStampCalls(ui);
+  ui.openStampPreview();
+  assert.deepEqual(opened, []);
+});
+
+// The printout after a stamp is the billing the server holds under that
+// number — a number already in use may hold more lines than were ticked.
+test('stamp & print sends the header, then prints the billing read back', async () => {
+  const { ui } = loadBilling({
+    'bl-number': 'B-0042', 'bl-doc-date': '2026-07-08', 'bl-from': '2026-06-29', 'bl-to': '2026-07-04',
+  });
+  ui.__setLines([line({ id: 1 })]);
+  ui.toggleBillingRow(1, true);
+
+  const { sent, printed } = stubStampCalls(ui, [
+    line({ id: 9, waybillNumber: 'AY-11799', status: 'Billed', billingNumber: 'B-0042' }),
+    line({ id: 1, status: 'Billed', billingNumber: 'B-0042' }),
+  ]);
+  ui.openStampPreview();
+  assert.equal(printed.length, 0, 'the stamp preview must not print before the stamp');
+
+  await ui.confirmStampAndPrint();
+  await tick();
+
+  assert.deepEqual({ ...sent[0].args[2] }, { docDate: '7/8/2026', from: '6/29/2026', to: '7/4/2026' });
+  assert.equal(sent[1].fn, 'getBilling');
+  assert.equal(sent[1].args[0], 77);
+  assert.equal(printed.length, 1);
+  assert.match(printed[0], /AY-11799[\s\S]*AY-11801/);
+  assert.match(printed[0], /BILLING #<\/span> B-0042/);
+  assert.match(printed[0], /BILLING JUNE 29 - JULY 4, 2026/);
+});
+
+test('a draft prints the visible lines with no billing number', () => {
+  const { ui } = loadBilling({ 'bl-number': 'B-0042' });
+  ui.__setLines([line({ id: 1 })]);
+  const { printed } = stubStampCalls(ui);
+
+  ui.openDraftPreview();
+  ui.printBillingDoc();
+
+  assert.equal(printed.length, 1);
+  assert.match(printed[0], /DRAFT, NOT STAMPED/);
+  assert.ok(!printed[0].includes('B-0042'), 'a draft must not carry a number nobody stamped');
+});
+
+test('the tick-all box ticks exactly the lines the filter shows', () => {
+  const { ui } = loadBilling({ 'bl-origin': 'TANZA' });
+  ui.__setLines([
+    line({ id: 1, origin: 'TANZA' }),
+    line({ id: 2, waybillNumber: 'AY-11802', origin: 'LINGUNAN' }),
+  ]);
+  ui.toggleAllBilling(true);
+  ui.document.getElementById('bl-origin').value = '';
+
+  assert.deepEqual(Array.from(ui.tickedBillingLines().map((l) => l.id)), [1]);
+});
+
+test('the detail row marks the stop that set the rate and names a typed-over amount', () => {
+  const { ui } = loadBilling();
+  const html = ui.billingDetailHtml(line({
+    id: 3, drops: 2, haulingRate: 20000, overrides: ['haulingRate'],
+    billingDate: '7/1/2026', tripDate: '7/2/2026', dieselPrice: 67, rateBand: '65.01-70',
+    stops: [
+      { outlet: 'SM Cabuyao', area: 'Cabuyao', quantity: 250, rate: 17290, mano: 784 },
+      { outlet: 'SM Calamba', area: 'Calamba', quantity: 20, rate: 17670, mano: 0 },
+    ],
+    computed: { haulingRate: 17670, mano: 784, dropFee: 0, area: 'Calamba' },
+  }));
+
+  assert.match(html, /<tr class="bl-top">[\s\S]*SM Calamba/);
+  assert.match(html, /highest rate among the stops \(Calamba\)/);
+  assert.match(html, /Typed over: ₱20,000\.00/);
+  assert.match(html, /delivered 7\/2\/2026/);
+  assert.match(html, /none for 2 drops/);
+});
+
+test('the .xlsx follows the company workbook: headers on row 5, live totals, the VAT block', async () => {
+  const ExcelJS = require('../web/vendor/exceljs.min.js');
+  const { ui } = loadBilling({ 'bl-doc-date': '2026-07-08', 'bl-from': '2026-07-02', 'bl-to': '2026-07-02' });
+  ui.ExcelJS = ExcelJS;
+  ui.__excelReady();
+  let saved = null;
+  ui.saveBuffer = (buf, name) => { saved = { buf, name }; };
+
+  ui.__setLines([
+    line({ id: 1, waybillNumber: 'AY-11801', total: 17670 + 150 + 392, mano: 392, manualCharges: { 1: 150 } }),
+    line({ id: 2, waybillNumber: 'AY-11802', total: 17670 }),
+  ], [{ id: 1, label: 'Parking Fee/Toll Fees' }]);
+  ui.openDraftPreview();
+  await ui.exportBillingXlsx();
+
+  assert.equal(saved.name, 'BILLING DRAFT (2026-07-02 to 2026-07-02).xlsx');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(saved.buf);
+  const ws = wb.getWorksheet('TRIPS BILLING');
+  const v = (addr) => ws.getCell(addr).value;
+
+  assert.deepEqual(ws.getRow(5).values.slice(1), [
+    'DATE', 'PLATE #', 'WAYBILL #', 'FREIGHT ORDER #', 'TRUCK TYPE', 'AREA',
+    'PARKING FEE/TOLL FEES', 'MANO', 'ADDITIONAL 500 PER 3 DROPS', 'HAULING RATE', 'TOTAL']);
+  assert.equal(v('A6').toISOString(), '2026-07-02T00:00:00.000Z');
+  assert.deepEqual([v('C6'), v('G6'), v('H6'), v('J6')], ['AY-11801', 150, 392, 17670]);
+  assert.deepEqual({ ...v('K6') }, { formula: 'SUM(G6:J6)', result: 18212 });
+  // Totals row, then the VAT block three rows down.
+  assert.equal(v('B8'), 'TOTAL WAYBILLS: ');
+  assert.deepEqual({ ...v('K8') }, { formula: 'SUM(K6:K7)', result: 35882 });
+  assert.equal(v('I11'), 'TOTAL SALES VAT INC :');
+  assert.equal(v('K16').formula, 'K11-K15');
+  assert.ok(Math.abs(v('K16').result - (35882 - (35882 / 1.12) * 0.02)) < 1e-6);
+  assert.deepEqual([v('G1'), v('I1'), v('H2'), v('E3')],
+    ['BILLING #', 'DRAFT, NOT STAMPED', 'DATE:', 'BILLING JULY 2 - 2, 2026']);
+});
+
+test('an Excel date lands on the same calendar day in Manila', () => {
+  const { ui } = loadBilling();
+  const d = ui.excelDate('7/2/2026');
+  assert.equal(d.toISOString(), '2026-07-02T00:00:00.000Z');
+  assert.equal(ui.excelDate(''), null);
 });
 
 test('the origin filter keeps one warehouse', () => {

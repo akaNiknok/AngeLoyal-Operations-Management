@@ -535,12 +535,20 @@ export function billingLineFromRow(r, charges) {
 }
 
 /** Stored billing lines by waybill id, in the client shape. */
+/**
+ * The select list and joins billingLineFromRow reads: the line, its waybill
+ * number, and the number of the billing it sits on (blank when unbilled).
+ */
+export const BILLING_LINE_COLS = `b.*, w.waybill_number, bl.billing_number
+  FROM billing_lines b
+  JOIN waybills w ON w.id = b.waybill_id
+  LEFT JOIN billings bl ON bl.id = b.billing_id`;
+
 export async function billingLinesByWaybill(waybillIds) {
   if (!waybillIds.length) return {};
   const marks = waybillIds.map(() => '?').join(',');
   const [lines, charges] = await Promise.all([
-    q(`SELECT b.*, w.waybill_number FROM billing_lines b JOIN waybills w ON w.id = b.waybill_id
-       WHERE b.waybill_id IN (${marks})`, ...waybillIds),
+    q(`SELECT ${BILLING_LINE_COLS} WHERE b.waybill_id IN (${marks})`, ...waybillIds),
     q(`SELECT c.* FROM billing_line_charges c JOIN billing_lines b ON b.id = c.billing_line_id
        WHERE b.waybill_id IN (${marks})`, ...waybillIds),
   ]);
@@ -567,6 +575,58 @@ export function _billingTotals(lines) {
     addVat: netOfVat * VAT_RATE,
     withholding: netOfVat * WITHHOLDING_RATE,
     amountDue: totalVatInc - netOfVat * WITHHOLDING_RATE,
+  };
+}
+
+function billingFromRow(r) {
+  return {
+    id: r.id,
+    billingNumber: r.billing_number,
+    docDate: toClientDate(r.doc_date),
+    from: toClientDate(r.period_from),
+    to: toClientDate(r.period_to),
+    stampedBy: r.stamped_by || '',
+    stampedAt: toClientDateTime(r.stamped_at),
+    lineCount: Number(r.line_count) || 0,
+    total: Number(r.total) || 0,
+  };
+}
+
+/** Every submitted billing, newest first, with its line count and total. */
+export async function getBillings() {
+  await requirePermission('VIEW_BILLING');
+  const rows = await q(
+    `SELECT bl.*, COUNT(b.id) AS line_count, COALESCE(SUM(b.total), 0) AS total
+     FROM billings bl JOIN billing_lines b ON b.billing_id = bl.id
+     GROUP BY bl.id ORDER BY bl.stamped_at DESC, bl.id DESC`);
+  return { success: true, billings: rows.map(billingFromRow) };
+}
+
+/**
+ * One submitted billing exactly as it went out: its header and its lines,
+ * read as stored. A reprint must not recompute, and must not depend on the
+ * trips still matching a date filter.
+ * @param {number} billingId
+ */
+export async function getBilling(billingId) {
+  await requirePermission('VIEW_BILLING');
+  const id = Number(billingId);
+  const [head, lines, charges, chargeTypes] = await Promise.all([
+    q(`SELECT bl.*, COUNT(b.id) AS line_count, COALESCE(SUM(b.total), 0) AS total
+       FROM billings bl JOIN billing_lines b ON b.billing_id = bl.id
+       WHERE bl.id = ? GROUP BY bl.id`, id),
+    q(`SELECT ${BILLING_LINE_COLS} WHERE b.billing_id = ?`, id),
+    q(`SELECT c.* FROM billing_line_charges c JOIN billing_lines b ON b.id = c.billing_line_id
+       WHERE b.billing_id = ?`, id),
+    getBillingChargeTypes(),
+  ]);
+  if (!head.length) return { success: false, error: 'Billing not found.' };
+  const byLine = groupBy(charges, 'billing_line_id');
+  return {
+    success: true,
+    billing: billingFromRow(head[0]),
+    lines: lines.map((l) => billingLineFromRow(l, byLine[l.id])),
+    chargeTypes,
   };
 }
 

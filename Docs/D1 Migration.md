@@ -218,7 +218,7 @@ Self-seeding sheets (Route Type Map, Customer Group Colors, Billing Charge
 Types, Billing Categories) become `INSERT OR IGNORE` seed statements in
 `0002_seed.sql`, in `-- @seed <table>` sections the test harness applies one at
 a time. The import file starts with `DELETE FROM` every table, so the seed rows
-never collide with imported ids. `0003_drop_freight_rates_key.sql` and `0004_drop_trips_billing_date.sql` drop indexes no query used. Payroll tables come later as `0005_payroll.sql`.
+never collide with imported ids. `0003_drop_freight_rates_key.sql` and `0004_drop_trips_billing_date.sql` drop indexes no query used. `0005_scan_indexes.sql` adds four indexes that stop whole-table scans. `0006_billings.sql` gives submitted billings their own table (the Billing panel history and exact reprints). Payroll tables come later as `0007_payroll.sql`.
 
 ### 3.1 Transform rules (`server/migrate/transform.js`)
 
@@ -404,7 +404,8 @@ step 2.
 
 - [x] Drop `trips_billing_date` (`0004`) and stop `getBillingLines` re-writing lines that did not change. `audit_ts` stays — the Audit Log panel now reads a ts range. Apply with `npm run db:migrate:dev`.
 - [x] Build the Audit Log panel (issue #37): `getAuditLog` in `server/readers.js`, `web/audit.js`, Admin-only. It replaces the Sheets tab the owner used to read the log in.
-- [ ] Build the RTVS tab and payroll on D1 (`0005_payroll.sql`). Normal `develop` workflow.
+- [x] Billing panel: a history of stamped billings (`0006_billings.sql`), one Stamp & print step, a line drill-down, and the `.xlsx` in the company workbook layout. The other UX items wait in a GitHub issue.
+- [ ] Build the RTVS tab and payroll on D1 (`0007_payroll.sql`). Normal `develop` workflow. The open rules wait on the client: see `Docs/Client Questions.md`.
 
 ### Phase 4 — Release v2.0.0 (Opus + owner present)
 

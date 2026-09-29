@@ -587,6 +587,7 @@ export async function clearAllData(confirmPhrase) {
       stmt(`DELETE FROM route_frequency_log`),
       stmt(`DELETE FROM trip_helpers`),
       stmt(`DELETE FROM billing_lines`),
+      stmt(`DELETE FROM billings`),
       stmt(`DELETE FROM trips`),
       stmt(`DELETE FROM waybills`),
       stmt(`DELETE FROM outlets`),

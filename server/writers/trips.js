@@ -239,7 +239,7 @@ export async function saveTripChanges(tripId, changes) {
       const outletId = numOrNull(changes.outletId);
       const check = await one(
         `SELECT (SELECT 1 FROM outlets WHERE id = ?) AS found,
-                (SELECT 1 FROM billing_lines WHERE waybill_id = ? AND COALESCE(billing_number, '') <> '') AS billed`,
+                (SELECT 1 FROM billing_lines WHERE waybill_id = ? AND billing_id IS NOT NULL) AS billed`,
         outletId, numOrNull(before.waybill_id));
       if (!check.found) throw new Error('Pick an existing outlet.');
       if (check.billed) throw new Error('This load is already billed, so its outlet cannot change.');

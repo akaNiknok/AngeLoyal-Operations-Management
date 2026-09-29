@@ -171,13 +171,17 @@
                     });
                 });
 
-                const buf = await wb.xlsx.writeBuffer();
+                saveBuffer(await wb.xlsx.writeBuffer(), `FINAL ROUTE ${dateVal} (ANGELOYAL).xlsx`);
+            }
+
+            // Hands a generated file to the browser as a download.
+            function saveBuffer(buf, filename) {
                 const url = URL.createObjectURL(
                     new Blob([buf], { type: "application/octet-stream" }),
                 );
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `FINAL ROUTE ${dateVal} (ANGELOYAL).xlsx`;
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 a.remove();

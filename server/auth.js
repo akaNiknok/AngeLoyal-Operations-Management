@@ -113,7 +113,7 @@ export const RPC_ALLOWED = [
   'updateBillingCategory', 'createRouteTypeMapping', 'updateRouteTypeMapping',
   'saveCustomerGroupColor', 'createWaybillPrefix', 'updateWaybillPrefix', 'createUser',
   'updateUser', 'createEmployee', 'updateEmployee', 'createBillingChargeType',
-  'updateBillingChargeType', 'getBillingLines', 'saveBillingLine', 'setBillingLineStatus',
+  'updateBillingChargeType', 'getBillingLines', 'getBillings', 'getBilling', 'saveBillingLine', 'setBillingLineStatus',
   'setBillingNumber', 'importFreightRates', 'updateFreightRate', 'addFuelPrice',
   'updateFuelPrice', 'deleteFuelPrice', 'clearAllData',
 ];

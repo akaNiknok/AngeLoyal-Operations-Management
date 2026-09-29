@@ -244,7 +244,9 @@ test('saveTripChanges refuses an outlet change once the load is billed', async (
             VALUES (70, '2026-06-16', '2026-06-16', 1, 0, 'x', '2026-06-16 00:00:00');`);
 
   assert.equal((await api.saveTripChanges(50, { outletId: 13 })).success, true); // not billed yet
-  raw.exec(`UPDATE billing_lines SET billing_number = 'B-1', status = 'Billed'`);
+  raw.exec(`INSERT INTO billings (id, billing_number, period_from, period_to, stamped_by, stamped_at)
+            VALUES (1, 'B-1', '2026-06-16', '2026-06-16', 'x', '2026-06-16 00:00:00');
+            UPDATE billing_lines SET billing_id = 1, status = 'Billed'`);
   const res = await api.saveTripChanges(50, { outletId: 12 });
   assert.equal(res.success, false);
   assert.match(res.error, /billed/);

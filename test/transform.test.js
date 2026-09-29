@@ -122,6 +122,58 @@ test('freight rates go long (one row per non-blank band) and billing lines split
   assert.deepEqual(tables.billing_line_charges, [{ billing_line_id: 1, charge_type_id: 1, amount: 150 }]);
 });
 
+test('a Billing Number becomes one billing, matched without case, spanning its lines', () => {
+  const line = (id, wb, date, number) => [id, wb, wb, date, date, 'T', 'AAA', 'A', '6W', 'X', 1, 1, 61,
+    '60.01-65', 100, 0, 0, '', 100, number, number ? 'Billed' : 'Not Billed', '[]', '', 'p', '6/2/2026 09:00:00', '', ''];
+  const { tables } = transform({
+    'Waybill Prefixes': [HEADERS['Waybill Prefixes'], [1, '', 'AL', 100, true, 5]],
+    Trips: [HEADERS.Trips,
+      tripRow({ ID: 1, 'Trip Date': '6/1/2026', 'FO Number': 'A', 'Added By': 'd', 'Added At': '6/1/2026 08:00:00' }),
+      tripRow({ ID: 2, 'Trip Date': '6/3/2026', 'FO Number': 'B', 'Added By': 'd', 'Added At': '6/3/2026 08:00:00' }),
+      tripRow({ ID: 3, 'Trip Date': '6/3/2026', 'FO Number': 'C', 'Added By': 'd', 'Added At': '6/3/2026 08:00:00' })],
+    Waybills: [HEADERS.Waybills,
+      [10, '00100', 1, 100, 1, 'A', 'Regular', '', 'Confirmed', true, '', ''],
+      [11, '00101', 1, 101, 2, 'B', 'Regular', '', 'Confirmed', true, '', ''],
+      [12, '00102', 1, 102, 3, 'C', 'Regular', '', 'Confirmed', true, '', '']],
+    'Billing Lines': [HEADERS['Billing Lines'],
+      line(1, 10, '6/3/2026', 'B-7'), line(2, 11, '6/1/2026', 'b-7'), line(3, 12, '6/3/2026', '')],
+  });
+  assert.equal(tables.billings.length, 1);
+  assert.deepEqual([tables.billings[0].billing_number, tables.billings[0].period_from, tables.billings[0].period_to],
+    ['B-7', '2026-06-01', '2026-06-03']);
+  assert.deepEqual(tables.billing_lines.map((l) => l.billing_id), [1, 1, null]);
+});
+
+// 0006 moves the numbers DEV already holds. Run it over a database built from
+// the migrations before it, the way wrangler applies it to DEV.
+test('0006 turns each stamped number into one billing and keeps every line on it', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const dir = path.join(__dirname, '..', 'migrations');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql') && !f.endsWith('_seed.sql')).sort();
+  const db = new DatabaseSync(':memory:');
+  const apply = (f) => db.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
+  files.filter((f) => f < '0006').forEach(apply);
+
+  db.exec(`INSERT INTO waybill_prefixes (id, prefix, company_name) VALUES (1, 'AY', 'AngeLoyal');
+    INSERT INTO waybills (id, waybill_number, prefix_id, sequence_number, waybill_type, status) VALUES
+      (1, 'AY-1', 1, 1, 'Regular', 'Confirmed'), (2, 'AY-2', 1, 2, 'Regular', 'Confirmed'),
+      (3, 'AY-3', 1, 3, 'Regular', 'Confirmed');
+    INSERT INTO billing_lines (id, waybill_id, trip_date, billing_date, drops, cartons, total, billing_number, status, added_by, added_at) VALUES
+      (1, 1, '2026-07-02', '2026-07-02', 1, 0, 100, 'B-1 ', 'Billed', 'a', '2026-07-02 08:00:00'),
+      (2, 2, '2026-07-06', '2026-07-06', 1, 0, 200, 'b-1', 'Billed', 'a', '2026-07-06 08:00:00'),
+      (3, 3, '2026-07-06', '2026-07-06', 1, 0, 300, NULL, 'Not Billed', 'a', '2026-07-06 08:00:00');`);
+  files.filter((f) => f >= '0006').forEach(apply);
+
+  const billings = db.prepare('SELECT * FROM billings').all();
+  assert.equal(billings.length, 1);
+  // Either spelling may survive; the number matches without case anyway.
+  assert.deepEqual([billings[0].billing_number.toUpperCase(), billings[0].period_from, billings[0].period_to],
+    ['B-1', '2026-07-02', '2026-07-06']);
+  assert.deepEqual(db.prepare('SELECT billing_id FROM billing_lines ORDER BY id').all().map((r) => r.billing_id),
+    [billings[0].id, billings[0].id, null]);
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+});
+
 test('the transformed rows satisfy the schema with foreign keys on', () => {
   const { db, raw } = makeEnv({
     sheets: {

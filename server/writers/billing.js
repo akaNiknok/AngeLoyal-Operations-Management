@@ -20,7 +20,7 @@ import {
 } from '../internals.js';
 import {
   tripFromRow, getFreightRates, getFuelPrices, getTrucks, getBillingChargeTypes,
-  billingLineFromRow, billingLinesByWaybill, _billingTotals,
+  billingLineFromRow, billingLinesByWaybill, _billingTotals, BILLING_LINE_COLS,
 } from '../readers.js';
 
 /** Trip statuses whose waybill is finished work and can be billed. */
@@ -291,7 +291,7 @@ export async function _billableWaybillGroups(from, to) {
   const f = fromClientDate(from) || todayPH();
   const t = fromClientDate(to) || todayPH();
   const rows = await q(
-    `SELECT t.*, o.area AS area, w.waybill_number
+    `SELECT t.*, o.area AS area, o.outlet_name, w.waybill_number
      FROM trips t
      JOIN waybills w ON w.id = t.waybill_id
      LEFT JOIN outlets o ON o.id = t.outlet_id
@@ -304,7 +304,7 @@ export async function _billableWaybillGroups(from, to) {
   const rejectedIds = new Set();
   rows.forEach((r) => {
     const wbId = r.waybill_id;
-    const trip = tripFromRow(r, []);
+    const trip = Object.assign(tripFromRow(r, []), { outletName: r.outlet_name || '' });
     if (BILLABLE_TRIP_STATUSES.indexOf(trip.tripStatus) === -1) { rejectedIds.add(wbId); return; }
     const g = groups[wbId] || (groups[wbId] = {
       waybillNumber: String(r.waybill_number || ''), waybillId: wbId, trips: [],
@@ -340,6 +340,10 @@ export function _priceWaybillGroup(group, rates, prices, trucksById, indexCache)
         area: first.area || '', drops: group.trips.length,
         cartons: group.trips.reduce((s, t) => s + (Number(t.quantity) || 0), 0),
         haulingRate: 0, mano: 0, dropFee: 0,
+        stops: group.trips.map((t) => ({
+          outlet: t.outletName || '', area: t.area || '',
+          quantity: Number(t.quantity) || 0, rate: null, mano: 0,
+        })),
         warning: `No diesel price recorded on or before ${first.billingDate || first.tripDate}.`,
       }
     : _computeBillingLine(group.trips, _cachedRateIndex(rates, billingDate, indexCache), band);
@@ -393,11 +397,11 @@ export async function getBillingLines(from, to) {
     const insertStmts = [];
     const insertMeta = [];
     const updateStmts = [];
-    const warnByWaybillId = {};
+    const pricedByWaybillId = {};
 
     groups.forEach((g) => {
       const priced = _priceWaybillGroup(g, rates, prices, trucksById, rateCache);
-      if (priced.warning) warnByWaybillId[g.waybillId] = priced.warning;
+      pricedByWaybillId[g.waybillId] = priced;
 
       const rateBandIdx = priced.rateBand ? _fuelBandFromLabel(priced.rateBand) : null;
       const dieselPrice = priced.dieselPrice === '' ? null : priced.dieselPrice;
@@ -447,7 +451,7 @@ export async function getBillingLines(from, to) {
       // to this refresh. A skipped line refreshes on the next open.
       updateStmts.push(stmt(
         `UPDATE billing_lines SET ${cols.map((c) => `${c} = ?`).join(', ')}
-         WHERE id = ? AND updated_at IS ? AND COALESCE(billing_number, '') = ''`,
+         WHERE id = ? AND updated_at IS ? AND billing_id IS NULL`,
         ...cols.map((c) => fields[c]), existing.id, existing.row.updated_at));
     });
 
@@ -466,8 +470,17 @@ export async function getBillingLines(from, to) {
     })));
 
     const finalByWaybill = waybillIds.length ? await billingLinesByWaybill(waybillIds) : {};
+    // `computed` is what the matrix gives today, so the panel can show it
+    // next to a typed-over amount; `stops` is how the line was built.
     const lines = Object.values(finalByWaybill)
-      .map((l) => Object.assign(l, { warning: warnByWaybillId[l.waybillId] || '' }))
+      .map((l) => {
+        const p = pricedByWaybillId[l.waybillId];
+        return Object.assign(l, {
+          warning: p.warning || '',
+          stops: p.stops,
+          computed: { haulingRate: p.haulingRate, mano: p.mano, dropFee: p.dropFee, area: p.area },
+        });
+      })
       .sort((a, b) => (a.waybillNumber < b.waybillNumber ? -1 : (a.waybillNumber > b.waybillNumber ? 1 : 0)));
 
     return { success: true, lines, chargeTypes, totals: _billingTotals(lines) };
@@ -481,9 +494,7 @@ const OVERRIDABLE_LABEL = { haulingRate: 'Hauling Rate', mano: 'Mano', dropFee: 
 
 /** One billing_lines row with its waybill number joined in, or null. */
 async function _billingLineRow(id) {
-  return await one(
-    `SELECT b.*, w.waybill_number FROM billing_lines b
-     JOIN waybills w ON w.id = b.waybill_id WHERE b.id = ?`, Number(id));
+  return await one(`SELECT ${BILLING_LINE_COLS} WHERE b.id = ?`, Number(id));
 }
 
 /**
@@ -597,7 +608,7 @@ export async function setBillingLineStatus(lineIds, status) {
     ids.forEach((id) => {
       const row = byId[id];
       if (!row) return;
-      if (String(row.billing_number || '').trim()) {
+      if (row.billing_id !== null) {
         throw new Error('A line already on a submitted billing cannot be deferred.');
       }
       const old = String(row.status || '');
@@ -616,11 +627,15 @@ export async function setBillingLineStatus(lineIds, status) {
 
 /**
  * Stamps a Rebisco billing number on a set of lines and marks them Billed. A
- * blank number clears the stamp, reopening the lines for editing.
+ * blank number clears the stamp, reopening the lines for editing. A number
+ * already in use adds the lines to that billing.
  * @param {number[]|number} lineIds
  * @param {string} billingNumber
+ * @param {{ docDate?: string, from?: string, to?: string }} [header]
+ *   The DATE: line and the week the printout names ('M/d/yyyy'). Without a
+ *   range, the billing covers the span of its lines.
  */
-export async function setBillingNumber(lineIds, billingNumber) {
+export async function setBillingNumber(lineIds, billingNumber, header) {
   await requirePermission('EDIT_BILLING');
   try {
     const ids = (Array.isArray(lineIds) ? lineIds : [lineIds]).map(Number).filter((n) => Number.isFinite(n));
@@ -630,22 +645,61 @@ export async function setBillingNumber(lineIds, billingNumber) {
     const clearing = num === '';
 
     const marks = ids.map(() => '?').join(',');
-    const found = await q(`SELECT id, billing_number FROM billing_lines WHERE id IN (${marks})`, ...ids);
+    const found = await q(
+      `SELECT b.id, b.trip_date, b.billing_id, bl.billing_number
+       FROM billing_lines b LEFT JOIN billings bl ON bl.id = b.billing_id
+       WHERE b.id IN (${marks})`, ...ids);
+    if (!found.length) return { success: true, updated: 0, billingNumber: num };
 
-    if (found.length) {
-      await batch(found.map((r) => stmt(
-        `UPDATE billing_lines SET billing_number = ?, status = ? WHERE id = ?`,
-        clearing ? null : num, clearing ? 'Not Billed' : 'Billed', r.id)));
+    // One batch: the billing, the lines and the cleanup land together, so a
+    // concurrent clear can never delete the billing between the two.
+    const stmts = [];
+    if (!clearing) {
+      const h = header || {};
+      const span = found.map((r) => r.trip_date).sort();
+      const from = fromClientDate(h.from) || span[0];
+      const to = fromClientDate(h.to) || span[span.length - 1];
+      stmts.push(stmt(
+        `INSERT INTO billings (billing_number, doc_date, period_from, period_to, stamped_by, stamped_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (billing_number) DO UPDATE SET
+           doc_date = COALESCE(excluded.doc_date, doc_date),
+           period_from = MIN(period_from, excluded.period_from),
+           period_to = MAX(period_to, excluded.period_to)
+         RETURNING id`,
+        num, fromClientDate(h.docDate) || null, from, to, currentEmail() || 'unknown', nowPH()));
     }
+    found.forEach((r) => stmts.push(clearing
+      ? stmt(`UPDATE billing_lines SET billing_id = NULL, status = 'Not Billed' WHERE id = ?`, r.id)
+      : stmt(`UPDATE billing_lines SET billing_id = (SELECT id FROM billings WHERE billing_number = ?),
+                status = 'Billed' WHERE id = ?`, num, r.id)));
+    // A billing whose last line moved away or was cleared is gone.
+    const oldIds = [...new Set(found.map((r) => r.billing_id).filter((v) => v !== null))];
+    if (oldIds.length) {
+      stmts.push(stmt(
+        `DELETE FROM billings WHERE id IN (${oldIds.map(() => '?').join(',')})
+           AND NOT EXISTS (SELECT 1 FROM billing_lines WHERE billing_id = billings.id)`, ...oldIds));
+    }
+    const results = await batch(stmts);
 
     // One row per line, with the number it had: a line moved from one
     // submitted billing to another must show where it came from.
-    await _auditLogBatch(found.map((r) => ({
+    const audit = found.map((r) => ({
       action: 'BILLING_NUMBER_SET', table: 'billing_lines', rowId: r.id,
       oldValue: r.billing_number || '', newValue: clearing ? '' : num,
-    })));
+    }));
+    if (!clearing) {
+      audit.push({
+        action: 'BILLING_STAMP', table: 'billings', rowId: results[0].results[0].id, oldValue: '',
+        newValue: JSON.stringify({ billingNumber: num, header: header || null, lines: found.length }),
+      });
+    }
+    await _auditLogBatch(audit);
 
-    return { success: true, updated: found.length, billingNumber: num };
+    return {
+      success: true, updated: found.length, billingNumber: num,
+      billingId: clearing ? null : results[0].results[0].id,
+    };
   } catch (e) {
     return { success: false, error: e.message };
   }
