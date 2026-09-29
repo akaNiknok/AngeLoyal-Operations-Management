@@ -3,18 +3,18 @@
     "SessionStart": [
       {
         "matcher": "startup|resume|clear",
-        "hooks": [{ "type": "command", "command": "node scripts/claude-hooks.mjs handoff" }]
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/claude-hooks.mjs\" handoff" }]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Bash|PowerShell",
-        "hooks": [{ "type": "command", "command": "node scripts/claude-hooks.mjs guard-release" }]
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/claude-hooks.mjs\" guard-release" }]
       }
     ],
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "node scripts/claude-hooks.mjs test" }]
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/claude-hooks.mjs\" test" }]
       }
     ]
   }
