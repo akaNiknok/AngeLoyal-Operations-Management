@@ -445,6 +445,8 @@ amountDue   = totalVatInc − withholding
 
 Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (many rows, one round trip) run after the change, are best-effort, and never throw. The Admin-only Audit Log panel reads it through `getAuditLog`, always over a date range and one page at a time.
 
+The History button on a trip or a billing line reads it through `getRowHistory(table, rowId)`: the rows of that record and of its waybill, newest first, at most 200. A trip needs the board permission (every role); a billing line needs `VIEW_BILLING`. No other table opens. The `audit_row` index on `(table_name, row_id)` (`0007_audit_row_index.sql`) answers each pair, and the read also matches the v1 sheet name (`Trips`, `Waybills`) of an imported row.
+
 | Column | Type | Notes |
 | :-- | :-- | :-- |
 | id | INTEGER PK | |
@@ -452,7 +454,7 @@ Append-only record of every change. `_auditLog` (one row) and `_auditLogBatch` (
 | user_email | TEXT | The request's verified email |
 | action | TEXT | A token from the vocabulary below |
 | detail | TEXT | Readable description |
-| table_name | TEXT | SQL table name (`trips`, `waybills`). v1 rows imported from Sheets keep the sheet name (`Trips`) |
+| table_name | TEXT (indexed with row_id) | SQL table name (`trips`, `waybills`). v1 rows imported from Sheets keep the sheet name (`Trips`) |
 | row_id | INTEGER | Row ID in that table |
 | old_value, new_value | TEXT | Previous and new value; JSON for multi-column changes |
 

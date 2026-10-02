@@ -102,7 +102,7 @@ export async function logout(sessionToken) {
 export const RPC_ALLOWED = [
   // readers
   'getBootData', 'getDispatchBoardData', 'getWaybillPrefixes', 'getUsers', 'getFreightRates',
-  'getFuelPrices', 'getAuditLog',
+  'getFuelPrices', 'getAuditLog', 'getRowHistory',
   // session
   'logout',
   // writers (Phase 1)

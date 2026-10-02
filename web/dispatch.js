@@ -46,6 +46,7 @@
                 const dateVal = document.getElementById("dispatch-date").value;
                 if (!dateVal) return;
                 const key = isoToMDY(dateVal);
+                syncHash(); // the date arrows set the value without an event
                 const cached = useCache && dispatchCache[key];
                 if (cached) {
                     dispatchData = cached;
@@ -326,6 +327,7 @@
                             : "";
                         // ponytail: shown for every source — the server is the
                         // real gate and refuses once a waybill is confirmed.
+                        const histBtn = `<button class="row-hist" title="History of this trip" data-title="FO ${esc(foFull) || "—"} · ${esc(outletName) || "no outlet"}" onclick="openHistory('trips', ${t.id}, this.dataset.title)">⟲</button>`;
                         const delBtn = canE
                             ? `<button class="row-del" title="Remove trip" onclick="confirmDeleteTrip(${t.id})">✕</button>`
                             : "";
@@ -352,7 +354,7 @@
       ${foSpan[i] ? `<td class="td-crew col-divider"${foSpan[i] > 1 ? ` rowspan="${foSpan[i]}"` : ""}>${crewCell}</td>` : ""}
       ${statusSpan[i] ? `<td class="td-status col-divider"${statusSpan[i] > 1 ? ` rowspan="${statusSpan[i]}"` : ""}>${statusCell}</td>` : ""}
       ${waybillSpan[i] ? `<td class="td-wb"${waybillSpan[i] > 1 ? ` rowspan="${waybillSpan[i]}"` : ""}>${waybillCellHtml(t, canE)}</td>` : ""}
-      <td class="td-remarks"><div class="remarks-cell">${remarksCell}${delBtn}</div></td>
+      <td class="td-remarks"><div class="remarks-cell">${remarksCell}${histBtn}${delBtn}</div></td>
     </tr>`;
                     })
                     .join("");

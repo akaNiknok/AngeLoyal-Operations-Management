@@ -99,8 +99,13 @@
                 loadBilling();
             }
 
+            // Each select keeps its choice across a refill, so a filter
+            // survives a panel switch and a link can preset it.
             function populateBillingFilters() {
                 const originSel = document.getElementById("bl-origin");
+                const prefixSel = document.getElementById("bl-prefix");
+                const keepOrigin = originSel.value;
+                const keepPrefix = prefixSel.value;
                 originSel.innerHTML =
                     '<option value="">All origins</option>' +
                     (origins || [])
@@ -108,7 +113,6 @@
                         .join("");
 
                 // Subcon = the waybill prefix namespace (AY, GL, …).
-                const prefixSel = document.getElementById("bl-prefix");
                 prefixSel.innerHTML =
                     '<option value="">All subcons</option>' +
                     waybillPrefixes
@@ -117,6 +121,8 @@
                                 `<option value="${esc(p.prefix)}">${esc(p.prefix)} — ${esc(p.companyName)}</option>`,
                         )
                         .join("");
+                originSel.value = (origins || []).includes(keepOrigin) ? keepOrigin : "";
+                prefixSel.value = waybillPrefixes.some((p) => p.prefix === keepPrefix) ? keepPrefix : "";
             }
 
             function loadBilling() {
@@ -124,10 +130,10 @@
                 const to = document.getElementById("bl-to").value;
                 if (!from || !to) return;
 
-                setLoading("Computing billing…");
+                setPanelLoading("billing", "Computing billing…");
                 call("getBillingLines", isoToMDY(from), isoToMDY(to)).then(
                     (r) => {
-                        hideLoading();
+                        setPanelLoading("billing", "");
                         if (!r.success) {
                             showToast(r.error, "error");
                             return;
@@ -147,7 +153,7 @@
                         renderBilling();
                     },
                     (e) => {
-                        hideLoading();
+                        setPanelLoading("billing", "");
                         toastError(e);
                     },
                 );
@@ -167,6 +173,7 @@
 
             function setBillingStatus(key) {
                 billingStatus = key;
+                syncHash();
                 renderBilling();
             }
 
@@ -354,7 +361,7 @@
                     .join("");
 
                 return `<tr class="bl-detail" data-detail="${l.id}"><td colspan="${colspan}">
-  <div class="bl-detail-meta">${meta}</div>
+  <div class="bl-detail-meta">${meta} <button class="btn btn-ghost btn-sm" data-title="Waybill ${esc(l.waybillNumber)}" onclick="openHistory('billing_lines', ${l.id}, this.dataset.title)">History</button></div>
   <table class="bl-stops"><thead><tr><th>Outlet</th><th>Area</th><th>Cartons</th><th>Rate</th><th>Mano</th></tr></thead>
   <tbody>${stopRows}</tbody></table>
   <ul class="bl-rules">${rules.join("")}</ul>

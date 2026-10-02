@@ -357,6 +357,12 @@
                 renderEmpList();
                 renderOutlets();
                 populateAddTripSelects();
+                // The first paint opens the view the URL names. A later boot
+                // refresh only re-reads the board, as before.
+                if (!hashRestored) {
+                    hashRestored = true;
+                    if (applyHash()) return;
+                }
                 loadDispatch(true);
             }
 
@@ -536,7 +542,74 @@
                     renderCustomerGroupColors();
                     renderAdminPanel();
                 }
+                syncHash();
             }
+
+            // ── URL HASH ──────────────────────────────────────────────
+            // The hash names the open panel and its filters, for example
+            // #billing?bl-from=2026-09-28&bl-to=2026-10-03. A reload keeps
+            // the place, and a shared link opens the same view. Each key is
+            // the id of the input that holds the value.
+            const HASH_INPUTS = {
+                dispatch: ["dispatch-date"],
+                billing: ["bl-preset", "bl-from", "bl-to", "bl-origin", "bl-prefix"],
+                "billing-matrix": ["bm-origin", "bm-effective", "bm-type", "bm-search"],
+                audit: ["au-from", "au-to", "au-search"],
+            };
+            let hashRestored = false;
+
+            // replaceState, not a new history entry: Back leaves the app as
+            // it always did, and no hashchange fires for our own writes.
+            function syncHash() {
+                const open = document.querySelector(".panel.active");
+                if (!open) return;
+                const name = open.id.replace("panel-", "");
+                const params = new URLSearchParams();
+                (HASH_INPUTS[name] || []).forEach((id) => {
+                    const v = document.getElementById(id).value;
+                    if (v) params.set(id, v);
+                });
+                if (name === "billing" && billingStatus !== "unbilled") {
+                    params.set("status", billingStatus);
+                }
+                const qs = params.toString();
+                history.replaceState(null, "", "#" + name + (qs ? "?" + qs : ""));
+            }
+
+            // Opens the view the hash names. False when it names no panel
+            // this role can open; the caller then opens the board.
+            function applyHash() {
+                const [name, qs] = (location.hash || "").slice(1).split("?");
+                const nav = name && document.getElementById("nav-" + name);
+                if (!nav || /-only\b/.test(nav.className)) return false;
+                const params = new URLSearchParams(qs || "");
+                (HASH_INPUTS[name] || []).forEach((id) => {
+                    if (!params.has(id)) return;
+                    const el = document.getElementById(id);
+                    const v = params.get(id);
+                    // A select fills its options when the panel opens. A
+                    // placeholder option holds the value until then, and
+                    // the fill keeps it only when it is a real choice.
+                    if (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === v)) {
+                        el.add(new Option(v, v));
+                    }
+                    el.value = v;
+                });
+                const status = params.get("status");
+                if (name === "billing" && status && BILLING_STATUS_CHIPS[status]) {
+                    billingStatus = status;
+                }
+                switchPanel(name);
+                return true;
+            }
+
+            // A typed or pasted link in the same tab changes only the hash.
+            window.addEventListener("hashchange", () => {
+                if (currentUser.role) applyHash();
+            });
+            // Any filter edit updates the hash. Code that sets a value
+            // without an event (the date arrows, presets) calls syncHash.
+            document.addEventListener("change", syncHash);
 
             // ── MODAL HELPERS ──────────────────────────────────────────
             function openModal(id) {
@@ -792,6 +865,21 @@
             }
             function hideLoading() {
                 document.getElementById("loading").style.display = "none";
+            }
+            // A spinner over one panel for a quick read: the nav and the
+            // other panels stay usable. The full-screen setLoading stays for
+            // sign-in, the first boot, and writes that must not be cut off.
+            // A blank msg hides it.
+            function setPanelLoading(name, msg) {
+                const panel = document.getElementById("panel-" + name);
+                let el = panel.querySelector(":scope > .panel-loading");
+                if (!el) {
+                    el = document.createElement("div");
+                    el.className = "board-loading panel-loading";
+                    panel.appendChild(el);
+                }
+                el.innerHTML = `<div class="spinner"></div><div class="loading-text">${esc(msg)}</div>`;
+                el.classList.toggle("on", !!msg);
             }
 
             let toastTimer;

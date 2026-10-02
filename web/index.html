@@ -53,83 +53,95 @@
                 </div>
 
                 <nav class="nav">
-                    <button
-                        class="nav-btn active"
-                        id="nav-dispatch"
-                        onclick="switchPanel('dispatch')"
-                    >
-                        Dispatch
-                    </button>
-                    <button
-                        class="nav-btn"
-                        id="nav-import"
-                        onclick="switchPanel('import')"
-                    >
-                        Import
-                    </button>
-                    <button
-                        class="nav-btn"
-                        id="nav-roster"
-                        onclick="switchPanel('roster')"
-                    >
-                        Truck Roster
-                    </button>
-                    <button
-                        class="nav-btn dispatcher-only"
-                        id="nav-outlets"
-                        onclick="switchPanel('outlets')"
-                    >
-                        Outlets
-                    </button>
-                    <button
-                        class="nav-btn admin-only"
-                        id="nav-trucks"
-                        onclick="switchPanel('trucks')"
-                    >
-                        Trucks
-                    </button>
-                    <button
-                        class="nav-btn admin-only"
-                        id="nav-employees"
-                        onclick="switchPanel('employees')"
-                    >
-                        Employees
-                    </button>
-                    <button
-                        class="nav-btn dispatcher-only"
-                        id="nav-waybill-prefixes"
-                        onclick="switchPanel('waybill-prefixes')"
-                    >
-                        Waybill Prefixes
-                    </button>
-                    <button
-                        class="nav-btn payroll-only"
-                        id="nav-billing"
-                        onclick="switchPanel('billing')"
-                    >
-                        Billing
-                    </button>
-                    <button
-                        class="nav-btn payroll-only"
-                        id="nav-billing-matrix"
-                        onclick="switchPanel('billing-matrix')"
-                    >
-                        Billing Matrix
-                    </button>
-                    <button
-                        class="nav-btn admin-only"
-                        id="nav-audit"
-                        onclick="switchPanel('audit')"
-                    >
-                        Audit Log
-                    </button>
-                    <button
-                        class="nav-btn admin-only"
-                        id="nav-settings"
-                        onclick="switchPanel('settings')"
-                    >
-                        Settings
-                    </button>
+                    <div class="nav-group">
+                        <span class="nav-group-label">Operations</span>
+                        <button
+                            class="nav-btn active"
+                            id="nav-dispatch"
+                            onclick="switchPanel('dispatch')"
+                        >
+                            Dispatch
+                        </button>
+                        <button
+                            class="nav-btn"
+                            id="nav-import"
+                            onclick="switchPanel('import')"
+                        >
+                            Import
+                        </button>
+                        <button
+                            class="nav-btn"
+                            id="nav-roster"
+                            onclick="switchPanel('roster')"
+                        >
+                            Roster
+                        </button>
+                    </div>
+                    <div class="nav-group">
+                        <span class="nav-group-label">Billing</span>
+                        <button
+                            class="nav-btn payroll-only"
+                            id="nav-billing"
+                            onclick="switchPanel('billing')"
+                        >
+                            Billing
+                        </button>
+                        <button
+                            class="nav-btn payroll-only"
+                            id="nav-billing-matrix"
+                            onclick="switchPanel('billing-matrix')"
+                        >
+                            Matrix
+                        </button>
+                    </div>
+                    <div class="nav-group">
+                        <span class="nav-group-label">Records</span>
+                        <button
+                            class="nav-btn dispatcher-only"
+                            id="nav-outlets"
+                            onclick="switchPanel('outlets')"
+                        >
+                            Outlets
+                        </button>
+                        <button
+                            class="nav-btn admin-only"
+                            id="nav-trucks"
+                            onclick="switchPanel('trucks')"
+                        >
+                            Trucks
+                        </button>
+                        <button
+                            class="nav-btn admin-only"
+                            id="nav-employees"
+                            onclick="switchPanel('employees')"
+                        >
+                            Employees
+                        </button>
+                        <button
+                            class="nav-btn dispatcher-only"
+                            id="nav-waybill-prefixes"
+                            onclick="switchPanel('waybill-prefixes')"
+                        >
+                            Prefixes
+                        </button>
+                    </div>
+                    <div class="nav-group">
+                        <span class="nav-group-label">Admin</span>
+                        <button
+                            class="nav-btn admin-only"
+                            id="nav-audit"
+                            onclick="switchPanel('audit')"
+                        >
+                            Audit
+                        </button>
+                        <button
+                            class="nav-btn admin-only"
+                            id="nav-settings"
+                            onclick="switchPanel('settings')"
+                        >
+                            Settings
+                        </button>
+                    </div>
                 </nav>
 
                 <div class="header-right">
@@ -1647,6 +1659,34 @@
                             </tr>
                         </thead>
                         <tbody id="bl-list-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Modal: the audit trail of one trip or billing line -->
+        <div class="modal-backdrop" id="modal-history">
+            <div class="modal" style="width: 1000px; max-width: 94vw">
+                <div class="modal-head">
+                    <span class="modal-head-title" id="hist-title">History</span>
+                    <button class="modal-close" onclick="closeModal('modal-history')">
+                        ✕
+                    </button>
+                </div>
+                <div class="modal-body" style="max-height: 65vh; overflow-y: auto">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 140px">When</th>
+                                <th style="width: 160px">User</th>
+                                <th style="width: 160px">Action</th>
+                                <th style="width: 110px">Record</th>
+                                <th>Detail</th>
+                                <th style="width: 160px">Old value</th>
+                                <th style="width: 160px">New value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hist-body"></tbody>
                     </table>
                 </div>
             </div>

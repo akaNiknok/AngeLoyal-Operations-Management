@@ -104,6 +104,7 @@
 
             .nav {
                 display: flex;
+                align-items: center;
                 gap: 2px;
                 margin-left: 8px;
                 background: var(--bg);
@@ -137,6 +138,30 @@
             .nav-btn.dispatcher-only,
             .nav-btn.payroll-only {
                 display: none;
+            }
+            /* Operations | Billing | Records | Admin. A group whose every
+               item the role hides goes too. */
+            .nav-group {
+                display: flex;
+                align-items: center;
+                gap: 2px;
+            }
+            .nav-group + .nav-group {
+                border-left: 1px solid var(--border);
+                margin-left: 3px;
+                padding-left: 5px;
+            }
+            .nav-group:not(:has(.nav-btn:not(.admin-only, .dispatcher-only, .payroll-only))) {
+                display: none;
+            }
+            .nav-group-label {
+                font-size: 9px;
+                font-family: "DM Mono", monospace;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: var(--hint);
+                padding: 0 3px 0 2px;
+                user-select: none;
             }
 
             .header-right {
@@ -390,6 +415,7 @@
                 flex: 1;
                 flex-direction: column;
                 overflow: hidden;
+                position: relative; /* anchors .panel-loading */
             }
             .panel.active {
                 display: flex;
@@ -598,6 +624,10 @@
             }
             .board-loading.on {
                 display: flex;
+            }
+            /* Above the sticky table headers and totals of the panel. */
+            .panel-loading {
+                z-index: 20;
             }
 
             .table-wrap {
@@ -1264,6 +1294,20 @@
             }
             .row-del {
                 border-color: transparent;
+            }
+            .row-hist {
+                border: 1px solid transparent;
+                border-radius: var(--radius-sm);
+                background: transparent;
+                cursor: pointer;
+                font-size: 12px;
+                padding: 1px 5px;
+                color: var(--muted);
+                flex-shrink: 0;
+            }
+            .row-hist:hover {
+                background: var(--bg);
+                color: var(--text);
             }
             .row-del:hover {
                 background: var(--red-bg);

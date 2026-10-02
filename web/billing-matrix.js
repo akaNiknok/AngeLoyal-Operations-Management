@@ -81,15 +81,15 @@
 
             function loadRateMatrix() {
                 const origin = document.getElementById("bm-origin").value;
-                setLoading("Loading rates…");
+                setPanelLoading("billing-matrix", "Loading rates…");
                 call("getFreightRates", origin).then((list) => {
-                    hideLoading();
+                    setPanelLoading("billing-matrix", "");
                     rateMatrix = list || [];
                     populateEffectiveDates();
                     populateTruckTypes();
                     renderRateMatrix();
                 }, (e) => {
-                    hideLoading();
+                    setPanelLoading("billing-matrix", "");
                     toastError(e);
                 });
             }

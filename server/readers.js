@@ -149,18 +149,63 @@ export async function getAuditLog(filters) {
   const hasMore = rows.length > limit;
 
   return {
-    entries: rows.slice(0, limit).map((r) => ({
-      id: r.id,
-      timestamp: toClientDateTime(r.ts),
-      userEmail: r.user_email || '',
-      action: r.action || '',
-      detail: r.detail || '',
-      tableName: r.table_name || '',
-      rowId: numOrNull(r.row_id),
-      oldValue: r.old_value == null ? '' : String(r.old_value),
-      newValue: r.new_value == null ? '' : String(r.new_value),
-    })),
+    entries: rows.slice(0, limit).map(auditEntryFromRow),
     hasMore,
+  };
+}
+
+function auditEntryFromRow(r) {
+  return {
+    id: r.id,
+    timestamp: toClientDateTime(r.ts),
+    userEmail: r.user_email || '',
+    action: r.action || '',
+    detail: r.detail || '',
+    tableName: r.table_name || '',
+    rowId: numOrNull(r.row_id),
+    oldValue: r.old_value == null ? '' : String(r.old_value),
+    newValue: r.new_value == null ? '' : String(r.new_value),
+  };
+}
+
+// The records a History button can open, and the permission each needs. Each
+// also shows the rows of its waybill (suggest, override, confirm): a load and
+// its number are one story. v1 rows imported from Sheets keep the sheet name
+// as table_name, so a table also matches its v1 name.
+const HISTORY_TABLES = {
+  trips:         { permission: 'VIEW_DISPATCH', v1: 'Trips' },
+  billing_lines: { permission: 'VIEW_BILLING',  v1: null },
+};
+const HISTORY_LIMIT = 200;
+
+/**
+ * The audit trail of one trip or billing line, newest first, with the rows
+ * of its waybill. The audit_row index (0007) answers each pair.
+ * @param {'trips'|'billing_lines'} tableName
+ * @param {number} rowId
+ * @returns {Promise<{ entries: Array, hasMore: boolean }>}
+ */
+export async function getRowHistory(tableName, rowId) {
+  const spec = Object.hasOwn(HISTORY_TABLES, tableName) ? HISTORY_TABLES[tableName] : null;
+  if (!spec) throw new Error('No history for this record.');
+  await requirePermission(spec.permission);
+  const id = Number(rowId);
+
+  // tableName is a key of HISTORY_TABLES here, never free client text.
+  const own = await one(`SELECT waybill_id FROM ${tableName} WHERE id = ?`, id);
+  const refs = [[tableName, id], [spec.v1, id]];
+  if (own && own.waybill_id) refs.push(['waybills', own.waybill_id], ['Waybills', own.waybill_id]);
+  const live = refs.filter(([t]) => t);
+
+  const rows = await q(
+    `SELECT * FROM audit_log
+     WHERE ${live.map(() => '(table_name = ? AND row_id = ?)').join(' OR ')}
+     ORDER BY ts DESC, id DESC LIMIT ?`,
+    ...live.flat(), HISTORY_LIMIT + 1,
+  );
+  return {
+    entries: rows.slice(0, HISTORY_LIMIT).map(auditEntryFromRow),
+    hasMore: rows.length > HISTORY_LIMIT,
   };
 }
 
