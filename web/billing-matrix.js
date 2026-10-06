@@ -534,7 +534,13 @@
                         closeModal("modal-seed-rates");
                         showToast(
                             results
-                                .map((r) => `${r.origin}: ${r.imported} rates`)
+                                .map(
+                                    (r) =>
+                                        `${r.origin}: ${r.imported} rates` +
+                                        (r.duplicates
+                                            ? ` (${r.duplicates} repeated area rows skipped, first kept)`
+                                            : ""),
+                                )
                                 .join(", "),
                             "success",
                         );
@@ -571,7 +577,7 @@
                                 showToast(`${sheet.name}: ${r.error}`, "error");
                                 return;
                             }
-                            results.push({ origin: sheet.name, imported: r.imported });
+                            results.push({ origin: sheet.name, imported: r.imported, duplicates: r.duplicates });
                             next(i + 1);
                         },
                         (e) => {

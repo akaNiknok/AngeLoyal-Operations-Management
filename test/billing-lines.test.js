@@ -795,3 +795,17 @@ test('a block that prices no unbilled line imports without asking', async () => 
   const res = await api.importFreightRates('TANZA', '7/1/2026', RATES_V2);
   assert.equal(res.success, true, 'a billed line never re-prices');
 });
+
+test('a repeated area and truck type in one sheet keeps the first row', async () => {
+  const { api } = await seeded(sheets([], []));
+  const res = await api.importFreightRates('LINGUNAN', '7/1/2026', [
+    { area: 'STA. MARIA', truckType: '6W', bands: { '65.01-70': 6910 } },
+    { area: 'STA. MARIA', truckType: '6W', bands: { '65.01-70': 28060 } },
+    { area: 'Sta. Maria', truckType: '6W', bands: { '65.01-70': 7000 } },
+  ]);
+  assert.equal(res.success, true, res.error);
+  assert.equal(res.imported, 2);
+  assert.equal(res.duplicates, 1);
+  const rows = (await api.getFreightRates('LINGUNAN')).filter((r) => r.effectiveDate === '7/1/2026');
+  assert.deepEqual(rows.map((r) => [r.area, r.bands['65.01-70']]), [['STA. MARIA', 6910], ['Sta. Maria', 7000]]);
+});

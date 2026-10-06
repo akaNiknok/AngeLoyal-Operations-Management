@@ -68,6 +68,17 @@ export async function importFreightRates(origin, effectiveDate, rows, confirmed)
       return { area, type, rates };
     });
 
+    // The DOE workbook names different towns the same ("STA. MARIA" twice in
+    // LINGUNAN). The rate lookup bills the first row anyway, so keep the
+    // first and skip the rest, as the Sheets import does.
+    const seen = new Set();
+    const lines = parsedRows.filter((r) => {
+      const key = `${r.area}|${r.type}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     // Every spelling of this origin in the matrix, matched the way the rate
     // lookup matches. The skip-scan reads one row per origin.
     const wantOrigin = _normArea(originName);
@@ -100,7 +111,7 @@ export async function importFreightRates(origin, effectiveDate, rows, confirmed)
         `DELETE FROM freight_rates WHERE origin IN (${inList}) AND effective_date = ? RETURNING id`,
         ...spellings, effDate));
     }
-    parsedRows.forEach((r) => {
+    lines.forEach((r) => {
       if (r.rates.every((v) => v === null)) return;   // a line with no rate has no row
       stmts.push(stmt(
         `INSERT INTO freight_rates (origin, area, truck_type, effective_date, rates) VALUES (?, ?, ?, ?, ?)`,
@@ -110,9 +121,9 @@ export async function importFreightRates(origin, effectiveDate, rows, confirmed)
     const replaced = spellings.length ? results[0].results.length : 0;
 
     await _auditLog('FREIGHT_RATE_IMPORT', 'freight_rates', null, '',
-      `${originName} → ${parsedRows.length} rows effective ${toClientDate(effDate)}`);
+      `${originName} → ${lines.length} rows effective ${toClientDate(effDate)}`);
 
-    return { success: true, imported: parsedRows.length, replaced };
+    return { success: true, imported: lines.length, replaced, duplicates: parsedRows.length - lines.length };
   } catch (e) {
     return { success: false, error: e.message };
   }
