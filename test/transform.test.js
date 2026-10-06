@@ -104,7 +104,7 @@ test('strict: orphan trip FKs are cleared and reported; orphan log rows are drop
   assert.match(report.dropped[0], /Trips ID 1: truck 98 not found/);
 });
 
-test('freight rates go long (one row per non-blank band) and billing lines split their charges', () => {
+test('freight rates keep one row per line with 25 rates, and billing lines split their charges', () => {
   const bands = Array.from({ length: 25 }, (_, i) => (i === 0 ? 900 : i === 24 ? 1500 : ''));
   const { tables } = transform({
     'Freight Rates': [HEADERS['Freight Rates'], [3, 'Cabuyao', 'Sta. Rosa', '6W', '1/1/2026', ...bands]],
@@ -116,7 +116,10 @@ test('freight rates go long (one row per non-blank band) and billing lines split
         '{"1":150,"3":0,"x":5}', 2042, '', 'Billed', '[]', '', 'p', '6/2/2026 09:00:00', '', ''],
     ],
   });
-  assert.deepEqual(tables.freight_rates.map((r) => [r.area_key, r.band, r.rate]), [['STAROSA', 1, 900], ['STAROSA', 25, 1500]]);
+  assert.equal(tables.freight_rates.length, 1);
+  const rates = JSON.parse(tables.freight_rates[0].rates);
+  assert.equal(rates.length, 25);
+  assert.deepEqual([rates[0], rates[1], rates[24]], [900, null, 1500]);
   assert.equal(tables.billing_lines[0].waybill_id, 10);
   assert.equal(tables.billing_lines[0].rate_band, 25);
   assert.deepEqual(tables.billing_line_charges, [{ billing_line_id: 1, charge_type_id: 1, amount: 150 }]);

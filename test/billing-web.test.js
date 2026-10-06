@@ -60,6 +60,7 @@ function loadBilling(fields = {}) {
       'globalThis.__order = () => billingOrder.slice();' +
       'globalThis.__bands = () => FUEL_BANDS.slice();' +
       'globalThis.__setRates = (rows) => { rateMatrix = rows; };' +
+      'globalThis.__setSeed = (parsed) => { seedRatesParsed = parsed; };' +
       'globalThis.__excelReady = () => { excelJsReady = true; };'
   );
   // The status filter is a chip now; 'bl-status' names the chip to start on.
@@ -690,4 +691,34 @@ test('the printed range collapses a same-month week and spells out the rest', ()
     'BILLING DECEMBER 28, 2026 - JANUARY 3, 2027'
   );
   assert.equal(ui.billingRangeLabel('', '2026-07-06'), '');
+});
+
+// ── Rate import: the re-price confirmation ─────────────────────
+
+test('a rate import that would re-price unbilled lines asks first; Cancel stops the run', async () => {
+  for (const yes of [true, false]) {
+    const { ui } = loadBilling({ 'sr-date': '2026-07-01' });
+    ui.__setSeed({ sheets: [{ name: 'TANZA', rows: [] }, { name: 'LINGUNAN', rows: [] }] });
+    ui.document.getElementById('sr-sheet-0').checked = true;
+    ui.document.getElementById('sr-sheet-1').checked = true;
+    const sent = [];
+    const asked = [];
+    ui.call = (fn, origin, eff, rows, confirmed) => {
+      sent.push([origin, confirmed]);
+      return Promise.resolve(origin === 'TANZA' && !confirmed
+        ? { success: false, needsConfirm: true, unbilled: 4, error: 'x' }
+        : { success: true, imported: 0 });
+    };
+    ui.confirm = (msg) => { asked.push(msg); return yes; };
+    ui.openBillingMatrix = () => {};
+
+    ui.submitSeedRates();
+    for (let i = 0; i < 6; i++) await tick();
+
+    assert.equal(asked.length, 1);
+    assert.match(asked[0], /TANZA: 4 unbilled/);
+    assert.deepEqual(sent, yes
+      ? [['TANZA', false], ['TANZA', true], ['LINGUNAN', false]]
+      : [['TANZA', false]]);
+  }
 });

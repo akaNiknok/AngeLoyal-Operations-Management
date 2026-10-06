@@ -639,3 +639,159 @@ test('a stop with no rate shows a blank rate, not zero', async () => {
   const { api } = await seeded(s);
   assert.equal((await api.getBillingLines(DAY, DAY)).lines[0].stops[0].rate, null);
 });
+
+// ── Rate storage: one row per line (0008) ─────────────────────
+
+const fs = require('node:fs');
+const path = require('node:path');
+const MIGRATION_0008 = fs.readFileSync(
+  path.join(__dirname, '..', 'migrations', '0008_freight_rate_lines.sql'), 'utf8');
+
+/** freight_rates before 0008: one row per band. */
+const LONG_TABLE = `CREATE TABLE freight_rates (
+  id INTEGER PRIMARY KEY, origin TEXT NOT NULL, area TEXT NOT NULL, area_key TEXT NOT NULL,
+  truck_type TEXT NOT NULL, effective_date TEXT NOT NULL,
+  band INTEGER NOT NULL CHECK (band BETWEEN 1 AND 25), rate REAL NOT NULL,
+  UNIQUE (origin, area, truck_type, effective_date, band))`;
+
+/** The grid getFreightRates built from the long table before 0008. */
+function longGrid(api, raw) {
+  const groups = [];
+  const byKey = {};
+  raw.prepare('SELECT * FROM freight_rates ORDER BY id').all().forEach((r) => {
+    const key = `${r.origin}|${r.area}|${r.truck_type}|${r.effective_date}`;
+    let g = byKey[key];
+    if (!g) {
+      const bands = {};
+      for (let i = 1; i <= 25; i++) bands[api._fuelBandLabel(i)] = null;
+      g = byKey[key] = {
+        id: r.id, origin: r.origin, area: r.area, truckType: r.truck_type,
+        effectiveDate: api.toClientDate(r.effective_date), bands,
+      };
+      groups.push(g);
+    }
+    if (r.id < g.id) g.id = r.id;
+    g.bands[api._fuelBandLabel(r.band)] = r.rate;
+  });
+  return groups;
+}
+
+const priceOf = (l) => ({
+  waybillNumber: l.waybillNumber, area: l.area, drops: l.drops, cartons: l.cartons,
+  haulingRate: l.haulingRate, mano: l.mano, dropFee: l.dropFee, warning: l.warning,
+  dieselPrice: l.dieselPrice, rateBand: l.rateBand,
+});
+
+test('0008 keeps every rate: a range prices the same before and after the migration', async () => {
+  const s = sheets(
+    [
+      trip({ id: 1 }),                                                   // one stop
+      trip({ id: 2, fo: 'FO-2', qty: 120 }),                             // split load: highest rate wins
+      trip({ id: 3, fo: 'FO-2', area: 'Cabuyao', qty: 130 }),
+      trip({ id: 4, fo: 'FO-3', area: 'San Juan' }),                     // 3 drops; two raw areas, one _normArea key
+      trip({ id: 5, fo: 'FO-3', area: 'SAN JUAN.' }),
+      trip({ id: 6, fo: 'FO-3', area: 'Cabuyao' }),
+      trip({ id: 7, fo: 'FO-4', tripDate: '7/16/2026', billingDate: '7/10/2026' }),   // carry-over: early block
+      trip({ id: 8, fo: 'FO-5', tripDate: '7/16/2026', billingDate: '7/16/2026' }),   // late block, band 9
+      trip({ id: 9, fo: 'FO-6', area: 'Lipa', truckId: 4, cat: '6W' }),               // blank band
+    ],
+    [
+      waybill(1, 'AY-1', 1), waybill(2, 'AY-2', 2), waybill(3, 'AY-2', 3),
+      waybill(4, 'AY-3', 4), waybill(5, 'AY-3', 5), waybill(6, 'AY-3', 6),
+      waybill(7, 'AY-4', 7), waybill(8, 'AY-5', 8), waybill(9, 'AY-6', 9),
+    ]
+  );
+  const { api, raw } = makeEnv({ sheets: s, userEmail: EMAIL.Admin });
+  await api.addFuelPrice({ effectiveDate: '7/1/2026', dieselPrice: 67 });    // band 8
+  await api.addFuelPrice({ effectiveDate: '7/15/2026', dieselPrice: 72 });   // band 9
+
+  raw.exec('DROP TABLE freight_rates');
+  raw.exec(LONG_TABLE);
+  const ins = raw.prepare(`INSERT INTO freight_rates (origin, area, area_key, truck_type, effective_date, band, rate)
+                           VALUES ('TANZA', ?, ?, ?, ?, ?, ?)`);
+  // Band 9 first, so a line's band ids are not one run.
+  [
+    ['Calamba', '4W', '2026-07-01', 9, 18100], ['Cabuyao', '4W', '2026-07-01', 9, 17500],
+    ['Lipa', '6W', '2026-07-01', 9, 21330], ['Calamba', '4W', '2026-07-15', 9, 19500],
+    ['Calamba', '4W', '2026-07-01', 8, 17670], ['Cabuyao', '4W', '2026-07-01', 8, 17290],
+    ['San Juan', '4W', '2026-07-01', 8, 6760], ['SAN JUAN.', '4W', '2026-07-01', 8, 16500],
+    ['Calamba', '4W', '2026-07-15', 8, 19000],
+  ].forEach(([area, type, eff, band, rate]) => ins.run(area, api._normArea(area), type, eff, band, rate));
+
+  const gridBefore = longGrid(api, raw);
+  const prices = await api.getFuelPrices();
+  const trucksById = {};
+  (await api.getTrucks()).forEach((t) => { trucksById[t.id] = t; });
+  const before = (await api._billableWaybillGroups('7/1/2026', '7/31/2026'))
+    .map((g) => priceOf(api._priceWaybillGroup(g, gridBefore, prices, trucksById, {})))
+    .sort((a, b) => a.waybillNumber.localeCompare(b.waybillNumber));
+
+  raw.exec(MIGRATION_0008);
+
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM freight_rates').get().n, 6);
+  assert.deepEqual(await api.getFreightRates(), gridBefore);
+  const res = await api.getBillingLines('7/1/2026', '7/31/2026');
+  assert.equal(res.success, true);
+  const after = res.lines.map(priceOf);
+  assert.deepEqual(after, before);
+
+  // Not vacuous: each rule priced something.
+  const by = Object.fromEntries(after.map((l) => [l.waybillNumber, l]));
+  assert.equal(by['AY-2'].haulingRate, 17670);
+  assert.equal(by['AY-3'].dropFee > 0, true);
+  assert.equal(by['AY-4'].haulingRate, 17670);
+  assert.equal(by['AY-5'].haulingRate, 19500);
+  assert.match(by['AY-6'].warning, /No rate/);
+});
+
+// ── The re-price warning on import ────────────────────────────
+
+const RATES_V2 = [{ area: 'Calamba', truckType: '4W', bands: { '65.01-70': 18000 } }];
+
+test('replacing a block that prices unbilled lines asks first and writes nothing', async () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api, raw } = await seeded(s);
+  await api.getBillingLines(DAY, DAY);
+  const calamba = async () => (await api.getFreightRates('TANZA')).find((r) => r.area === 'Calamba');
+
+  const res = await api.importFreightRates('TANZA', '7/1/2026', RATES_V2);
+  assert.equal(res.success, false);
+  assert.equal(res.needsConfirm, true);
+  assert.equal(res.unbilled, 1);
+  assert.equal((await calamba()).bands['65.01-70'], 17670);
+  assert.equal(raw.prepare(`SELECT COUNT(*) n FROM audit_log WHERE action = 'FREIGHT_RATE_IMPORT'`).get().n, 1);
+
+  const ok = await api.importFreightRates('TANZA', '7/1/2026', RATES_V2, true);
+  assert.equal(ok.success, true);
+  assert.equal(ok.replaced, 3);
+  assert.equal((await api.getFreightRates('TANZA')).length, 1);
+  assert.equal((await calamba()).bands['65.01-70'], 18000);
+});
+
+test('a new earlier block counts only the lines before the next block', async () => {
+  const s = sheets(
+    [trip({ id: 1, tripDate: '6/20/2026', billingDate: '6/20/2026' }), trip({ id: 2, fo: 'FO-2' })],
+    [waybill(1, 'AY-1', 1), waybill(2, 'AY-2', 2)]
+  );
+  const { api } = await seeded(s);
+  await api.addFuelPrice({ effectiveDate: '6/1/2026', dieselPrice: 67 });
+  assert.equal((await api.getBillingLines('6/1/2026', '7/31/2026')).lines.length, 2);
+
+  // The 7/2 line stays with the 7/1 block; only the 6/20 line re-prices.
+  const res = await api.importFreightRates('TANZA', '6/1/2026', RATES_V2);
+  assert.equal(res.needsConfirm, true);
+  assert.equal(res.unbilled, 1);
+});
+
+test('a block that prices no unbilled line imports without asking', async () => {
+  const s = sheets([trip({ id: 1 })], [waybill(1, 'AY-11801', 1)]);
+  const { api } = await seeded(s);
+  const id = (await api.getBillingLines(DAY, DAY)).lines[0].id;
+
+  assert.equal((await api.importFreightRates('LINGUNAN', '7/1/2026', RATES_V2)).success, true, 'another origin');
+  assert.equal((await api.importFreightRates('TANZA', '8/1/2026', RATES_V2)).success, true, 'after every line');
+
+  await api.setBillingNumber([id], 'BILL-0001');
+  const res = await api.importFreightRates('TANZA', '7/1/2026', RATES_V2);
+  assert.equal(res.success, true, 'a billed line never re-prices');
+});

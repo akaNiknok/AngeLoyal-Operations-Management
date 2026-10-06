@@ -13,19 +13,19 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const { loadWeb } = require('./webharness');
+const { loadWeb, jsonResponse } = require('./webharness');
 
 const API = '/api';
 
 /** Loads core.js with fetch stubbed to reply with `payload`. */
-function loadTransport(payload, { reject } = {}) {
+function loadTransport(payload, { reject, reply } = {}) {
   const seen = { requests: [], expired: 0 };
   const stubs = {
     API_URL: API,
     fetch: (url, init) => {
       seen.requests.push({ url, init });
       if (reject) return Promise.reject(reject);
-      return Promise.resolve({ json: () => Promise.resolve(payload) });
+      return Promise.resolve(reply || jsonResponse(payload));
     },
   };
   const { sandbox } = loadWeb(['core.js'], stubs,
@@ -74,6 +74,18 @@ test('an { ok:false } body becomes a rejection carrying the server error', async
 test('a malformed body still rejects rather than resolving with junk', async () => {
   const { ui } = loadTransport({ nonsense: true });
   await assert.rejects(() => ui.call('getBootData'), /Request failed/);
+});
+
+// Cloudflare answers a Worker over its CPU limit (1102) with an HTML page.
+test('an HTML error page rejects with "server busy", not a JSON parse error', async () => {
+  const page = '<!DOCTYPE html><title>Error 1102</title>';
+  for (const reply of [
+    new Response(page, { status: 503, headers: { 'content-type': 'text/html' } }),
+    new Response(page, { status: 200, headers: { 'content-type': 'text/html' } }),
+  ]) {
+    const { ui } = loadTransport(null, { reply });
+    await assert.rejects(() => ui.call('getBillingLines'), /server is busy/);
+  }
 });
 
 test('a network failure rejects', async () => {
@@ -137,9 +149,7 @@ test('a sign-in stores the session and reloads the page', async () => {
       setItem: (k, v) => { store[k] = v; },
       removeItem: (k) => { delete store[k]; },
     },
-    fetch: () => Promise.resolve({
-      json: () => Promise.resolve({ ok: true, data: { success: true, sessionToken: 'sess-new' } }),
-    }),
+    fetch: () => Promise.resolve(jsonResponse({ ok: true, data: { success: true, sessionToken: 'sess-new' } })),
   });
   store.oms_boot = '{"session":{"role":"Admin"}}'; // the last account's cache
 
@@ -174,7 +184,7 @@ test('a save lost to the network re-reads the open panel, not just the board', a
         const PageTypeError = vm.runInContext('TypeError', ui);
         return Promise.reject(new PageTypeError('Failed to fetch'));
       }
-      return Promise.resolve({ json: () => Promise.resolve({ ok: true, data: { session: { role: 'Admin' } } }) });
+      return Promise.resolve(jsonResponse({ ok: true, data: { session: { role: 'Admin' } } }));
     },
   }));
   const applied = [];

@@ -33,7 +33,7 @@ v1 kept the same data in Google Sheets. [`Docs/D1 Migration.md`](D1%20Migration.
 | 12 | `trip_helpers` | Dispatch | Trip helpers |
 | 13 | `route_frequency_log` | Dispatch | Append-only |
 | 14 | `waybills` | Waybills | Ledger, one row per load |
-| 15 | `freight_rates` | Billing | DOE rate matrix, long format |
+| 15 | `freight_rates` | Billing | DOE rate matrix, one row per rate line |
 | 16 | `fuel_prices` | Billing | Weekly price history |
 | 17 | `billing_charge_types` | Billing | Master (seeded) |
 | 18 | `billing_lines` | Billing | Billing ledger |
@@ -316,22 +316,26 @@ A carry-over of a carry-over keeps one suffix. The server strips a trailing `-R`
 
 ### freight_rates
 
-The DOE rate matrix in long format: **one row per band**. A rate revision inserts a new block with a later `effective_date`. The lookup takes the newest block on or before the trip's billing date, so a past billing never re-prices.
+The DOE rate matrix: **one row per rate line** (origin, area, truck type, effective date), with the 25 band rates in one JSON array. A rate revision inserts a new block with a later `effective_date`. The lookup takes the newest block on or before the trip's billing date, so a past billing never re-prices.
 
 | Column | Type | Notes |
 | :-- | :-- | :-- |
-| id | INTEGER PK | The client sees the lowest ID of a block; any band row's ID resolves the block |
+| id | INTEGER PK | The line. `updateFreightRate` takes it |
 | origin | TEXT | Rebisco warehouse, e.g. `TANZA` |
 | area | TEXT | Destination as the workbook spells it |
-| area_key | TEXT | `_normArea(area)`: case- and punctuation-free, for matching |
 | truck_type | TEXT | `6W`, `4W`, `L300` |
 | effective_date | TEXT date | First day the block applies |
-| band | INTEGER 1–25 | Diesel price band |
-| rate | REAL | Pesos. A band with no rate has no row |
+| rates | TEXT JSON | Array of 25 pesos amounts. `rates[0]` is band 1, `rates[24]` is band 25. A blank band is `null`. `CHECK (json_array_length(rates) = 25)` |
 
-`UNIQUE (origin, area, truck_type, effective_date, band)`. The key is the raw area, because the DOE workbook names different towns the same ("San Juan" and "SAN JUAN"). The lookup matches on `area_key`, so the first block wins, as in v1. `getFreightRates()` rebuilds the wide grid for the Billing Matrix panel, and filters the origin in SQL through the `UNIQUE` index. The origin list is a skip-scan of that index, one row for each origin: `SELECT DISTINCT origin` would read the whole table on every boot.
+`UNIQUE (origin, area, truck_type, effective_date)`. The key is the raw area, because the DOE workbook names different towns the same ("San Juan" and "SAN JUAN"). The lookup matches on `_normArea(area)` in JS, so the first line by id wins, as in v1. A line with no rate in any band has no row.
 
-The table carries no second index. `0003_drop_freight_rates_key.sql` dropped `freight_rates_key`, because no query used it and it made every rate write cost a third row. The table is about 36,750 rows, so a data load has to stay inside the 100,000 rows written per day the free plan allows.
+`getFreightRates()` builds the `bands` grid from the array, and filters the origin in SQL through the `UNIQUE` index. The origin list is a skip-scan of that index, one row for each origin: `SELECT DISTINCT origin` would read the whole table on every boot. `freight_rates_origin_date (origin, effective_date)` serves the import: it deletes the block it replaces, and finds the next later block for the re-price warning.
+
+`0008_freight_rate_lines.sql` replaced the old long format (one row per band, plus an `area_key` column). A block went from about 36,750 rows to about 1,470. A Billing open reads about 430 rate rows, not 10,800, and fits the Workers 10 ms CPU limit. A cell edit is one `UPDATE … SET rates = json_set(rates, '$[i]', ?)`.
+
+#### The re-price warning
+
+A block prices every unbilled billing line (`billing_id IS NULL`) of its origin whose Billing Date is on or after its `effective_date` and before the next later block. When such lines exist, `importFreightRates` writes nothing and returns `{ success:false, needsConfirm:true, unbilled }`. The caller repeats the call with `confirmed = true` (the optional last argument) to import.
 
 #### Band indexing
 
@@ -528,7 +532,7 @@ A Rebisco route file has one drop per row. One Freight Order (FO) can span sever
 
 The Workers free plan allows 5,000,000 rows read and 100,000 rows written a day. D1 counts every row a query visits, not the rows it returns, and every index entry a write changes.
 
-- **No full scan on a large or growing table.** `freight_rates` is about 36,750 rows. `trips`, `waybills` and `route_frequency_log` grow every day. A lookup on them goes through an index. `test/scans.test.js` reads the query plans and fails on a scan.
+- **No full scan on a large or growing table.** `freight_rates` is about 1,470 rows a block, and each block adds more. `trips`, `waybills` and `route_frequency_log` grow every day. A lookup on them goes through an index. `test/scans.test.js` reads the query plans and fails on a scan.
 - **An index costs one written row per insert.** Add one only for a query that runs. A partial index (`WHERE … IS NOT NULL`) holds only the rows that need it, so it costs almost nothing on the other inserts.
 - **A foreign key needs an index on the child column.** D1 enforces foreign keys, so a parent delete looks up its children. Without an index, that lookup reads the whole child table.
 

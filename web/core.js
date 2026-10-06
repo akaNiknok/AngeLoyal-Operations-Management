@@ -123,13 +123,20 @@
             // Same origin, so no CORS: a plain string body is all it needs.
             //
             // The function never throws, so a non-ok payload is a real app
-            // error; a rejected fetch is the network being down.
+            // error; a rejected fetch is the network being down. A non-JSON
+            // reply is a Cloudflare error page (e.g. 1102, the CPU limit).
             function callBackend(body) {
                 return fetch(API_URL, {
                     method: "POST",
                     body: JSON.stringify(body),
                 })
-                    .then((res) => res.json())
+                    .then((res) => {
+                        const type = res.headers.get("content-type") || "";
+                        if (!res.ok || !type.includes("application/json")) {
+                            throw new Error("The server is busy. Try again in a moment.");
+                        }
+                        return res.json();
+                    })
                     .then((payload) => {
                         if (!payload || payload.ok !== true) {
                             throw new Error(

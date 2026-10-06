@@ -127,13 +127,13 @@ if (snapshot['Billing Lines']) {
   check('SUM(Billing Lines.Total) -> SUM(total)', expected, Math.round(count('SELECT COALESCE(SUM(total),0) n FROM billing_lines') * 100) / 100);
 }
 
-// Freight Rates: one row per non-blank band cell.
+// Freight Rates: every non-blank band cell lands in some line's rates array.
 if (snapshot['Freight Rates'] && !skipRates) {
   const headers = snapshot['Freight Rates'][0].map((h) => String(h).trim());
   const bandCols = headers.map((h, i) => (/^\d+\.01-\d+$/.test(h) ? i : -1)).filter((i) => i !== -1);
   const droppedIds = new Set(report.dropped.map((d) => (/^Freight Rates ID (\d+):/.exec(d) || [])[1]).filter(Boolean).map(Number));
   const expected = sheetRows('Freight Rates').filter((r) => !droppedIds.has(Number(r[0]))).reduce((s, r) => s + bandCols.filter((i) => r[i] !== '' && r[i] !== null && r[i] !== undefined && !Number.isNaN(Number(r[i]))).length, 0);
-  check('Freight Rates band cells -> freight_rates', expected, count('SELECT COUNT(*) n FROM freight_rates'));
+  check('Freight Rates band cells -> freight_rates', expected, count('SELECT COUNT(*) n FROM freight_rates, json_each(freight_rates.rates) WHERE json_each.value IS NOT NULL'));
 }
 
 const fkProblems = db.prepare('PRAGMA foreign_key_check').all();

@@ -11,7 +11,7 @@ const { HEADERS, usersSheet, EMAIL } = require('./fixtures');
 
 const plan = (raw, sql) => raw.prepare('EXPLAIN QUERY PLAN ' + sql).all().map((r) => r.detail);
 
-test('boot and the rate reads never scan freight_rates (~36,750 rows)', async () => {
+test('boot, the rate reads and the rate writers never scan freight_rates', async () => {
   const bands = Array.from({ length: 25 }, (_, i) => (i === 7 ? 1000 : ''));
   const sheets = {
     Users: usersSheet(),

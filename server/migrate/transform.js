@@ -14,7 +14,7 @@
 //  categories are created and no FK is checked.
 // ============================================================
 
-import { _normArea, _fuelBandFromLabel, _parseJsonCell, FUEL_BAND_COUNT, _fuelBandLabel } from '../internals.js';
+import { _fuelBandFromLabel, _parseJsonCell, FUEL_BAND_COUNT, _fuelBandLabel } from '../internals.js';
 import { numOrNull, toPHTimestamp } from '../db.js';
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -323,7 +323,7 @@ export function transform(snapshot, opts = {}) {
     T.route_frequency_log.push(row);
   });
 
-  // ---- freight rates: 25 band columns -> up to 25 rows
+  // ---- freight rates: 25 band columns -> one row with a 25-rate array
   let rateId = 1;
   const seenRate = {};
   rows('Freight Rates').forEach((r) => {
@@ -334,14 +334,13 @@ export function transform(snapshot, opts = {}) {
     const key = [str(r.Origin), str(r.Area), str(r['Truck Type']), eff].join('|');
     if (seenRate[key]) { dropped.push(`Freight Rates ID ${r.ID}: duplicate of ID ${seenRate[key]} (${key}) — dropped`); return; }
     seenRate[key] = r.ID;
-    for (let band = 1; band <= FUEL_BAND_COUNT; band++) {
-      const rate = num(r[_fuelBandLabel(band)]);
-      if (rate === null) continue;
-      T.freight_rates.push({
-        id: rateId++, origin: str(r.Origin), area: str(r.Area), area_key: _normArea(r.Area),
-        truck_type: str(r['Truck Type']), effective_date: eff, band, rate,
-      });
-    }
+    const rates = [];
+    for (let band = 1; band <= FUEL_BAND_COUNT; band++) rates.push(num(r[_fuelBandLabel(band)]));
+    if (rates.every((v) => v === null)) return;   // a line with no rate has no row
+    T.freight_rates.push({
+      id: rateId++, origin: str(r.Origin), area: str(r.Area),
+      truck_type: str(r['Truck Type']), effective_date: eff, rates: JSON.stringify(rates),
+    });
   });
 
   rows('Fuel Prices').forEach((r) => {

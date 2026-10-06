@@ -73,7 +73,7 @@ function loadWeb(files, overrides = {}, expose = '') {
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }) },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     location: { hostname: 'localhost' },
-    fetch: () => Promise.resolve({ json: () => Promise.resolve({ ok: true, data: null }) }),
+    fetch: () => Promise.resolve(jsonResponse({ ok: true, data: null })),
     setTimeout, clearTimeout, requestAnimationFrame: (fn) => fn(),
     API_URL: '/api', OAUTH_CLIENT_ID: '',
     ...overrides,
@@ -89,4 +89,9 @@ function loadWeb(files, overrides = {}, expose = '') {
   return { sandbox };
 }
 
-module.exports = { loadWeb, fakeEl, plain };
+/** A fetch reply the way /api sends one: JSON with its content type. */
+function jsonResponse(body) {
+  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8' } });
+}
+
+module.exports = { loadWeb, fakeEl, plain, jsonResponse };

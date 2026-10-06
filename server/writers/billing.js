@@ -19,7 +19,7 @@ import {
   _sumManualCharges,
 } from '../internals.js';
 import {
-  tripFromRow, getFreightRates, getFuelPrices, getTrucks, getBillingChargeTypes,
+  tripFromRow, getFreightRates, _rawOrigins, getFuelPrices, getTrucks, getBillingChargeTypes,
   billingLineFromRow, billingLinesByWaybill, _billingTotals, BILLING_LINE_COLS,
 } from '../readers.js';
 
@@ -33,11 +33,16 @@ const BILLABLE_TRIP_STATUSES = ['Delivered', 'Two-Day Trip'];
 /**
  * Seeds or replaces one origin's rate block. Re-posting the same origin and
  * effective date replaces that block instead of stacking a second copy.
+ *
+ * A block prices every unbilled line of its origin from its effective date
+ * up to the next later block. When such lines exist, the call writes nothing
+ * and returns { needsConfirm, unbilled } until the caller confirms.
  * @param {string} origin
  * @param {string} effectiveDate  'M/d/yyyy'
  * @param {Object[]} rows  [{ area, truckType, bands: { '65.01-70': 15300, ... } }]
+ * @param {boolean} [confirmed]  The user accepted the re-pricing.
  */
-export async function importFreightRates(origin, effectiveDate, rows) {
+export async function importFreightRates(origin, effectiveDate, rows, confirmed) {
   await requirePermission('EDIT_FREIGHT_RATES');
   try {
     const originName = String(origin || '').trim();
@@ -52,48 +57,71 @@ export async function importFreightRates(origin, effectiveDate, rows) {
       const area = String(r.area || '').trim();
       const type = String(r.truckType || '').trim();
       if (!area || !type) throw new Error('Every rate row needs an area and a truck type.');
-      return { area, type, bands: r.bands || {} };
+      const bands = r.bands || {};
+      const rates = [];
+      for (let i = 1; i <= FUEL_BAND_COUNT; i++) {
+        const v = bands[_fuelBandLabel(i)];
+        if (v === null || v === undefined || v === '') { rates.push(null); continue; }
+        if (!isFinite(Number(v))) throw new Error(`${area} ${type}: the ${_fuelBandLabel(i)} rate is not a number.`);
+        rates.push(Number(v));
+      }
+      return { area, type, rates };
     });
 
-    // Drop any earlier block for the same origin and date — matched by the
-    // same normalized-origin comparison the rate lookup uses.
+    // Every spelling of this origin in the matrix, matched the way the rate
+    // lookup matches. The skip-scan reads one row per origin.
     const wantOrigin = _normArea(originName);
-    const candidates = await q(
-      `SELECT id, origin, area, truck_type FROM freight_rates WHERE effective_date = ?`, effDate);
-    const doomed = candidates.filter((r) => _normArea(r.origin) === wantOrigin);
-    const replacedGroups = new Set(doomed.map((r) => `${_normArea(r.area)}|${_normArea(r.truck_type)}`));
+    const spellings = (await _rawOrigins()).filter((o) => _normArea(o) === wantOrigin);
+    const inList = spellings.map(() => '?').join(', ');
+
+    if (!confirmed) {
+      const next = spellings.length ? await one(
+        `SELECT MIN(effective_date) AS d FROM freight_rates WHERE origin IN (${inList}) AND effective_date > ?`,
+        ...spellings, effDate) : null;
+      const until = next && next.d;
+      // ponytail: scans billing_lines, once per import; index billing_date if the ledger gets big.
+      const counts = await q(
+        `SELECT origin, COUNT(*) AS n FROM billing_lines
+         WHERE billing_id IS NULL AND billing_date >= ?${until ? ' AND billing_date < ?' : ''}
+         GROUP BY origin`,
+        effDate, ...(until ? [until] : []));
+      const unbilled = counts.filter((r) => _normArea(r.origin) === wantOrigin).reduce((s, r) => s + r.n, 0);
+      if (unbilled > 0) {
+        return {
+          success: false, needsConfirm: true, unbilled,
+          error: `${unbilled} unbilled billing lines of ${originName} would re-price. Confirm to import.`,
+        };
+      }
+    }
 
     const stmts = [];
-    if (doomed.length) {
-      const marks = doomed.map(() => '?').join(',');
-      stmts.push(stmt(`DELETE FROM freight_rates WHERE id IN (${marks})`, ...doomed.map((r) => r.id)));
+    if (spellings.length) {
+      stmts.push(stmt(
+        `DELETE FROM freight_rates WHERE origin IN (${inList}) AND effective_date = ? RETURNING id`,
+        ...spellings, effDate));
     }
     parsedRows.forEach((r) => {
-      const areaKey = _normArea(r.area);
-      for (let i = 1; i <= FUEL_BAND_COUNT; i++) {
-        const v = r.bands[_fuelBandLabel(i)];
-        if (v === null || v === undefined || v === '') continue;   // a blank band has no row
-        stmts.push(stmt(
-          `INSERT INTO freight_rates (origin, area, area_key, truck_type, effective_date, band, rate)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          originName, r.area, areaKey, r.type, effDate, i, Number(v)));
-      }
+      if (r.rates.every((v) => v === null)) return;   // a line with no rate has no row
+      stmts.push(stmt(
+        `INSERT INTO freight_rates (origin, area, truck_type, effective_date, rates) VALUES (?, ?, ?, ?, ?)`,
+        originName, r.area, r.type, effDate, JSON.stringify(r.rates)));
     });
-    if (stmts.length) await batch(stmts);
+    const results = stmts.length ? await batch(stmts) : [];
+    const replaced = spellings.length ? results[0].results.length : 0;
 
     await _auditLog('FREIGHT_RATE_IMPORT', 'freight_rates', null, '',
       `${originName} → ${parsedRows.length} rows effective ${toClientDate(effDate)}`);
 
-    return { success: true, imported: parsedRows.length, replaced: replacedGroups.size };
+    return { success: true, imported: parsedRows.length, replaced };
   } catch (e) {
     return { success: false, error: e.message };
   }
 }
 
 /**
- * Edits one rate cell from the Billing Matrix panel. `rateId` may be any row
- * of the (origin, area, truck type, effective date) block — it resolves the
- * whole block on the RAW area ("San Juan" and "SAN JUAN" are two towns), then upserts or deletes just the one band's row.
+ * Edits one rate cell from the Billing Matrix panel. `rateId` is the line:
+ * one (origin, raw area, truck type, effective date). "San Juan" and
+ * "SAN JUAN" are two towns and two lines.
  * @param {number} rateId
  * @param {string} bandLabel
  * @param {number|string} value  Blank clears the cell.
@@ -110,39 +138,25 @@ export async function updateFreightRate(rateId, bandLabel, value) {
       throw new Error('A rate must be a number that is zero or more.');
     }
 
-    const anyRow = await one(`SELECT * FROM freight_rates WHERE id = ?`, Number(rateId));
-    if (!anyRow) throw new Error(`Freight rate ID ${rateId} not found.`);
+    const row = await one(`SELECT * FROM freight_rates WHERE id = ?`, Number(rateId));
+    if (!row) throw new Error(`Freight rate ID ${rateId} not found.`);
 
-    const bandRow = await one(
-      `SELECT * FROM freight_rates
-       WHERE origin = ? AND area = ? AND truck_type = ? AND effective_date = ? AND band = ?`,
-      anyRow.origin, anyRow.area, anyRow.truck_type, anyRow.effective_date, bandIndex);
-
-    const oldVal = bandRow ? bandRow.rate : null;
+    const oldVal = numOrNull(JSON.parse(row.rates)[bandIndex - 1]);
     const newVal = raw === '' ? '' : Number(raw);
 
-    if (raw === '') {
-      if (bandRow) await run(`DELETE FROM freight_rates WHERE id = ?`, bandRow.id);
-    } else if (bandRow) {
-      await run(`UPDATE freight_rates SET rate = ? WHERE id = ?`, newVal, bandRow.id);
-    } else {
-      await run(
-        `INSERT INTO freight_rates (origin, area, area_key, truck_type, effective_date, band, rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        anyRow.origin, anyRow.area, anyRow.area_key, anyRow.truck_type, anyRow.effective_date,
-        bandIndex, newVal);
-    }
+    await run(`UPDATE freight_rates SET rates = json_set(rates, ?, ?) WHERE id = ?`,
+      `$[${bandIndex - 1}]`, raw === '' ? null : newVal, row.id);
 
-    await _auditLog('FREIGHT_RATE_EDIT', 'freight_rates', Number(rateId),
+    await _auditLog('FREIGHT_RATE_EDIT', 'freight_rates', row.id,
       JSON.stringify({ band: label, value: oldVal }), JSON.stringify({ band: label, value: newVal }));
 
     return {
       success: true,
       rate: {
-        id: Number(rateId),
-        origin: String(anyRow.origin).trim(),
-        area: String(anyRow.area).trim(),
-        truckType: String(anyRow.truck_type).trim(),
+        id: row.id,
+        origin: String(row.origin).trim(),
+        area: String(row.area).trim(),
+        truckType: String(row.truck_type).trim(),
         band: label,
         value: newVal,
       },

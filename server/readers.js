@@ -438,7 +438,7 @@ export async function getRouteFrequencyForDriver(driverId, windowDays, exceptTri
 /**
  * The freight rate matrix, one object per (origin, area, truck type,
  * effective date) with its 25 bands under `bands` keyed by band label. `id`
- * is the lowest row id of that group; any band row's id resolves the group.
+ * is the id of the line row; updateFreightRate takes it.
  * @param {string|string[]} [origin]  Case-insensitive warehouse filter.
  * @returns {Promise<Array<{ id, origin, area, truckType, effectiveDate, bands }>>}
  */
@@ -446,9 +446,9 @@ export async function getFreightRates(origin) {
   await requirePermission('VIEW_BILLING');
   const want = (Array.isArray(origin) ? origin : [origin]).filter(Boolean).map(_normArea);
 
-  // A filtered read narrows in SQL, not in JS: the table holds about 36,750
-  // rows and one origin is about a third of them. _normArea still does the
-  // matching, so read the spellings first and pass the raw ones the filter hit.
+  // A filtered read narrows in SQL, not in JS: one origin is about a third of
+  // the matrix. _normArea still does the matching, so read the spellings
+  // first and pass the raw ones the filter hit.
   let rows;
   if (want.length) {
     const origins = (await _rawOrigins()).filter((o) => want.includes(_normArea(o)));
@@ -460,37 +460,30 @@ export async function getFreightRates(origin) {
     rows = await q(`SELECT * FROM freight_rates ORDER BY id`);
   }
 
-  const groups = [];
-  const byKey = {};
-  rows.forEach((r) => {
-    // Grouped on the raw area: "San Juan" and "SAN JUAN" are two matrix rows.
-    const key = `${r.origin}|${r.area}|${r.truck_type}|${r.effective_date}`;
-    let g = byKey[key];
-    if (!g) {
-      const bands = {};
-      for (let i = 1; i <= FUEL_BAND_COUNT; i++) bands[_fuelBandLabel(i)] = null;
-      g = byKey[key] = {
-        id: r.id,
-        origin: String(r.origin).trim(),
-        area: String(r.area).trim(),
-        truckType: String(r.truck_type).trim(),
-        effectiveDate: toClientDate(r.effective_date),
-        bands,
-      };
-      groups.push(g);
-    }
-    if (r.id < g.id) g.id = r.id;
-    g.bands[_fuelBandLabel(r.band)] = numOrNull(r.rate);
+  // One row per line: "San Juan" and "SAN JUAN" stay two matrix rows.
+  return rows.map((r) => {
+    const rates = JSON.parse(r.rates);
+    const bands = {};
+    for (let i = 0; i < FUEL_BAND_COUNT; i++) bands[BAND_LABELS[i]] = numOrNull(rates[i]);
+    return {
+      id: r.id,
+      origin: String(r.origin).trim(),
+      area: String(r.area).trim(),
+      truckType: String(r.truck_type).trim(),
+      effectiveDate: toClientDate(r.effective_date),
+      bands,
+    };
   });
-  return groups;
 }
 
+const BAND_LABELS = Array.from({ length: FUEL_BAND_COUNT }, (_, i) => _fuelBandLabel(i + 1));
+
 /**
- * Every raw origin spelling in the matrix. SELECT DISTINCT walks all ~36,750
- * index entries, and D1 bills each one as a row read. This skip-scan seeks
- * the next origin in the UNIQUE index instead: one row read per origin.
+ * Every raw origin spelling in the matrix. SELECT DISTINCT walks every index
+ * entry, and D1 bills each one as a row read. This skip-scan seeks the next
+ * origin in the UNIQUE index instead: one row read per origin.
  */
-async function _rawOrigins() {
+export async function _rawOrigins() {
   const rows = await q(
     `WITH RECURSIVE o(v) AS (
        SELECT MIN(origin) FROM freight_rates

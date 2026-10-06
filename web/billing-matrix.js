@@ -546,8 +546,26 @@
                         return;
                     }
                     const sheet = chosen[i];
-                    call("importFreightRates", sheet.name, effective, sheet.rows).then(
+                    const send = (confirmed) => call("importFreightRates", sheet.name, effective, sheet.rows, confirmed).then(
                         (r) => {
+                            // The block would re-price unbilled lines: the
+                            // server wrote nothing and waits for a yes.
+                            if (r.needsConfirm && !confirmed) {
+                                hideLoading();
+                                if (!confirm(
+                                    `${sheet.name}: ${r.unbilled} unbilled billing line(s) will re-price with these rates. Import anyway?`,
+                                )) {
+                                    const done = results.map((x) => x.origin).join(", ");
+                                    showToast(
+                                        `Import stopped at ${sheet.name}.` + (done ? ` Already imported: ${done}.` : ""),
+                                        "warning",
+                                    );
+                                    return;
+                                }
+                                setLoading("Importing rates…");
+                                send(true);
+                                return;
+                            }
                             if (!r.success) {
                                 hideLoading();
                                 showToast(`${sheet.name}: ${r.error}`, "error");
@@ -561,6 +579,7 @@
                             showToast(`${sheet.name}: ${e.message}`, "error");
                         },
                     );
+                    send(false);
                 };
                 next(0);
             }
