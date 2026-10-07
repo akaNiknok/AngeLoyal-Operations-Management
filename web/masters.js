@@ -6,7 +6,7 @@
             }
             // Remove / Restore action button for an admin row.
             function rowActionBtn(fn, id, active) {
-                return `<button class="row-del" style="border-color:var(--border)" onclick="${fn}(${id})">${active === false ? "Restore" : "Remove"}</button>`;
+                return `<button class="row-del row-action${active === false ? " restore" : ""}" onclick="${fn}(${id})">${active === false ? "Restore" : "Remove"}</button>`;
             }
 
             // Everything the five admin tables do identically, declared once. `list` is a
@@ -185,8 +185,7 @@
                             ? `<div class="cat-cell">${catSwatch(t.billingCategory)}<select class="cell-select" onchange="updateTruckField(${t.id},'billingCategory',this.value)">${billingCategoryOptions(t.billingCategory)}</select></div>`
                             : colorChip(t.billingCategory);
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${t.id}</td>
-    <td style="font-family:'DM Mono',monospace">${f("plate", t.plate)}</td>
+    <td style="font-family:'IBM Plex Mono',monospace">${f("plate", t.plate)}</td>
     <td>${f("brand", t.brand)}</td>
     <td>${f("type", t.type)}</td>
     <td>${cat}</td>
@@ -288,7 +287,6 @@
                </select>`
                             : `<span class="badge ${roleBadgeClass(e.role)}">${esc(e.role)}</span>`;
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${e.id}</td>
     <td>${f("nick", e.nick)}</td>
     <td>${f("firstName", e.firstName)}</td>
     <td>${f("middleName", e.middleName)}</td>
@@ -396,7 +394,6 @@
                               ).join("") +
                               `</select>`;
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${u.id}</td>
     <td>${cell("email", u.email)}</td>
     <td>${cell("displayName", u.displayName)}</td>
     <td>${roleCell}</td>
@@ -485,7 +482,6 @@
                             ? `<div class="cat-cell">${catSwatch(c.name)}<input class="cell-input" value="${esc(c.name)}" onchange="updateBillingCategoryName(${c.id},this.value)"></div>`
                             : colorChip(c.name);
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${c.id}</td>
     <td>${nameCell}</td>
     <td>${statusChip(c.active)}</td>
     <td>${isAdmin ? rowActionBtn("toggleBillingCategoryActive", c.id, c.active) : ""}</td>
@@ -564,12 +560,11 @@
                     .map((m) => {
                         const codeCell = isAdmin
                             ? `<input class="cell-input" value="${esc(m.fileTypeCode)}" onchange="updateRouteTypeMapField(${m.id},'fileTypeCode',this.value)">`
-                            : `<span style="font-family:'DM Mono',monospace">${esc(m.fileTypeCode)}</span>`;
+                            : `<span style="font-family:'IBM Plex Mono',monospace">${esc(m.fileTypeCode)}</span>`;
                         const catCell = isAdmin
                             ? `<div class="cat-cell">${catSwatch(m.billingCategory)}<select class="cell-select" onchange="updateRouteTypeMapField(${m.id},'billingCategory',this.value)">${billingCategoryOptions(m.billingCategory)}</select></div>`
                             : colorChip(m.billingCategory);
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${m.id}</td>
     <td>${codeCell}</td>
     <td>${catCell}</td>
     <td>${statusChip(m.active)}</td>
@@ -683,16 +678,16 @@
                             p.sequenceWidth || 0,
                             "0",
                         );
+                        // A blank prefix is AngeLoyal's own booklet: say so.
                         const cell = (field, value, mono) =>
                             canEdit
-                                ? `<input class="cell-input" value="${esc(value)}" onchange="updateWaybillPrefixField(${p.id},'${field}',this.value)">`
-                                : `<span${mono ? ` style="font-family:'DM Mono',monospace"` : ""}>${esc(value)}</span>`;
+                                ? `<input class="cell-input" value="${esc(value)}"${field === "prefix" ? ' placeholder="(none)"' : ""} onchange="updateWaybillPrefixField(${p.id},'${field}',this.value)">`
+                                : `<span${mono ? ` style="font-family:'IBM Plex Mono',monospace"` : ""}>${esc(value) || (field === "prefix" ? "(none)" : "")}</span>`;
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${p.id}</td>
     <td>${cell("prefix", p.prefix, true)}</td>
     <td>${cell("companyName", p.companyName)}</td>
     <td>${cell("lastSequenceNumber", seq, true)}</td>
-    <td style="font-family:'DM Mono',monospace;color:var(--muted)">${esc(p.prefix ? `${p.prefix}-${next}` : next)}</td>
+    <td style="font-family:'IBM Plex Mono',monospace;color:var(--muted)">${esc(p.prefix ? `${p.prefix}-${next}` : next)}</td>
     <td>${statusChip(p.active)}</td>
     <td>${canEdit ? rowActionBtn("toggleWaybillPrefixActive", p.id, p.active) : ""}</td>
   </tr>`;
@@ -825,7 +820,7 @@
                                </div>`
                             : `<span class="color-chip" style="background:${hex};border-color:rgba(0,0,0,.2)"></span>`;
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace">${esc(g)}</td>
+    <td style="font-family:'IBM Plex Mono',monospace">${esc(g)}</td>
     <td>${picker}</td>
     <td>${colorChip(g)}</td>
   </tr>`;

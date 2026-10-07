@@ -1,4 +1,4 @@
-            @import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap");
+            @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
             *,
             *::before,
@@ -8,38 +8,54 @@
                 padding: 0;
             }
 
+            /* Carbon-copy palette. A waybill booklet is white paper, carbon
+               ink and colored copies; the app uses the same three things.
+               Ink (--ink) is the one action color. Status uses the copy
+               tints: white = Prepping, canary = Scheduled, blue = Delivered,
+               green = Billed or Active, pink = a problem. */
             :root {
-                --bg: #f7f6f2;
+                --sans: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+                --mono: "IBM Plex Mono", ui-monospace, monospace;
+                --bg: #eef0f3;
                 --surface: #ffffff;
-                --border: #e2e0d8;
-                --border-md: #c8c6bc;
-                --text: #1c1b18;
-                --muted: #6b6960;
-                --hint: #a09e96;
-                --blue: #185fa5;
-                --blue-bg: #e6f1fb;
-                --blue-mid: #b8d6f5;
-                --green: #3b6d11;
-                --green-bg: #eaf3de;
-                --amber: #854f0b;
-                --amber-bg: #faeeda;
-                --red: #a32d2d;
-                --red-bg: #fcebeb;
-                --purple: #5c3a8f;
-                --purple-bg: #f0eaf9;
-                --accent: #378add;
+                --border: #dde1e6;
+                --border-md: #bcc3cc;
+                --text: #171b22;
+                --muted: #525a67;
+                --hint: #6c7482;
+                --ink: #2f3c8f;
+                --ink-hover: #232d73;
+                --ink-bg: #e9ebf8;
+                --canary: #5f4f00;
+                --canary-bg: #fcf1ae;
+                --blue: #1f4f86;
+                --blue-bg: #dde9f7;
+                --blue-mid: #b5cdea;
+                --green: #2b6127;
+                --green-bg: #dff0dd;
+                --amber: #8a4a00;
+                --amber-bg: #fbe8cf;
+                --red: #9c1f3b;
+                --red-bg: #fbdfe5;
+                --purple: #5b3a91;
+                --purple-bg: #efe9f8;
+                --band: #e3e7ed;
+                --band-line: #c9d0d9;
+                --accent: var(--ink);
+                --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
                 --radius: 10px;
                 --radius-sm: 6px;
                 --row-h: 42px;
             }
 
             body {
-                font-family: "DM Sans", sans-serif;
+                font-family: var(--sans);
                 background: var(--bg);
                 color: var(--text);
                 min-height: 100vh;
-                font-size: 13px;
+                font-size: 14px;
                 line-height: 1.5;
+                font-variant-numeric: tabular-nums;
             }
 
             /* ── LAYOUT ── */
@@ -73,7 +89,7 @@
             .logo-icon {
                 width: 28px;
                 height: 28px;
-                background: var(--text);
+                background: var(--ink);
                 border-radius: 6px;
                 display: flex;
                 align-items: center;
@@ -94,12 +110,30 @@
                 letter-spacing: -0.01em;
             }
             .logo-sub {
-                font-size: 10px;
-                font-family: "DM Mono", monospace;
+                font-size: 12px;
+                font-family: var(--sans);
                 color: var(--muted);
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
                 margin-top: -1px;
+            }
+            /* Copy tints again: a pink slip for DEV, canary for local. */
+            .env-tag {
+                display: inline-block;
+                font-weight: 600;
+                font-size: 11px;
+                padding: 0 6px;
+                border-radius: 3px;
+                margin-top: 1px;
+            }
+            .env-tag[hidden] {
+                display: none;
+            }
+            .env-tag[data-env="dev"] {
+                background: var(--red-bg);
+                color: var(--red);
+            }
+            .env-tag[data-env="local"] {
+                background: var(--canary-bg);
+                color: var(--canary);
             }
 
             .nav {
@@ -113,11 +147,11 @@
                 padding: 3px;
             }
             .nav-btn {
-                padding: 4px 13px;
+                padding: 4px 11px;
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 400;
-                font-family: "DM Sans", sans-serif;
+                font-family: var(--sans);
                 cursor: pointer;
                 border: none;
                 background: transparent;
@@ -127,7 +161,7 @@
             }
             .nav-btn.active {
                 background: var(--surface);
-                color: var(--text);
+                color: var(--ink);
                 font-weight: 500;
                 box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
             }
@@ -155,10 +189,8 @@
                 display: none;
             }
             .nav-group-label {
-                font-size: 9px;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                font-size: 12px;
+                font-family: var(--sans);
                 color: var(--hint);
                 padding: 0 3px 0 2px;
                 user-select: none;
@@ -172,8 +204,8 @@
             }
             /* Version tag left of the account chip — opens "What's new". */
             .app-version {
-                font-family: "DM Mono", monospace;
-                font-size: 10px;
+                font-family: var(--mono);
+                font-size: 11px;
                 color: var(--hint);
                 background: none;
                 border: 1px solid transparent;
@@ -194,18 +226,18 @@
                 display: none;
             }
             .user-chip {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--muted);
                 display: flex;
                 align-items: center;
                 gap: 5px;
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
             }
             .user-role-badge {
-                font-size: 10px;
+                font-size: 11px;
                 padding: 1px 7px;
                 border-radius: 99px;
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 font-weight: 500;
             }
             .role-admin {
@@ -244,7 +276,7 @@
                 border-color: var(--border);
             }
             .account-caret {
-                font-size: 9px;
+                font-size: 10px;
                 color: var(--hint);
                 margin-left: 1px;
             }
@@ -288,7 +320,7 @@
                 min-width: 0;
             }
             .account-name {
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
                 color: var(--text);
                 white-space: nowrap;
@@ -296,9 +328,9 @@
                 text-overflow: ellipsis;
             }
             .account-mail {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--muted);
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -317,8 +349,8 @@
                 border: none;
                 background: none;
                 border-radius: var(--radius-sm);
-                font-family: "DM Sans", sans-serif;
-                font-size: 12px;
+                font-family: var(--sans);
+                font-size: 13px;
                 color: var(--text);
                 text-align: left;
                 text-decoration: none;
@@ -337,7 +369,7 @@
             .auth-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(247, 246, 242, 0.96);
+                background: rgba(238, 240, 243, 0.96);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -364,7 +396,7 @@
                 margin-bottom: 8px;
             }
             .auth-msg {
-                font-size: 13px;
+                font-size: 14px;
                 color: var(--muted);
                 line-height: 1.55;
                 margin-bottom: 20px;
@@ -385,7 +417,7 @@
                 display: flex;
                 align-items: center;
                 gap: 5px;
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--hint);
             }
             .sync-dot {
@@ -433,11 +465,9 @@
                 flex-wrap: wrap;
             }
             .tb-label {
-                font-size: 11px;
+                font-size: 13px;
                 color: var(--muted);
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
+                font-family: var(--sans);
                 white-space: nowrap;
             }
             .tb-sep {
@@ -449,6 +479,11 @@
             .tb-spacer {
                 flex: 1;
             }
+            /* Ends a toolbar row: what follows starts the next one. */
+            .tb-break {
+                flex-basis: 100%;
+                height: 0;
+            }
 
             input[type="text"],
             input[type="date"],
@@ -456,8 +491,8 @@
             input:not([type]),
             select,
             textarea {
-                font-family: "DM Sans", sans-serif;
-                font-size: 13px;
+                font-family: var(--sans);
+                font-size: 14px;
                 border: 1px solid var(--border);
                 border-radius: var(--radius-sm);
                 padding: 5px 9px;
@@ -469,17 +504,23 @@
             input:focus,
             select:focus,
             textarea:focus {
-                border-color: var(--accent);
-                background: white;
+                border-color: var(--ink);
+                background: var(--surface);
+                box-shadow: 0 0 0 3px var(--ink-bg);
+            }
+            /* One keyboard focus ring for everything you can press. */
+            :is(button, a, [tabindex], summary):focus-visible {
+                outline: none;
+                box-shadow: var(--focus-ring);
             }
             input[type="date"] {
-                font-family: "DM Mono", monospace;
-                font-size: 12px;
+                font-family: var(--mono);
+                font-size: 13px;
             }
 
             .btn {
-                font-family: "DM Sans", sans-serif;
-                font-size: 12px;
+                font-family: var(--sans);
+                font-size: 13px;
                 font-weight: 500;
                 padding: 5px 13px;
                 border-radius: var(--radius-sm);
@@ -489,11 +530,11 @@
                 white-space: nowrap;
             }
             .btn-primary {
-                background: var(--text);
-                color: white;
+                background: var(--ink);
+                color: #fff;
             }
             .btn-primary:hover {
-                background: #333;
+                background: var(--ink-hover);
             }
             .btn-ghost {
                 background: transparent;
@@ -510,11 +551,11 @@
                 border-color: transparent;
             }
             .btn-danger:hover {
-                background: #f8d7d7;
+                background: #f6cbd5;
             }
             .btn-sm {
                 padding: 3px 9px;
-                font-size: 11px;
+                font-size: 12px;
             }
             .btn:disabled {
                 opacity: 0.45;
@@ -524,72 +565,98 @@
 
             .pill-group {
                 display: flex;
-                gap: 3px;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 4px;
             }
             .pill {
-                font-size: 11px;
-                font-family: "DM Sans", sans-serif;
-                padding: 3px 11px;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                font-family: var(--sans);
+                padding: 2px 10px;
                 border-radius: 99px;
                 border: 1px solid var(--border);
-                background: transparent;
+                background: var(--surface);
                 color: var(--muted);
                 cursor: pointer;
-                transition: all 0.1s;
+                transition: border-color 0.1s, color 0.1s;
             }
+            /* A selected chip is a filter, not an action: ink outline on an
+               ink tint, never the filled ink of a primary button. */
             .pill.active {
-                background: var(--text);
-                color: white;
-                border-color: var(--text);
+                background: var(--ink-bg);
+                color: var(--ink);
+                border-color: var(--ink);
+                font-weight: 500;
             }
             .pill:not(.active):hover {
                 border-color: var(--border-md);
                 color: var(--text);
             }
-
-            /* ── STAT BAR ── */
-            .stat-bar {
-                display: flex;
-                gap: 1px;
-                background: var(--border);
-                border-bottom: 1px solid var(--border);
-                flex-shrink: 0;
-                overflow-x: auto;
+            .pill-n {
+                font-family: var(--mono);
+                font-size: 12px;
+                color: var(--text);
             }
-            .stat-cell {
+            .pill-n:empty {
+                display: none;
+            }
+            .pill.active .pill-n {
+                color: var(--ink);
+            }
+            /* The copy tint of each status, as a swatch in front of its chip. */
+            .pill[data-sf]::before {
+                content: "";
+                width: 9px;
+                height: 9px;
+                border-radius: 2px;
+                display: none;
+            }
+            .pill[data-sf="Prepping"]::before,
+            .pill[data-sf="unbilled"]::before {
+                display: block;
                 background: var(--surface);
-                padding: 8px 16px;
-                flex: 1;
-                min-width: 90px;
-                white-space: nowrap;
+                box-shadow: inset 0 0 0 1px var(--border-md);
             }
-            .stat-label {
-                font-size: 10px;
-                color: var(--muted);
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                font-family: "DM Mono", monospace;
-                margin-bottom: 1px;
+            .pill[data-sf="Scheduled"]::before {
+                display: block;
+                background: var(--canary-bg);
+                box-shadow: inset 0 0 0 1px #e2d36f;
             }
-            .stat-val {
-                font-size: 18px;
-                font-weight: 500;
-                font-family: "DM Mono", monospace;
+            .pill[data-sf="Delivered"]::before {
+                display: block;
+                background: var(--blue-bg);
+                box-shadow: inset 0 0 0 1px var(--blue-mid);
             }
-            .stat-val.green {
-                color: var(--green);
+            .pill[data-sf="Undelivered"]::before,
+            .pill[data-sf="attention"]::before {
+                display: block;
+                background: var(--red-bg);
+                box-shadow: inset 0 0 0 1px #eeb2c0;
             }
-            .stat-val.amber {
+            .pill[data-sf="carry"]::before,
+            .pill[data-sf="deferred"]::before {
+                display: block;
+                background: var(--purple-bg);
+                box-shadow: inset 0 0 0 1px #d2c3ea;
+            }
+            .pill[data-sf="billed"]::before {
+                display: block;
+                background: var(--green-bg);
+                box-shadow: inset 0 0 0 1px #b5d8b1;
+            }
+            /* A gap a chip has to close: amber count while it is above 0. */
+            .pill-warn.has-n:not(.active) .pill-n {
                 color: var(--amber);
+                font-weight: 600;
             }
-            .stat-val.red {
-                color: var(--red);
-            }
-            .stat-val.blue {
-                color: var(--blue);
-            }
-            .stat-val.muted {
-                color: var(--hint);
+            .pill-sep {
+                width: 1px;
+                height: 16px;
+                background: var(--border);
+                margin: 0 4px;
             }
 
             /* ── DISPATCH BOARD ── */
@@ -614,7 +681,7 @@
             .board-loading {
                 position: absolute;
                 inset: 0;
-                background: rgba(247, 246, 242, 0.7);
+                background: rgba(238, 240, 243, 0.7);
                 display: none;
                 align-items: center;
                 justify-content: center;
@@ -637,9 +704,10 @@
 
             table.dispatch-table {
                 width: 100%;
-                min-width: 1620px; /* >= sum of column widths, so columns (e.g. Status) scroll instead of squishing */
+                min-width: 1340px; /* fixed widths (1060) + 140 each for Outlet and Address; fits a 1366 screen */
+                table-layout: fixed;
                 border-collapse: collapse;
-                font-size: 12px;
+                font-size: 13px;
                 user-select: none; /* rows are click-to-select; shift-click shouldn't smear a text selection */
             }
             table.dispatch-table input,
@@ -655,11 +723,9 @@
                 padding: 0 10px;
                 height: 36px;
                 text-align: left;
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: 500;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                font-family: var(--sans);
                 color: var(--muted);
                 white-space: nowrap;
             }
@@ -693,13 +759,13 @@
                 border-bottom: 1px solid var(--border);
             }
             table.dispatch-table tbody tr.fo-grp-1 td:first-child {
-                background: #e4e0d2;
+                background: var(--band);
             }
             table.dispatch-table tbody tr.load-hover td:first-child {
-                background: #eef1f5;
+                background: var(--ink-bg);
             }
             table.dispatch-table tbody tr.selected td:first-child {
-                background: var(--blue-bg);
+                background: var(--ink-bg);
             }
 
             table.dispatch-table tbody tr {
@@ -710,28 +776,28 @@
             /* Alternating shade groups consecutive trips of the same FO. A warm
                neutral, distinct from the white rows and the blue selected row. */
             table.dispatch-table tbody tr.fo-grp-1 {
-                background: #e4e0d2;
+                background: var(--band);
             }
             /* The deeper shade is close to --border, which would swallow the
                grid lines — give these rows a darker divider so they stay visible. */
             table.dispatch-table tbody tr.fo-grp-1,
             table.dispatch-table tbody tr.fo-grp-1 td:first-child {
-                border-bottom-color: #cdc6b2;
+                border-bottom-color: var(--band-line);
             }
             table.dispatch-table tbody tr.fo-grp-1 td:first-child::after {
-                background: #cdc6b2;
+                background: var(--band-line);
             }
             table.dispatch-table tbody tr.fo-grp-1 .col-divider {
-                border-left-color: #cdc6b2;
+                border-left-color: var(--band-line);
             }
             /* Hover is applied to every row of a load by hoverLoad(), not by
                :hover — a merged cell is transparent, so tinting only the row
                under the cursor would light up part of it and not the rest. */
             table.dispatch-table tbody tr.load-hover {
-                background: #eef1f5;
+                background: var(--ink-bg);
             }
             table.dispatch-table tbody tr.selected {
-                background: var(--blue-bg);
+                background: var(--ink-bg);
             }
             table.dispatch-table tbody tr.source-manual td:first-child {
                 border-left: 3px solid var(--amber);
@@ -747,7 +813,6 @@
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                max-width: 180px;
             }
             table.dispatch-table tbody td:first-child {
                 padding-left: 14px;
@@ -757,8 +822,8 @@
             }
 
             .td-fo {
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
+                font-family: var(--mono);
+                font-size: 12px;
                 color: var(--muted);
             }
 
@@ -766,19 +831,19 @@
                day. The tr carries cg-N (stripe on the FO cell) and the badge
                inside the FO cell repeats the color, so groups read together
                even when the FO shading alternates. */
-            .cg-0 { --cg-color: #1e88e5; }
-            .cg-1 { --cg-color: #43a047; }
-            .cg-2 { --cg-color: #e53935; }
-            .cg-3 { --cg-color: #8e24aa; }
-            .cg-4 { --cg-color: #f4511e; }
-            .cg-5 { --cg-color: #00897b; }
+            .cg-0 { --cg-color: #2f6fb3; }
+            .cg-1 { --cg-color: #3d8a3a; }
+            .cg-2 { --cg-color: #b8324f; }
+            .cg-3 { --cg-color: #6b46a8; }
+            .cg-4 { --cg-color: #c0601a; }
+            .cg-5 { --cg-color: #1f7d75; }
             tr[class*="cg-"] .td-crew {
                 box-shadow: inset 3px 0 0 var(--cg-color);
             }
             .convoy-badge {
                 display: inline-block;
-                font-family: "DM Mono", monospace;
-                font-size: 9px;
+                font-family: var(--mono);
+                font-size: 10px;
                 font-weight: 500;
                 padding: 0 5px;
                 border-radius: 99px;
@@ -798,9 +863,9 @@
             .color-chip {
                 display: inline-block;
                 max-width: 100%;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: 500;
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 padding: 1px 7px;
                 border-radius: 99px;
                 border: 1px solid var(--border);
@@ -859,7 +924,7 @@
                 cursor: pointer;
             }
             .cb-rail-sort-icon {
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--muted);
                 pointer-events: none;
             }
@@ -877,7 +942,7 @@
                 background: none;
                 border: none;
                 padding: 0;
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--muted);
                 cursor: pointer;
                 line-height: 1;
@@ -899,7 +964,7 @@
                 font-style: italic;
             }
             .cb-empty {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--hint);
                 font-style: italic;
                 padding: 6px 2px;
@@ -935,12 +1000,12 @@
                 border-radius: 99px;
                 background: var(--accent);
                 color: #fff;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: 600;
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
             }
             .cb-crew-line {
-                font-size: 12px;
+                font-size: 13px;
             }
             .cb-crew-plate {
                 display: flex;
@@ -949,8 +1014,8 @@
                 margin-top: 3px;
             }
             .cb-crew-platenum {
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
+                font-family: var(--mono);
+                font-size: 12px;
                 color: var(--muted);
             }
             /* The rows a crew drop will land on, highlighted as one block —
@@ -963,7 +1028,7 @@
                hover tint. */
             table.dispatch-table tbody tr.cb-drop-hover,
             table.dispatch-table tbody tr.cb-drop-hover td:first-child {
-                background: var(--blue-bg);
+                background: var(--ink-bg);
             }
 
             /* Row-reorder drag handle, sits inside the frozen FO cell. One per
@@ -975,7 +1040,7 @@
                 cursor: grab;
                 color: var(--muted);
                 margin-right: 4px;
-                font-size: 13px;
+                font-size: 14px;
                 line-height: 1;
             }
             .row-drag-handle:active {
@@ -1009,7 +1074,7 @@
                 opacity: 0.45;
             }
             @keyframes row-settle {
-                from { background: var(--blue-bg); }
+                from { background: var(--ink-bg); }
             }
             table.dispatch-table tbody tr.just-moved,
             table.dispatch-table tbody tr.just-moved td:first-child {
@@ -1039,8 +1104,8 @@
             }
 
             .selection-count {
-                font-size: 11px;
-                font-family: "DM Mono", monospace;
+                font-size: 12px;
+                font-family: var(--mono);
                 color: var(--muted);
                 white-space: nowrap;
             }
@@ -1065,7 +1130,7 @@
                 background: var(--surface);
             }
             .ds-convoy {
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: 600;
                 color: var(--purple);
                 margin-bottom: 4px;
@@ -1074,16 +1139,16 @@
                 display: flex;
                 flex-wrap: wrap;
                 gap: 4px 10px;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
             }
             .ds-plate {
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
             }
             .ds-wb {
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 color: var(--muted);
-                font-size: 11px;
+                font-size: 12px;
                 margin-left: auto;
                 white-space: nowrap;
             }
@@ -1093,7 +1158,7 @@
                 padding-top: 5px;
             }
             .ds-stop {
-                font-size: 12px;
+                font-size: 13px;
                 margin-bottom: 6px;
             }
             .ds-stop-top {
@@ -1105,7 +1170,7 @@
                 font-weight: 600;
             }
             .ds-fo {
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 font-weight: 600;
                 white-space: nowrap;
             }
@@ -1119,55 +1184,54 @@
             .ds-area,
             .ds-qty {
                 color: var(--muted);
-                font-size: 11px;
+                font-size: 12px;
                 white-space: nowrap;
             }
             .ds-remarks {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--amber);
                 margin-left: 16px;
             }
             .ds-address {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--muted);
                 margin-left: 16px;
             }
             .td-outlet {
                 font-weight: 500;
-                max-width: 200px !important;
             }
             .td-outlet .outlet-in {
                 font-weight: 500;
                 text-overflow: ellipsis;
             }
             .td-address {
-                max-width: 220px !important;
                 color: var(--muted);
             }
             .td-area {
                 color: var(--muted);
-                font-size: 11px;
+                font-size: 12px;
             }
             .td-rdd {
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
+                font-family: var(--sans);
+                font-size: 12px;
                 color: var(--muted);
                 white-space: nowrap;
             }
             .td-qty {
-                font-family: "DM Mono", monospace;
+                font-family: var(--sans);
                 text-align: right;
             }
 
             .td-wb {
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
+                font-family: var(--mono);
+                font-size: 12px;
             }
 
             /* Inline cell editors (dispatch table) */
             .cell-select,
-            .cell-input {
-                font-size: 11px;
+            .cell-input,
+            input.cell-input {
+                font-size: 12px;
                 padding: 3px 6px;
                 width: 100%;
                 max-width: 100%;
@@ -1176,19 +1240,20 @@
                 border-radius: var(--radius-sm);
             }
             .cell-select:hover,
-            .cell-input:hover {
+            .cell-input:hover,
+            input.cell-input:hover {
                 border-color: var(--border);
                 background: var(--bg);
             }
             .cell-select:focus,
-            .cell-input:focus {
+            .cell-input:focus,
+            input.cell-input:focus {
                 border-color: var(--accent);
                 background: white;
             }
             .td-crew,
             .td-status,
             .td-remarks {
-                max-width: 180px !important;
                 white-space: normal;
                 overflow: visible;
             }
@@ -1218,12 +1283,12 @@
                 gap: 5px;
             }
             .crew-card-plate {
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
+                font-family: var(--mono);
+                font-size: 12px;
                 font-weight: 500;
             }
             .crew-card-crew {
-                font-size: 11px;
+                font-size: 12px;
             }
             .cb-unassign {
                 margin-left: auto;
@@ -1231,7 +1296,7 @@
                 background: transparent;
                 color: var(--hint);
                 cursor: pointer;
-                font-size: 11px;
+                font-size: 12px;
                 padding: 0 4px;
                 display: flex;
                 align-items: center;
@@ -1242,19 +1307,18 @@
             .cb-unassign:hover {
                 color: var(--red);
             }
-            .cell-select.sc-scheduled {
-                color: var(--blue);
+            /* The status select is filled with its copy tint, so the
+               column reads as a stack of colored slips. */
+            .cell-select[class*="sc-"] {
+                font-weight: 500;
+                border-color: transparent;
             }
-            .cell-select.sc-delivered {
-                color: var(--green);
+            .cell-select.sc-prepping {
+                border-color: var(--border-md);
+                box-shadow: none;
             }
-            .cell-select.sc-undelivered,
-            .cell-select.sc-fouln,
-            .cell-select.sc-foutr {
-                color: var(--red);
-            }
-            .cell-select.sc-redeliver {
-                color: var(--purple);
+            .cell-select[class*="sc-"]:hover {
+                filter: brightness(0.97);
             }
             .cell-select.badge-driver {
                 background: transparent;
@@ -1282,7 +1346,7 @@
                 border-radius: var(--radius-sm);
                 background: transparent;
                 cursor: pointer;
-                font-size: 11px;
+                font-size: 12px;
                 padding: 2px 6px;
                 color: var(--muted);
                 flex-shrink: 0;
@@ -1300,7 +1364,7 @@
                 border-radius: var(--radius-sm);
                 background: transparent;
                 cursor: pointer;
-                font-size: 12px;
+                font-size: 13px;
                 padding: 1px 5px;
                 color: var(--muted);
                 flex-shrink: 0;
@@ -1331,76 +1395,76 @@
                 display: inline-flex;
                 align-items: center;
                 gap: 4px;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: 500;
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 padding: 2px 8px;
                 border-radius: 99px;
                 white-space: nowrap;
             }
+            /* Status as the copy it would be in the booklet. */
             .sc-prepping {
-                background: var(--border);
+                background: var(--surface);
                 color: var(--muted);
+                box-shadow: inset 0 0 0 1px var(--border-md);
             }
             .sc-backlog {
-                background: #ede7f6;
-                color: #5e35b1;
+                background: var(--purple-bg);
+                color: var(--purple);
             }
-            .sc-scheduled {
+            .sc-scheduled,
+            .sc-preload {
+                background: var(--canary-bg);
+                color: var(--canary);
+            }
+            .sc-delivered,
+            .sc-twoday {
                 background: var(--blue-bg);
                 color: var(--blue);
             }
-            .sc-preload {
-                background: #e0f2f1;
-                color: #00695c;
-            }
-            .sc-delivered {
-                background: var(--green-bg);
-                color: var(--green);
-            }
-            .sc-undelivered {
+            .sc-undelivered,
+            .sc-fouln,
+            .sc-foutr {
                 background: var(--red-bg);
                 color: var(--red);
-            }
-            .sc-fouln {
-                background: #fff3e0;
-                color: #bf6800;
-            }
-            .sc-foutr {
-                background: var(--amber-bg);
-                color: var(--amber);
             }
             .sc-redeliver {
                 background: var(--purple-bg);
                 color: var(--purple);
             }
-            .sc-twoday {
-                background: #e8f5e9;
-                color: #2e7d32;
-            }
 
             .crew-driver {
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 500;
             }
             .crew-helper {
-                font-size: 10px;
+                font-size: 11px;
                 color: var(--muted);
                 font-style: italic;
             }
             .crew-empty {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--hint);
                 font-style: italic;
             }
 
             /* Waybill cell */
+            /* The waybill number is what the board exists to produce: a
+               confirmed one is printed in carbon ink; a suggested one is
+               still a pencil mark. */
             .wb-confirmed {
-                color: var(--text);
+                color: var(--ink);
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: -0.01em;
             }
             .wb-suggested {
-                color: var(--hint);
-                font-style: italic;
+                color: var(--muted);
+                border-bottom: 1px dashed var(--border-md);
+            }
+            .wb-inline .wb-in {
+                font-family: var(--mono);
+                font-size: 13px;
             }
             .wb-none {
                 color: var(--hint);
@@ -1426,26 +1490,24 @@
                 color: var(--muted);
             }
             .empty-board .sub {
-                font-size: 12px;
+                font-size: 13px;
                 text-align: center;
                 max-width: 280px;
             }
 
             .field-label {
-                font-size: 10px;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                font-size: 12px;
+                font-family: var(--sans);
                 color: var(--hint);
                 margin-bottom: 4px;
             }
             .field-value {
-                font-size: 13px;
+                font-size: 14px;
                 font-weight: 500;
             }
             .field-value.mono {
-                font-family: "DM Mono", monospace;
-                font-size: 12px;
+                font-family: var(--mono);
+                font-size: 13px;
                 font-weight: 400;
             }
             .field-value.muted {
@@ -1473,41 +1535,8 @@
                 overflow: hidden;
             }
 
-            .drop-zone {
-                margin: 16px;
-                border: 2px dashed var(--border-md);
-                border-radius: var(--radius);
-                padding: 28px 16px;
-                text-align: center;
-                cursor: pointer;
-                transition: all 0.15s;
-                background: var(--bg);
-            }
-            .drop-zone:hover,
-            .drop-zone.drag-over {
-                border-color: var(--accent);
-                background: var(--blue-bg);
-            }
-            .drop-zone .dz-icon {
-                font-size: 28px;
-                margin-bottom: 8px;
-            }
-            .drop-zone .dz-title {
-                font-size: 13px;
-                font-weight: 500;
-                color: var(--text);
-            }
-            .drop-zone .dz-sub {
-                font-size: 11px;
-                color: var(--muted);
-                margin-top: 4px;
-            }
-            .drop-zone input[type="file"] {
-                display: none;
-            }
-
             .import-config {
-                padding: 0 16px 16px;
+                padding: 16px;
                 display: flex;
                 flex-direction: column;
                 gap: 10px;
@@ -1545,7 +1574,7 @@
                 flex-shrink: 0;
             }
             .preview-count {
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--muted);
             }
             .preview-count strong {
@@ -1560,7 +1589,7 @@
             table.preview-table {
                 width: 100%;
                 border-collapse: collapse;
-                font-size: 12px;
+                font-size: 13px;
             }
             table.preview-table thead th {
                 position: sticky;
@@ -1571,11 +1600,9 @@
                 padding: 0 10px;
                 height: 30px;
                 text-align: left;
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: 500;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                font-family: var(--sans);
                 color: var(--muted);
                 white-space: nowrap;
             }
@@ -1594,14 +1621,14 @@
             }
 
             .row-toggle-btn {
-                font-size: 10px;
+                font-size: 11px;
                 padding: 2px 8px;
                 border: 1px solid var(--border);
                 border-radius: var(--radius-sm);
                 cursor: pointer;
                 background: transparent;
                 color: var(--muted);
-                font-family: "DM Sans", sans-serif;
+                font-family: var(--sans);
             }
             .row-toggle-btn:hover {
                 background: var(--red-bg);
@@ -1614,7 +1641,7 @@
                 border-color: var(--green);
             }
             table.preview-table tbody tr.excluded .row-toggle-btn:hover {
-                background: #d6edbd;
+                background: #cbe6c8;
             }
 
             .empty-import {
@@ -1632,11 +1659,9 @@
             .col-head {
                 padding: 8px 12px;
                 border-bottom: 1px solid var(--border);
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: 500;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                font-family: var(--sans);
                 color: var(--muted);
                 display: flex;
                 align-items: center;
@@ -1659,7 +1684,7 @@
 
             .list-item {
                 padding: 8px 12px;
-                font-size: 12px;
+                font-size: 13px;
                 display: flex;
                 align-items: center;
                 gap: 7px;
@@ -1675,7 +1700,7 @@
                 background: var(--bg);
             }
             .list-item.selected {
-                background: var(--blue-bg);
+                background: var(--ink-bg);
             }
             .list-item.dimmed {
                 opacity: 0.4;
@@ -1685,20 +1710,19 @@
                 line-height: 1.3;
             }
             .item-sub {
-                font-size: 10px;
+                font-size: 11px;
                 color: var(--muted);
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 margin-top: 1px;
             }
 
             .badge {
-                font-size: 9px;
+                font-size: 12px;
                 font-weight: 500;
                 padding: 1px 6px;
                 border-radius: 99px;
                 flex-shrink: 0;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
+                font-family: var(--sans);
             }
             .badge-driver {
                 background: var(--blue-bg);
@@ -1716,7 +1740,7 @@
             table.data-table {
                 width: 100%;
                 border-collapse: collapse;
-                font-size: 12px;
+                font-size: 13px;
             }
             table.data-table thead th {
                 position: sticky;
@@ -1727,11 +1751,9 @@
                 padding: 0 12px;
                 height: 32px;
                 text-align: left;
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: 500;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                font-family: var(--sans);
                 color: var(--muted);
                 white-space: nowrap;
             }
@@ -1740,7 +1762,7 @@
                 transition: background 0.07s;
             }
             table.data-table tbody tr:hover {
-                background: #fafaf8;
+                background: var(--bg);
             }
             table.data-table tbody td {
                 padding: 0 12px;
@@ -1777,11 +1799,9 @@
                 cursor: grabbing;
             }
             .emp-group-lbl {
-                font-size: 9px;
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
+                font-size: 12px;
                 color: var(--hint);
-                font-family: "DM Mono", monospace;
+                font-family: var(--sans);
                 padding: 10px 12px 3px;
             }
 
@@ -1794,7 +1814,7 @@
                 margin: 6px 8px;
             }
             .roster-truck-card.drop-hover {
-                background: var(--blue-bg);
+                background: var(--ink-bg);
                 outline: 2px dashed var(--accent);
                 outline-offset: -2px;
             }
@@ -1804,15 +1824,15 @@
                 gap: 6px;
             }
             .rtc-plate {
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 font-size: 14px;
                 font-weight: 500;
                 letter-spacing: 0.03em;
             }
             .rtc-meta {
-                font-size: 10px;
+                font-size: 11px;
                 color: var(--muted);
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 margin-top: 2px;
             }
             .rtc-crew {
@@ -1829,7 +1849,7 @@
                 border: 1px solid var(--border);
                 border-radius: var(--radius-sm);
                 background: var(--surface);
-                font-size: 12px;
+                font-size: 13px;
                 cursor: grab;
             }
             .rtc-chip:active {
@@ -1839,13 +1859,13 @@
                 font-weight: 500;
             }
             .rtc-empty {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--hint);
                 font-style: italic;
                 padding: 2px 0;
             }
             table.data-table tbody tr.row-selected {
-                background: var(--blue-bg);
+                background: var(--ink-bg);
             }
 
             /* ── ADMIN MASTER-DETAIL PANELS (Outlets, Trucks, Employees, Billing Categories) ── */
@@ -1904,18 +1924,16 @@
                 margin-bottom: 10px;
             }
             .settings-section-title {
-                font-family: "DM Mono", monospace;
-                font-size: 13px;
+                font-family: var(--sans);
+                font-size: 14px;
                 font-weight: 500;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
                 color: var(--text);
             }
             /* Section description: a normal-case sentence, not an uppercase
                tb-label crammed into the header row. */
             .settings-section-hint {
                 margin: -2px 0 12px;
-                font-size: 11px;
+                font-size: 12px;
                 line-height: 1.5;
                 color: var(--hint);
             }
@@ -1953,14 +1971,12 @@
                 background: var(--red);
                 color: #fff;
                 padding: 10px 14px;
-                font-family: "DM Mono", monospace;
-                font-size: 13px;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                font-family: var(--sans);
+                font-size: 14px;
             }
             .danger-zone-body {
                 padding: 14px;
-                font-size: 13px;
+                font-size: 14px;
                 line-height: 1.55;
             }
             .danger-lede {
@@ -1972,14 +1988,11 @@
                 font-size: 14px;
             }
             .danger-env {
-                text-transform: uppercase;
             }
             .danger-sub {
                 margin: 0 0 4px;
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
+                font-family: var(--sans);
+                font-size: 13px;
                 color: var(--muted);
             }
             .danger-list {
@@ -1998,13 +2011,13 @@
                 gap: 6px;
             }
             .danger-confirm code {
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 text-transform: none;
                 letter-spacing: 0;
                 color: var(--red);
             }
             .danger-confirm input {
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
             }
             .danger-confirm .btn {
                 align-self: flex-start;
@@ -2019,7 +2032,7 @@
             .loading-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(247, 246, 242, 0.85);
+                background: rgba(238, 240, 243, 0.85);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -2041,7 +2054,7 @@
                 }
             }
             .loading-text {
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--muted);
             }
 
@@ -2053,7 +2066,7 @@
                 transform: translateX(-50%);
                 background: var(--text);
                 color: white;
-                font-size: 12px;
+                font-size: 13px;
                 padding: 9px 16px;
                 border-radius: var(--radius);
                 box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
@@ -2062,7 +2075,7 @@
                 pointer-events: none;
                 transition: opacity 0.18s;
                 white-space: nowrap;
-                font-family: "DM Sans", sans-serif;
+                font-family: var(--sans);
                 max-width: 90vw;
             }
             .toast.show {
@@ -2082,7 +2095,7 @@
             .modal-backdrop {
                 position: fixed;
                 inset: 0;
-                background: rgba(28, 27, 24, 0.35);
+                background: rgba(23, 27, 34, 0.4);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -2153,10 +2166,8 @@
                 gap: 4px;
             }
             .form-label {
-                font-size: 11px;
-                font-family: "DM Mono", monospace;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
+                font-size: 13px;
+                font-family: var(--sans);
                 color: var(--muted);
             }
             .form-row input,
@@ -2189,7 +2200,7 @@
                 resize: none;
             }
             .form-hint {
-                font-size: 10px;
+                font-size: 11px;
                 color: var(--hint);
             }
 
@@ -2238,14 +2249,14 @@
             /* The band in use today, and a gap in it: a trip on that row
                cannot be priced. Two classes beat the rm-alt shading. */
             #rate-matrix-table tr td.rm-live {
-                background: var(--blue-bg);
+                background: var(--ink-bg);
             }
             #rate-matrix-table tr td.rm-live.rm-missing {
                 background: var(--amber-bg);
                 box-shadow: inset 0 0 0 1px var(--amber);
             }
             .bm-edit-warn {
-                font-size: 12px;
+                font-size: 13px;
                 padding: 8px 12px;
                 margin-bottom: 8px;
                 background: var(--amber-bg);
@@ -2312,13 +2323,13 @@
                 gap: 8px;
             }
             .whatsnew-version {
-                font-family: "DM Mono", monospace;
-                font-size: 12px;
+                font-family: var(--mono);
+                font-size: 13px;
                 font-weight: 500;
                 color: var(--blue);
             }
             .whatsnew-date {
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--hint);
             }
             .whatsnew-title {
@@ -2333,10 +2344,8 @@
             }
             .whatsnew-notes h4 {
                 margin: 16px 0 6px;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
-                letter-spacing: 0.04em;
-                text-transform: uppercase;
                 color: var(--muted);
             }
             .whatsnew-notes p {
@@ -2350,7 +2359,7 @@
                 margin: 5px 0;
             }
             .whatsnew-notes code {
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
                 font-size: 12.5px;
                 background: var(--bg);
                 border-radius: 4px;
@@ -2358,13 +2367,13 @@
             }
             .whatsnew-empty {
                 color: var(--muted);
-                font-size: 13px;
+                font-size: 14px;
             }
 
             /* Billing: why a line could not be priced in full, on the line */
             .bl-warn {
                 color: var(--amber);
-                font-size: 11px;
+                font-size: 12px;
             }
             .pill.bl-chip-warn:not(.active) {
                 color: var(--amber);
@@ -2385,21 +2394,23 @@
                 background: none;
                 padding: 0;
                 color: var(--accent);
-                font-family: "DM Mono", monospace;
-                font-size: 11px;
+                font-family: var(--mono);
+                font-size: 12px;
                 cursor: pointer;
                 text-decoration: underline;
             }
-            .bl-empty {
+            .bl-empty,
+            .table-empty {
                 text-align: center;
-                color: var(--hint);
-                padding: 24px !important;
+                color: var(--muted);
+                padding: 32px 24px !important;
+                white-space: normal;
             }
             .bl-preview-fields {
                 display: flex;
                 gap: 16px;
                 margin-bottom: 8px;
-                font-size: 12px;
+                font-size: 13px;
                 color: var(--muted);
             }
             .bl-preview-fields label {
@@ -2408,7 +2419,7 @@
                 gap: 6px;
             }
             .bl-number-warn:not(:empty) {
-                font-size: 12px;
+                font-size: 13px;
                 padding: 8px 12px;
                 margin-bottom: 8px;
                 background: var(--amber-bg);
@@ -2438,7 +2449,7 @@
                 color: var(--muted);
                 cursor: pointer;
                 padding: 0 4px;
-                font-size: 12px;
+                font-size: 13px;
             }
             .bl-caret:hover {
                 color: var(--text);
@@ -2449,12 +2460,12 @@
             }
             .bl-detail-meta {
                 color: var(--muted);
-                font-size: 12px;
+                font-size: 13px;
                 margin-bottom: 8px;
             }
             .bl-stops {
                 border-collapse: collapse;
-                font-size: 12px;
+                font-size: 13px;
                 margin-bottom: 8px;
             }
             .bl-stops th,
@@ -2465,7 +2476,7 @@
             }
             .bl-stops .n {
                 text-align: right;
-                font-family: "DM Mono", monospace;
+                font-family: var(--mono);
             }
             .bl-stops tr.bl-top td {
                 font-weight: 600;
@@ -2473,6 +2484,118 @@
             .bl-rules {
                 margin: 0;
                 padding-left: 18px;
-                font-size: 12px;
+                font-size: 13px;
                 line-height: 1.6;
+            }
+
+            /* ── OVERHAUL: RECORDS GRIDS ── */
+            /* Remove shows on the row you point at or tab into; Restore on an
+               inactive row stays, since it is the reason to look at it. */
+            .row-action {
+                border-color: var(--border);
+            }
+            @media (hover: hover) {
+                table.data-table tbody tr .row-action:not(.restore) {
+                    opacity: 0;
+                }
+                table.data-table tbody tr:is(:hover, :focus-within) .row-action {
+                    opacity: 1;
+                }
+            }
+
+            /* ── OVERHAUL: ROSTER ── */
+            /* Trucks fill the width in columns; the unassigned crew is a
+               narrow strip, so a drag crosses less of the screen. */
+            #truck-list {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+                gap: 8px;
+                padding: 8px;
+                align-content: start;
+            }
+            #truck-list > :not(.roster-truck-card) {
+                grid-column: 1 / -1;
+            }
+            #truck-list .roster-truck-card {
+                margin: 0;
+            }
+            .roster-emps {
+                flex: 0 0 300px;
+            }
+            @media (max-width: 768px) {
+                .roster-emps {
+                    flex: 1;
+                }
+            }
+
+            /* ── OVERHAUL: IMPORT ── */
+            #import-preview-table .empty-import {
+                margin: 24px;
+                min-height: calc(100% - 48px);
+                border: 2px dashed var(--border-md);
+                border-radius: var(--radius);
+                cursor: pointer;
+            }
+            #import-preview-table .empty-import:hover,
+            #import-preview-table.drag-over .empty-import {
+                border-color: var(--ink);
+                background: var(--ink-bg);
+            }
+            #import-preview-table.drag-over {
+                box-shadow: inset 0 0 0 2px var(--ink);
+            }
+            .empty-import-title {
+                font-size: 17px;
+                font-weight: 600;
+                color: var(--text);
+            }
+            .empty-import-sub {
+                font-size: 13px;
+                color: var(--muted);
+                text-align: center;
+                max-width: 320px;
+            }
+
+            /* ── OVERHAUL: MATRIX ── */
+            #rate-matrix-table.rm-narrow {
+                width: auto;
+                min-width: 360px;
+            }
+
+            /* ── OVERHAUL: NARROW SCREENS ── */
+            /* The nav scrolls sideways instead of running off the screen, so
+               every panel stays reachable on a phone. */
+            @media (max-width: 1400px) {
+                .nav-group-label {
+                    display: none;
+                }
+            }
+            @media (max-width: 768px) {
+                .header {
+                    gap: 8px;
+                    padding: 0 10px;
+                }
+                .logo-text {
+                    display: none;
+                }
+                .nav {
+                    margin-left: 0;
+                    min-width: 0;
+                    overflow-x: auto;
+                    scrollbar-width: none;
+                }
+                .nav-group {
+                    flex-shrink: 0;
+                }
+                .header-right .app-version,
+                .header-right .sync-info span,
+                #user-email {
+                    display: none;
+                }
+                .toolbar {
+                    padding: 8px 10px;
+                }
+                .pill-sep {
+                    display: none;
+                }
             }

@@ -171,8 +171,8 @@
                         const offCycle = !isTuesdayIso(mdyToIso(p.effectiveDate));
                         return `<tr>
   <td>${esc(p.effectiveDate)}${offCycle ? ' <span class="tb-label" title="The DOE week starts on a Tuesday">not a Tuesday</span>' : ""}</td>
-  <td style="font-family:'DM Mono',monospace">${Number(p.dieselPrice).toFixed(2)}</td>
-  <td style="font-family:'DM Mono',monospace;color:var(--muted)">${esc(bandLabelForPrice(p.dieselPrice))}</td>
+  <td style="font-family:'IBM Plex Mono',monospace">${Number(p.dieselPrice).toFixed(2)}</td>
+  <td style="font-family:'IBM Plex Mono',monospace;color:var(--muted)">${esc(bandLabelForPrice(p.dieselPrice))}</td>
   <td style="color:var(--muted);font-size:11px">${esc(p.addedBy)}</td>
   <td>${
       canEditRates
@@ -337,6 +337,11 @@
                 const focus =
                     document.getElementById("bm-focus-band").checked && liveBand;
                 const cols = focus ? [liveBand] : FUEL_BANDS;
+                // One band column needs no full-width table: keep the rate
+                // next to its area.
+                document
+                    .getElementById("rate-matrix-table")
+                    .classList.toggle("rm-narrow", cols.length < 6);
 
                 const missingOnly = document.getElementById("bm-missing").checked && liveBand;
                 const isMissing = (r) => r.bands[liveBand] === null || r.bands[liveBand] === undefined;
@@ -362,7 +367,7 @@
                     cols
                         .map(
                             (b) =>
-                                `<th style="width:70px${b === liveBand ? ";background:var(--blue-bg)" : ""}">${esc(b)}</th>`,
+                                `<th style="width:70px${b === liveBand ? ";background:var(--ink-bg)" : ""}">${esc(b)}</th>`,
                         )
                         .join("") +
                     `</tr>`;
@@ -398,7 +403,7 @@
                                 const cls = b !== liveBand ? "" : shown === "" ? "rm-live rm-missing" : "rm-live";
                                 return editable
                                     ? `<td class="${cls}"><input class="cell-input" style="width:64px;text-align:right" value="${esc(shown)}" onchange="saveRateCell(${r.id},'${b}',this.value)"></td>`
-                                    : `<td class="${cls}" style="text-align:right;font-family:'DM Mono',monospace">${esc(shown) || "—"}</td>`;
+                                    : `<td class="${cls}" style="text-align:right;font-family:'IBM Plex Mono',monospace">${esc(shown) || "—"}</td>`;
                             })
                             .join("");
 

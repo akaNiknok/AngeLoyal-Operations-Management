@@ -3,13 +3,16 @@
             // parseConvoyFills needs them to scope the fill scan.
             let importParseMeta = null;
 
+            // The whole preview area takes a dropped file.
             function handleDragOver(e) {
                 e.preventDefault();
-                document.getElementById("drop-zone").classList.add("drag-over");
+                document
+                    .getElementById("import-preview-table")
+                    .classList.add("drag-over");
             }
             function handleDragLeave() {
                 document
-                    .getElementById("drop-zone")
+                    .getElementById("import-preview-table")
                     .classList.remove("drag-over");
             }
             function handleDrop(e) {
@@ -18,6 +21,8 @@
                 const f = e.dataTransfer.files[0];
                 if (f) processFile(f);
             }
+            const EMPTY_IMPORT_HTML = `<div class="empty-import"><div class="empty-import-title">Drop the Rebisco route file here</div><div class="empty-import-sub">Or click to browse for the .xlsx. You check the rows here before you import them.</div></div>`;
+
             function handleFileSelect(e) {
                 const f = e.target.files[0];
                 if (f) processFile(f);
@@ -498,13 +503,13 @@
             .map((r, i) => {
                 const exc = importExcluded.has(i);
                 return `<tr class="${exc ? "excluded" : ""}">
-            <td style="font-family:'DM Mono',monospace;font-size:11px">${esc(r.foNumber) || "—"}</td>
+            <td style="font-family:'IBM Plex Mono',monospace;font-size:11px">${esc(r.foNumber) || "—"}</td>
             <td>${esc(r.outletName) || "—"}</td>
             <td style="font-size:11px;color:var(--muted)">${esc(r.area) || "—"}</td>
-            <td style="font-family:'DM Mono',monospace;text-align:right">${r.quantity || "—"}</td>
+            <td style="font-family:'IBM Plex Mono',monospace;text-align:right">${r.quantity || "—"}</td>
             <td style="font-size:11px;font-weight:500">${esc(r.displayType) || "—"}</td>
             <td style="font-size:11px;color:var(--muted)">${esc(r.restrictions) || "—"}</td>
-            <td style="font-family:'DM Mono',monospace;font-size:11px">${r.convoyGroup ? "C" + esc(r.convoyGroup) : ""}</td>
+            <td style="font-family:'IBM Plex Mono',monospace;font-size:11px">${r.convoyGroup ? "C" + esc(r.convoyGroup) : ""}</td>
             <td><button class="row-toggle-btn" onclick="toggleRow(${i})">${exc ? "Include" : "Exclude"}</button></td>
           </tr>`;
             })
@@ -646,5 +651,5 @@
                 document.getElementById("preview-toolbar").style.display =
                     "none";
                 document.getElementById("import-preview-table").innerHTML =
-                    `<div class="empty-import"><div style="font-size:32px">📤</div><div style="font-size:13px;font-weight:500;color:var(--muted)">No file loaded</div><div style="font-size:12px;text-align:center;max-width:260px;color:var(--hint)">Upload the Rebisco route Excel file to preview and review rows before importing.</div></div>`;
+                    EMPTY_IMPORT_HTML;
             }

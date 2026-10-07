@@ -404,7 +404,6 @@
                                 ? `<input class="cell-input" value="${esc(val)}" onchange="updateOutletField(${o.id},'${field}',this.value)">`
                                 : esc(val) || "—";
                         return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${o.id}</td>
     <td>${f("outletName", o.outletName)}</td>
     <td>${f("area", o.area)}</td>
     <td>${f("address", o.address)}</td>

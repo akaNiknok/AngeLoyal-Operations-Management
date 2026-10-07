@@ -1,7 +1,7 @@
 // ── ENVIRONMENT CONFIG ────────────────────────────────────────
 // The backend is a Pages Function on the same origin (/api), so the page
-// never has to know which environment it is in — only the Settings danger
-// zone shows the label. No build step, no env vars.
+// never has to know which environment it is in — only the header tag and the
+// Settings danger zone show the label. No build step, no env vars.
 const OMS_ENVIRONMENTS = {
     "angeloyal-oms.pages.dev": { label: "prod" },
     "develop.angeloyal-oms.pages.dev": { label: "dev" },
@@ -11,6 +11,15 @@ const OMS_ENVIRONMENTS = {
 
 // Unknown host (a CF preview deployment, someone's fork) → "local", never prod.
 const OMS_ENV = OMS_ENVIRONMENTS[location.hostname] || OMS_ENVIRONMENTS.localhost;
+
+// Name a non-prod database under the logo, so DEV never passes for PROD.
+// Scripts load at the end of <body>, so the tag already exists.
+if (OMS_ENV.label !== "prod") {
+    const tag = document.getElementById("env-tag");
+    tag.textContent = OMS_ENV.label === "dev" ? "DEV database" : "Local database";
+    tag.dataset.env = OMS_ENV.label;
+    tag.hidden = false;
+}
 
 const API_URL = "/api";
 

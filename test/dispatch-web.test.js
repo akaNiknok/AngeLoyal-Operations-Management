@@ -75,3 +75,24 @@ test('the waybill ✓ button keeps focus in the number box', () => {
 
   assert.match(html, /<button class="row-confirm" onmousedown="event\.preventDefault\(\)" onclick="confirmWaybillInline\(5\)">/);
 });
+
+// A filter chip shows a count and, when clicked, the rows; both come from
+// one predicate, so the two can never disagree. Undelivered takes the foul
+// trips too, as the old Undelivered tile did.
+test('each filter chip counts exactly the trips it shows', () => {
+  const { sandbox } = loadWeb(['core.js', 'dispatch.js'], {},
+    'globalThis.__count = (f, trips) => trips.filter(DISPATCH_FILTERS[f]).length;');
+  const trips = [
+    { tripStatus: 'Prepping', truckId: null },
+    { tripStatus: 'Delivered', truckId: 3, waybillConfirmed: 'AY-1' },
+    { tripStatus: 'Foul Trip - For Redeliver', truckId: 3, waybillSuggested: 'AY-2' },
+    { tripStatus: 'Undelivered', truckId: 4, source: 'Carry-over' },
+  ];
+  const n = (f) => sandbox.__count(f, trips);
+  assert.equal(n('all'), 4);
+  assert.equal(n('Prepping'), 1);
+  assert.equal(n('Undelivered'), 2);
+  assert.equal(n('carry'), 1);
+  assert.equal(n('nowb'), 2);
+  assert.equal(n('nocrew'), 1);
+});

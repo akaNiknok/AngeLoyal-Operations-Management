@@ -75,18 +75,20 @@
                 document.getElementById("au-prev").disabled = auditOffset === 0;
                 document.getElementById("au-next").disabled = !auditHasMore;
 
-                document.getElementById("au-tbody").innerHTML = entries
-                    .map(auditRowHtml)
-                    .join("");
+                const from = document.getElementById("au-from").value;
+                const to = document.getElementById("au-to").value;
+                document.getElementById("au-tbody").innerHTML = entries.length
+                    ? entries.map(auditRowHtml).join("")
+                    : `<tr><td colspan="7" class="table-empty">No changes logged from ${esc(isoToMDY(from))} to ${esc(isoToMDY(to))}. Widen the date range or clear the search.</td></tr>`;
             }
 
             // One log entry as a table row. The Audit Log panel and the
             // History modal share it, so both read the same way.
             function auditRowHtml(e) {
                 return `<tr>
-    <td style="font-family:'DM Mono',monospace;font-size:11px;white-space:nowrap">${esc(e.timestamp)}</td>
+    <td style="font-family:'IBM Plex Mono',monospace;font-size:11px;white-space:nowrap">${esc(e.timestamp)}</td>
     <td>${esc(e.userEmail)}</td>
-    <td style="font-family:'DM Mono',monospace;font-size:11px">${esc(e.action)}</td>
+    <td style="font-family:'IBM Plex Mono',monospace;font-size:11px">${esc(e.action)}</td>
     <td style="color:var(--muted)">${esc(e.tableName)}${e.rowId ? " #" + e.rowId : ""}</td>
     <td>${esc(e.detail)}</td>
     <td style="color:var(--muted)">${auditValue(e.oldValue)}</td>

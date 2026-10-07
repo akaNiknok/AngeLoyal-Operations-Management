@@ -144,8 +144,10 @@ test('the paging buttons follow the page the server answered', () => {
 test('an empty page says so instead of showing a range', () => {
   const { ui, els } = loadPanel();
   ui.__setPage(0, false);
+  els['au-from'] = { value: '2026-10-01' };
+  els['au-to'] = { value: '2026-10-07' };
   ui.renderAudit([]);
 
   assert.equal(els['au-count'].textContent, 'No entries');
-  assert.equal(els['au-tbody'].innerHTML, '');
+  assert.match(els['au-tbody'].innerHTML, /No changes logged from 10\/1\/2026 to 10\/7\/2026\. Widen the date range/);
 });

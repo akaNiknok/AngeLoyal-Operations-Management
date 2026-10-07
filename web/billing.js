@@ -216,7 +216,7 @@
                                 ? ` · ₱${PESO_SHORT.format(rows.reduce((s, l) => s + Number(l.total || 0), 0))}`
                                 : "";
                         const warn = key === "attention" && rows.length ? " bl-chip-warn" : "";
-                        return `<button class="pill${key === billingStatus ? " active" : ""}${warn}" onclick="setBillingStatus('${key}')">${label} ${rows.length}${amount}</button>`;
+                        return `<button class="pill${key === billingStatus ? " active" : ""}${warn}" data-sf="${key}" onclick="setBillingStatus('${key}')">${label} ${rows.length}${amount}</button>`;
                     })
                     .join("");
             }
@@ -265,7 +265,7 @@
                 if (billingLines.length) return "No line matches these filters.";
                 const from = document.getElementById("bl-from").value;
                 const to = document.getElementById("bl-to").value;
-                return `No billable waybills from ${esc(isoToMDY(from))} to ${esc(isoToMDY(to))}.`;
+                return `No billable waybills from ${esc(isoToMDY(from))} to ${esc(isoToMDY(to))}. A trip shows here once it is Delivered and its waybill is confirmed on the Dispatch board.`;
             }
 
             // What a stamp or a bulk action would take: the ticked lines the
@@ -280,11 +280,15 @@
                     parts.push(`<strong>${ticked.length} ticked · ₱${PESO(sum)}</strong>`);
                 }
                 if (hidden) parts.push(`${hidden} more ticked, hidden by the filters`);
+                const stampable = ticked.some((l) => l.status === "Not Billed");
+                if (!ticked.length && scopedBillingLines().some((l) => l.status === "Not Billed"))
+                    parts.push("Tick Not billed lines to stamp them");
                 document.getElementById("bl-selection").innerHTML = parts.join(" · ");
 
                 const show = (id, on) => (document.getElementById(id).style.display = on ? "" : "none");
                 show("bl-defer-ticked", ticked.some((l) => l.status === "Not Billed"));
                 show("bl-restore-ticked", ticked.some((l) => l.status === "Deferred"));
+                document.getElementById("bl-stamp").disabled = !stampable;
             }
 
             // One row of the table. Held apart from renderBilling so a saved
@@ -293,7 +297,7 @@
                 const locked = l.status === "Billed";
                 const money = (field) =>
                     locked
-                        ? `<td style="text-align:right;font-family:'DM Mono',monospace">${PESO(l[field])}</td>`
+                        ? `<td style="text-align:right;font-family:'IBM Plex Mono',monospace">${PESO(l[field])}</td>`
                         : `<td style="text-align:right"><input class="cell-input${l.overrides.includes(field) ? " bl-typed" : ""}" style="width:84px;text-align:right"
    data-field="${field}"
    title="${l.overrides.includes(field) ? "Typed over — clear the cell to recompute" : "Computed"}"
@@ -304,7 +308,7 @@
                     .map((c) => {
                         const v = l.manualCharges[String(c.id)];
                         return locked
-                            ? `<td style="text-align:right;font-family:'DM Mono',monospace">${v ? PESO(v) : "—"}</td>`
+                            ? `<td style="text-align:right;font-family:'IBM Plex Mono',monospace">${v ? PESO(v) : "—"}</td>`
                             : `<td style="text-align:right"><input class="cell-input" style="width:76px;text-align:right" data-charge="${c.id}" value="${v === undefined ? "" : v}" onchange="saveBillingCharge(${l.id},${c.id},this.value)"></td>`;
                     })
                     .join("");
@@ -314,15 +318,15 @@
   <td style="white-space:nowrap"><input type="checkbox" title="Shift-click to tick a range" ${billingSelected.has(l.id) ? "checked" : ""} onclick="tickBillingRow(${l.id},this.checked,event.shiftKey)"><button class="bl-caret" title="${open ? "Hide" : "Show"} how this line was priced" onclick="toggleBillingDetail(${l.id})">${open ? "▾" : "▸"}</button></td>
   <td>${esc(l.tripDate)}</td>
   <td>${esc(l.plateNumber) || "—"}</td>
-  <td style="font-family:'DM Mono',monospace">${esc(l.waybillNumber)}</td>
-  <td style="font-family:'DM Mono',monospace">${esc(l.foNumber) || "—"}</td>
+  <td style="font-family:'IBM Plex Mono',monospace">${esc(l.waybillNumber)}</td>
+  <td style="font-family:'IBM Plex Mono',monospace">${esc(l.foNumber) || "—"}</td>
   <td>${esc(l.truckType)}</td>
   <td>${esc(l.area) || "—"}${l.drops > 1 ? ` <span class="tb-label">×${l.drops}</span>` : ""}${l.warning ? `<div class="bl-warn">${esc(l.warning)}${locked ? "" : billingMatrixLink(l)}</div>` : ""}</td>
   ${charges}
   ${money("mano")}
   ${money("dropFee")}
   ${money("haulingRate")}
-  <td class="bl-total" style="text-align:right;font-family:'DM Mono',monospace"><strong>${PESO(l.total)}</strong></td>
+  <td class="bl-total" style="text-align:right;font-family:'IBM Plex Mono',monospace"><strong>${PESO(l.total)}</strong></td>
   <td>${
       locked
           ? `<button class="bl-link" title="Open billing ${esc(l.billingNumber)}" data-num="${esc(l.billingNumber)}" onclick="openBillingByNumber(this.dataset.num)">${esc(l.billingNumber)}</button>`
@@ -471,7 +475,7 @@
             // matches the filter, and are never editable.
             function renderBillingFooter(rows) {
                 const sum = (f) => rows.reduce((s, l) => s + Number(f(l) || 0), 0);
-                const cell = (n) => `<td style="text-align:right;font-family:'DM Mono',monospace"><strong>${PESO(n)}</strong></td>`;
+                const cell = (n) => `<td style="text-align:right;font-family:'IBM Plex Mono',monospace"><strong>${PESO(n)}</strong></td>`;
                 // The totals row of the table, as the company workbook has it.
                 // It sticks to the bottom of the scroller with the header.
                 document.getElementById("billing-tfoot").innerHTML = rows.length
@@ -489,16 +493,16 @@
                 const net = gross - lessVat;
                 const ewt = net * 0.02;
 
-                document.getElementById("billing-footer").innerHTML = `
+                document.getElementById("billing-footer").innerHTML = !rows.length ? "" : `
 <table class="data-table" style="width:420px;margin-left:auto">
   <tbody>
     <tr><td>Total waybills</td><td style="text-align:right">${rows.length}</td></tr>
-    <tr><td>Total sales VAT inc</td><td style="text-align:right;font-family:'DM Mono',monospace">${PESO(gross)}</td></tr>
-    <tr><td>Less VAT</td><td style="text-align:right;font-family:'DM Mono',monospace">${PESO(lessVat)}</td></tr>
-    <tr><td>Amount net of VAT</td><td style="text-align:right;font-family:'DM Mono',monospace">${PESO(net)}</td></tr>
-    <tr><td>Add VAT</td><td style="text-align:right;font-family:'DM Mono',monospace">${PESO(net * 0.12)}</td></tr>
-    <tr><td>Less withholding tax</td><td style="text-align:right;font-family:'DM Mono',monospace">${PESO(ewt)}</td></tr>
-    <tr><td><strong>Total amount due</strong></td><td style="text-align:right;font-family:'DM Mono',monospace"><strong>${PESO(gross - ewt)}</strong></td></tr>
+    <tr><td>Total sales VAT inc</td><td style="text-align:right;font-family:'IBM Plex Mono',monospace">${PESO(gross)}</td></tr>
+    <tr><td>Less VAT</td><td style="text-align:right;font-family:'IBM Plex Mono',monospace">${PESO(lessVat)}</td></tr>
+    <tr><td>Amount net of VAT</td><td style="text-align:right;font-family:'IBM Plex Mono',monospace">${PESO(net)}</td></tr>
+    <tr><td>Add VAT</td><td style="text-align:right;font-family:'IBM Plex Mono',monospace">${PESO(net * 0.12)}</td></tr>
+    <tr><td>Less withholding tax</td><td style="text-align:right;font-family:'IBM Plex Mono',monospace">${PESO(ewt)}</td></tr>
+    <tr><td><strong>Total amount due</strong></td><td style="text-align:right;font-family:'IBM Plex Mono',monospace"><strong>${PESO(gross - ewt)}</strong></td></tr>
   </tbody>
 </table>`;
             }
@@ -813,11 +817,11 @@
                         ? r.billings
                               .map(
                                   (b) => `<tr>
-  <td style="font-family:'DM Mono',monospace">${esc(b.billingNumber)}</td>
+  <td style="font-family:'IBM Plex Mono',monospace">${esc(b.billingNumber)}</td>
   <td>${esc(b.from)} – ${esc(b.to)}</td>
   <td>${esc(b.docDate) || "—"}</td>
   <td style="text-align:right">${b.lineCount}</td>
-  <td style="text-align:right;font-family:'DM Mono',monospace">${PESO(b.total)}</td>
+  <td style="text-align:right;font-family:'IBM Plex Mono',monospace">${PESO(b.total)}</td>
   <td>${esc(b.stampedBy)}<div class="tb-label">${esc(b.stampedAt)}</div></td>
   <td><button class="btn btn-ghost btn-sm" onclick="openSavedBilling(${b.id})">Open</button></td>
 </tr>`,

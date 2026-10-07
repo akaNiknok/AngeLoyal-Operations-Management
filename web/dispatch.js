@@ -109,41 +109,28 @@
                             .map((o) => `<option value="${esc(o.outletName)}">`)
                             .join("");
 
-                // Stats (always computed from full data, not filtered)
+                // Chip counts (always from the full day, not the filter)
                 const all = dispatchData.trips || [];
-                document.getElementById("ds-total").textContent = all.length;
-                const preppingCount = all.filter(
-                    (t) => t.tripStatus === "Prepping",
-                ).length;
-                document.getElementById("ds-prepping").textContent =
-                    preppingCount;
+                document
+                    .querySelectorAll("#status-pills .pill")
+                    .forEach((b) => {
+                        const n = all.filter(
+                            DISPATCH_FILTERS[b.dataset.sf],
+                        ).length;
+                        b.querySelector(".pill-n").textContent = n;
+                        b.classList.toggle("has-n", n > 0);
+                    });
                 document.getElementById("btn-mark-scheduled").style.display =
-                    canEdit() && preppingCount > 0 ? "" : "none";
-                const preppingCrewCount = all.filter(
-                    (t) => t.tripStatus === "Prepping" && t.truckId,
-                ).length;
+                    canEdit() && all.some(DISPATCH_FILTERS.Prepping)
+                        ? ""
+                        : "none";
                 document.getElementById(
                     "btn-clear-prepping-crew",
                 ).style.display =
-                    canEdit() && preppingCrewCount > 0 ? "" : "none";
-                document.getElementById("ds-scheduled").textContent =
-                    all.filter((t) => t.tripStatus === "Scheduled").length;
-                document.getElementById("ds-delivered").textContent =
-                    all.filter((t) => t.tripStatus === "Delivered").length;
-                document.getElementById("ds-undelivered").textContent =
-                    all.filter((t) =>
-                        [
-                            "Undelivered",
-                            "Foul Trip - No Redeliver",
-                            "Foul Trip - For Redeliver",
-                        ].includes(t.tripStatus),
-                    ).length;
-                const noWb = all.filter(
-                    (t) => !t.waybillSuggested && !t.waybillConfirmed,
-                ).length;
-                document.getElementById("ds-nowb").textContent = noWb;
-                document.getElementById("ds-unassigned-crew").textContent =
-                    all.filter((t) => !t.truckId).length;
+                    canEdit() &&
+                    all.some((t) => t.tripStatus === "Prepping" && t.truckId)
+                        ? ""
+                        : "none";
                 updateConvoyButtons();
                 renderCrewRail();
 
@@ -352,8 +339,8 @@
       <td>${esc(t.tier) || "—"}</td>
       <td class="td-billingcat"><div class="billingcat-cell">${colorChip(billingCat)}${cgBadge}</div></td>
       ${foSpan[i] ? `<td class="td-crew col-divider"${foSpan[i] > 1 ? ` rowspan="${foSpan[i]}"` : ""}>${crewCell}</td>` : ""}
-      ${statusSpan[i] ? `<td class="td-status col-divider"${statusSpan[i] > 1 ? ` rowspan="${statusSpan[i]}"` : ""}>${statusCell}</td>` : ""}
       ${waybillSpan[i] ? `<td class="td-wb"${waybillSpan[i] > 1 ? ` rowspan="${waybillSpan[i]}"` : ""}>${waybillCellHtml(t, canE)}</td>` : ""}
+      ${statusSpan[i] ? `<td class="td-status col-divider"${statusSpan[i] > 1 ? ` rowspan="${statusSpan[i]}"` : ""}>${statusCell}</td>` : ""}
       <td class="td-remarks"><div class="remarks-cell">${remarksCell}${histBtn}${delBtn}</div></td>
     </tr>`;
                     })
@@ -824,17 +811,30 @@
                 );
             }
 
+            // One predicate per filter chip: it both filters the board and
+            // counts the chip.
+            const DISPATCH_FILTERS = {
+                all: () => true,
+                Prepping: (t) => t.tripStatus === "Prepping",
+                Scheduled: (t) => t.tripStatus === "Scheduled",
+                Delivered: (t) => t.tripStatus === "Delivered",
+                Undelivered: (t) =>
+                    [
+                        "Undelivered",
+                        "Foul Trip - No Redeliver",
+                        "Foul Trip - For Redeliver",
+                    ].includes(t.tripStatus),
+                carry: (t) => t.source === "Carry-over",
+                nowb: (t) => !t.waybillSuggested && !t.waybillConfirmed,
+                nocrew: (t) => !t.truckId,
+            };
+
             function getFilteredTrips() {
                 if (!dispatchData) return [];
                 const trips = dispatchData.trips || [];
-                let filtered = trips;
-                if (statusFilter === "carry")
-                    filtered = trips.filter((t) => t.source === "Carry-over");
-                else if (statusFilter !== "all")
-                    filtered = trips.filter(
-                        (t) => t.tripStatus === statusFilter,
-                    );
-                return orderedDayTrips(filtered);
+                return orderedDayTrips(
+                    trips.filter(DISPATCH_FILTERS[statusFilter]),
+                );
             }
 
             function setStatusFilter(f, btn) {

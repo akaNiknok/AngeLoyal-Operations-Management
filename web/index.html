@@ -48,7 +48,7 @@
                     </div>
                     <div>
                         <div class="logo-text">AngeLoyal OMS</div>
-                        <div class="logo-sub">Operations</div>
+                        <div class="logo-sub env-tag" id="env-tag" hidden></div>
                     </div>
                 </div>
 
@@ -215,9 +215,10 @@
        PANEL: DISPATCH BOARD
   ══════════════════════════════════════ -->
             <div class="panel active" id="panel-dispatch">
-                <!-- Toolbar -->
+                <!-- Toolbar: row 1 is the day and its actions, row 2 the
+                     filter chips (with counts) and the selection actions. -->
                 <div class="toolbar">
-                    <span class="tb-label">Date</span>
+                    <label class="tb-label" for="dispatch-date">Date</label>
                     <input
                         type="date"
                         id="dispatch-date"
@@ -230,101 +231,16 @@
                     >
                         ‹ Prev
                     </button>
-                    <button class="btn btn-ghost btn-sm" onclick="shiftDate(1)">
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        onclick="shiftDate(1)"
+                    >
                         Next ›
                     </button>
                     <button class="btn btn-ghost btn-sm" onclick="goToday()">
                         Today
                     </button>
-                    <div class="tb-sep"></div>
-                    <div class="pill-group" id="status-pills">
-                        <button
-                            class="pill active"
-                            data-sf="all"
-                            onclick="setStatusFilter('all', this)"
-                        >
-                            All
-                        </button>
-                        <button
-                            class="pill"
-                            data-sf="Prepping"
-                            onclick="setStatusFilter('Prepping', this)"
-                        >
-                            Prepping
-                        </button>
-                        <button
-                            class="pill"
-                            data-sf="Scheduled"
-                            onclick="setStatusFilter('Scheduled', this)"
-                        >
-                            Scheduled
-                        </button>
-                        <button
-                            class="pill"
-                            data-sf="Delivered"
-                            onclick="setStatusFilter('Delivered', this)"
-                        >
-                            Delivered
-                        </button>
-                        <button
-                            class="pill"
-                            data-sf="Undelivered"
-                            onclick="setStatusFilter('Undelivered', this)"
-                        >
-                            Undelivered
-                        </button>
-                        <button
-                            class="pill"
-                            data-sf="carry"
-                            onclick="setStatusFilter('carry', this)"
-                        >
-                            Carry-over
-                        </button>
-                    </div>
                     <div class="tb-spacer"></div>
-                    <span
-                        id="selection-count"
-                        class="selection-count"
-                        style="display: none"
-                    ></span>
-                    <select
-                        class="cell-select"
-                        id="bulk-status"
-                        style="display: none; width: 140px"
-                        onchange="bulkChangeStatus(this.value); this.selectedIndex = 0;"
-                    ></select>
-                    <button
-                        class="btn btn-ghost btn-sm"
-                        id="btn-group-convoy"
-                        onclick="groupSelectedTrips('group')"
-                        style="display: none"
-                    >
-                        ⛓ Group convoy
-                    </button>
-                    <button
-                        class="btn btn-ghost btn-sm"
-                        id="btn-ungroup-convoy"
-                        onclick="groupSelectedTrips('ungroup')"
-                        style="display: none"
-                    >
-                        Ungroup
-                    </button>
-                    <button
-                        class="btn btn-ghost btn-sm"
-                        id="btn-delete-selected"
-                        onclick="confirmDeleteSelected()"
-                        style="display: none"
-                    >
-                        ✕ Delete
-                    </button>
-                    <button
-                        class="btn btn-primary btn-sm"
-                        id="btn-mark-scheduled"
-                        onclick="openMarkScheduledModal()"
-                        style="display: none"
-                    >
-                        Mark day Scheduled
-                    </button>
                     <button
                         class="btn btn-ghost btn-sm"
                         id="btn-clear-prepping-crew"
@@ -332,7 +248,7 @@
                         style="display: none"
                         title="Unassign crew from every Prepping trip on this day"
                     >
-                        ✕ Clear all crew (Prepping)
+                        Clear Prepping crew
                     </button>
                     <button
                         class="btn btn-ghost btn-sm"
@@ -392,7 +308,6 @@
                             </button>
                         </div>
                     </div>
-                    <div class="tb-sep"></div>
                     <button
                         class="btn btn-ghost btn-sm"
                         id="btn-crew-rail"
@@ -401,44 +316,81 @@
                     >
                         ☰ Crews
                     </button>
-                </div>
-
-                <!-- Stat bar -->
-                <div class="stat-bar">
-                    <div class="stat-cell">
-                        <div class="stat-label">Total drops</div>
-                        <div class="stat-val blue" id="ds-total">—</div>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        id="btn-mark-scheduled"
+                        onclick="openMarkScheduledModal()"
+                        style="display: none"
+                    >
+                        Mark day Scheduled
+                    </button>
+                    <div class="tb-break"></div>
+                    <!-- renderDispatch() fills each .pill-n from
+                         DISPATCH_FILTERS, so a count always matches what its
+                         chip shows. -->
+                    <div class="pill-group" id="status-pills">
+                        <button class="pill active" data-sf="all" onclick="setStatusFilter('all', this)">
+                            All <span class="pill-n"></span>
+                        </button>
+                        <button class="pill" data-sf="Prepping" onclick="setStatusFilter('Prepping', this)">
+                            Prepping <span class="pill-n"></span>
+                        </button>
+                        <button class="pill" data-sf="Scheduled" onclick="setStatusFilter('Scheduled', this)">
+                            Scheduled <span class="pill-n"></span>
+                        </button>
+                        <button class="pill" data-sf="Delivered" onclick="setStatusFilter('Delivered', this)">
+                            Delivered <span class="pill-n"></span>
+                        </button>
+                        <button class="pill" data-sf="Undelivered" onclick="setStatusFilter('Undelivered', this)" title="Undelivered and foul trips">
+                            Undelivered <span class="pill-n"></span>
+                        </button>
+                        <button class="pill" data-sf="carry" onclick="setStatusFilter('carry', this)">
+                            Carry-over <span class="pill-n"></span>
+                        </button>
+                        <span class="pill-sep"></span>
+                        <button class="pill pill-warn" data-sf="nowb" onclick="setStatusFilter('nowb', this)">
+                            No waybill <span class="pill-n"></span>
+                        </button>
+                        <button class="pill pill-warn" data-sf="nocrew" onclick="setStatusFilter('nocrew', this)">
+                            No crew <span class="pill-n"></span>
+                        </button>
                     </div>
-                    <div class="stat-cell">
-                        <div class="stat-label">Prepping</div>
-                        <div class="stat-val muted" id="ds-prepping">—</div>
-                    </div>
-                    <div class="stat-cell">
-                        <div class="stat-label">Scheduled</div>
-                        <div
-                            class="stat-val"
-                            id="ds-scheduled"
-                            style="color: var(--blue)"
-                        >
-                            —
-                        </div>
-                    </div>
-                    <div class="stat-cell">
-                        <div class="stat-label">Delivered</div>
-                        <div class="stat-val green" id="ds-delivered">—</div>
-                    </div>
-                    <div class="stat-cell">
-                        <div class="stat-label">Undelivered</div>
-                        <div class="stat-val red" id="ds-undelivered">—</div>
-                    </div>
-                    <div class="stat-cell">
-                        <div class="stat-label">No waybill</div>
-                        <div class="stat-val amber" id="ds-nowb">—</div>
-                    </div>
-                    <div class="stat-cell">
-                        <div class="stat-label">Unassigned crew</div>
-                        <div class="stat-val muted" id="ds-unassigned-crew">—</div>
-                    </div>
+                    <div class="tb-spacer"></div>
+                    <span
+                        id="selection-count"
+                        class="selection-count"
+                        style="display: none"
+                    ></span>
+                    <select
+                        class="cell-select"
+                        id="bulk-status"
+                        style="display: none; width: 140px"
+                        onchange="bulkChangeStatus(this.value); this.selectedIndex = 0;"
+                    ></select>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-group-convoy"
+                        onclick="groupSelectedTrips('group')"
+                        style="display: none"
+                    >
+                        ⛓ Group convoy
+                    </button>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-ungroup-convoy"
+                        onclick="groupSelectedTrips('ungroup')"
+                        style="display: none"
+                    >
+                        Ungroup
+                    </button>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="btn-delete-selected"
+                        onclick="confirmDeleteSelected()"
+                        style="display: none"
+                    >
+                        ✕ Delete
+                    </button>
                 </div>
 
                 <div class="dispatch-layout">
@@ -464,46 +416,25 @@
                                 style="display: none"
                             >
                                 <thead>
+                                    <!-- table-layout: fixed. The widths sum
+                                         to the table's min-width in
+                                         styles.css; Outlet and Address take
+                                         any extra width. -->
                                     <tr>
-                                        <th style="width: 110px">FO #</th>
-                                        <th
-                                            style="width: 90px"
-                                            title="Requested Delivery Date"
-                                        >
-                                            RDD
-                                        </th>
-                                        <th style="width: 110px">
-                                            Cust. Grp.
-                                        </th>
-                                        <th style="width: 200px">Outlet</th>
-                                        <th style="width: 160px">Address</th>
-                                        <th style="width: 90px">Area</th>
-                                        <th
-                                            style="
-                                                width: 55px;
-                                                text-align: right;
-                                            "
-                                        >
-                                            Qty
-                                        </th>
-                                        <th
-                                            style="
-                                                width: 50px;
-                                                text-align: right;
-                                            "
-                                        >
-                                            CBM
-                                        </th>
-                                        <th style="width: 50px">Tier</th>
-                                        <th style="width: 90px">
-                                            Billing Cat.
-                                        </th>
-                                        <th class="col-divider" style="width: 170px">
-                                            Crew
-                                        </th>
-                                        <th class="col-divider" style="width: 120px">Status</th>
-                                        <th style="width: 120px">Waybill</th>
-                                        <th style="width: 140px">Remarks</th>
+                                        <th style="width: 116px">FO #</th>
+                                        <th style="width: 80px" title="Requested delivery date">RDD</th>
+                                        <th style="width: 50px" title="Customer group">Group</th>
+                                        <th class="th-grow">Outlet</th>
+                                        <th class="th-grow">Address</th>
+                                        <th style="width: 88px">Area</th>
+                                        <th style="width: 46px; text-align: right">Qty</th>
+                                        <th style="width: 60px; text-align: right">CBM</th>
+                                        <th style="width: 38px">Tier</th>
+                                        <th style="width: 80px" title="Billing category">Category</th>
+                                        <th class="col-divider" style="width: 172px">Crew</th>
+                                        <th style="width: 112px">Waybill</th>
+                                        <th class="col-divider" style="width: 118px">Status</th>
+                                        <th style="width: 100px">Remarks</th>
                                     </tr>
                                 </thead>
                                 <tbody id="dispatch-tbody"></tbody>
@@ -563,26 +494,15 @@
                 <div class="import-left">
                     <div class="col-head">Import Rebisco File</div>
 
-                    <div
-                        class="drop-zone"
-                        id="drop-zone"
-                        onclick="document.getElementById('file-input').click()"
-                        ondragover="handleDragOver(event)"
-                        ondragleave="handleDragLeave(event)"
-                        ondrop="handleDrop(event)"
-                    >
-                        <input
-                            type="file"
-                            id="file-input"
-                            accept=".xlsx,.xls,.csv"
-                            onchange="handleFileSelect(event)"
-                        />
-                        <div class="dz-icon">📂</div>
-                        <div class="dz-title">Click to browse</div>
-                        <div class="dz-sub">
-                            or drag &amp; drop an<br />.xlsx / .xls file here
-                        </div>
-                    </div>
+                    <!-- The file picker; the preview area on the right is
+                         where a file is dropped or clicked for. -->
+                    <input
+                        type="file"
+                        id="file-input"
+                        accept=".xlsx,.xls,.csv"
+                        hidden
+                        onchange="handleFileSelect(event)"
+                    />
 
                     <div class="import-config">
                         <div>
@@ -650,27 +570,23 @@
                             Exclude all
                         </button>
                     </div>
-                    <div class="import-preview-table" id="import-preview-table">
+                    <!-- The whole area is a drop target; while it is empty, a
+                         click opens the file picker too. -->
+                    <div
+                        class="import-preview-table"
+                        id="import-preview-table"
+                        ondragover="handleDragOver(event)"
+                        ondragleave="handleDragLeave(event)"
+                        ondrop="handleDrop(event)"
+                        onclick="if (event.target.closest('.empty-import')) document.getElementById('file-input').click()"
+                    >
                         <div class="empty-import">
-                            <div style="font-size: 32px">📤</div>
-                            <div
-                                style="
-                                    font-size: 13px;
-                                    font-weight: 500;
-                                    color: var(--muted);
-                                "
-                            >
-                                No file loaded
+                            <div class="empty-import-title">
+                                Drop the Rebisco route file here
                             </div>
-                            <div
-                                style="
-                                    font-size: 12px;
-                                    text-align: center;
-                                    max-width: 260px;
-                                "
-                            >
-                                Upload the Rebisco route Excel file to preview
-                                and review rows before importing.
+                            <div class="empty-import-sub">
+                                Or click to browse for the .xlsx. You check the
+                                rows here before you import them.
                             </div>
                         </div>
                     </div>
@@ -684,7 +600,7 @@
                 <div class="toolbar">
                     <span
                         class="tb-label"
-                        style="color: var(--hint); font-size: 10px"
+                        style="font-size: 12px"
                         >The default crew per truck. Drag crew onto a truck to
                         assign; drag them back to the right to unassign. Changes
                         affect new dispatch days only — not existing trips.</span
@@ -760,7 +676,6 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px">ID</th>
                                     <th>Outlet Name</th>
                                     <th style="width: 130px">Area</th>
                                     <th>Address</th>
@@ -818,7 +733,6 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px">ID</th>
                                     <th style="width: 120px">Plate</th>
                                     <th>Brand</th>
                                     <th>Type</th>
@@ -880,7 +794,6 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px">ID</th>
                                     <th>Nickname</th>
                                     <th>First Name</th>
                                     <th>Middle Name</th>
@@ -927,7 +840,6 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px">ID</th>
                                     <th style="width: 120px">Prefix</th>
                                     <th>Company Name</th>
                                     <th style="width: 160px">Last Sequence</th>
@@ -985,6 +897,8 @@
                     <div class="tb-spacer"></div>
                     <button
                         class="btn btn-primary btn-sm"
+                        id="bl-stamp"
+                        disabled
                         onclick="openStampPreview()"
                         title="Preview the ticked lines, then stamp and print them in one step"
                     >
@@ -1334,7 +1248,6 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px">ID</th>
                                     <th>Email</th>
                                     <th>Display Name</th>
                                     <th style="width: 120px">Role</th>
@@ -1381,7 +1294,6 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px">ID</th>
                                     <th>Name</th>
                                     <th style="width: 90px">Status</th>
                                     <th style="width: 90px"></th>
@@ -1424,7 +1336,6 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px">ID</th>
                                     <th>File Type</th>
                                     <th>Billing Category</th>
                                     <th style="width: 90px">Status</th>
