@@ -508,11 +508,12 @@ test('stamping a billing number audits each line with the number it had', async 
   const { api, db } = await seeded(s);
   const id = (await api.getBillingLines(DAY, DAY)).lines[0].id;
   await api.setBillingNumber([id], 'BILL-0001');
+  await api.setBillingNumber([id], '');
   await api.setBillingNumber([id], 'BILL-0002');
 
   const rows = dump(db, 'audit_log').filter((r) => r.action === 'BILLING_NUMBER_SET');
   assert.deepEqual(rows.map((r) => [r.row_id, r.old_value, r.new_value]),
-    [[id, '', 'BILL-0001'], [id, 'BILL-0001', 'BILL-0002']]);
+    [[id, '', 'BILL-0001'], [id, 'BILL-0001', ''], [id, '', 'BILL-0002']]);
 });
 
 // ── Submitted billings ────────────────────────────────────────
@@ -571,7 +572,7 @@ test('without a header the billing spans its lines, and a second stamp on the nu
   assert.deepEqual([b.from, b.to, b.docDate, b.lineCount], ['7/2/2026', '7/3/2026', '7/9/2026', 2]);
 });
 
-test('a billing disappears when its last line is cleared or moved to another number', async () => {
+test('a billing disappears when its last line is cleared', async () => {
   const s = sheets(
     [trip({ id: 1 }), trip({ id: 2, fo: 'FO-2' })],
     [waybill(1, 'AY-11801', 1), waybill(2, 'AY-11802', 2)]
@@ -580,15 +581,33 @@ test('a billing disappears when its last line is cleared or moved to another num
   const [a, b] = (await api.getBillingLines(DAY, DAY)).lines.map((l) => l.id);
 
   await api.setBillingNumber([a, b], 'B-1');
-  await api.setBillingNumber([a], 'B-2');
-  assert.deepEqual(dump(db, 'billings').map((r) => r.billing_number).sort(), ['B-1', 'B-2']);
+  await api.setBillingNumber([a], '');
+  assert.deepEqual(dump(db, 'billings').map((r) => r.billing_number), ['B-1']);
 
-  await api.setBillingNumber([b], 'B-2');
-  assert.deepEqual(dump(db, 'billings').map((r) => r.billing_number), ['B-2']);
-
-  await api.setBillingNumber([a, b], '');
+  await api.setBillingNumber([b], '');
   assert.deepEqual(dump(db, 'billings'), []);
   assert.ok((await api.getBillingLines(DAY, DAY)).lines.every((l) => l.status === 'Not Billed' && !l.billingNumber));
+});
+
+test('only Not Billed lines take a stamp, and a refused stamp writes nothing', async () => {
+  const s = sheets(
+    [trip({ id: 1 }), trip({ id: 2, fo: 'FO-2' }), trip({ id: 3, fo: 'FO-3' })],
+    [waybill(1, 'AY-11801', 1), waybill(2, 'AY-11802', 2), waybill(3, 'AY-11803', 3)]
+  );
+  const { api, db } = await seeded(s);
+  const byWb = Object.fromEntries((await api.getBillingLines(DAY, DAY)).lines.map((l) => [l.waybillNumber, l.id]));
+  await api.setBillingNumber([byWb['AY-11801']], 'B-1');
+  await api.setBillingLineStatus([byWb['AY-11802']], 'Deferred');
+
+  // A billed line does not move, a deferred line stays held, and the
+  // Not Billed line in the same call is not stamped alone.
+  const res = await api.setBillingNumber(Object.values(byWb), 'B-2');
+  assert.equal(res.success, false);
+  assert.match(res.error, /Refused: AY-11801 \(Billed\), AY-11802 \(Deferred\)/);
+  assert.deepEqual(dump(db, 'billings').map((r) => r.billing_number), ['B-1']);
+  const lines = (await api.getBillingLines(DAY, DAY)).lines;
+  assert.equal(lines.find((l) => l.id === byWb['AY-11803']).status, 'Not Billed');
+  assert.equal(lines.find((l) => l.id === byWb['AY-11801']).billingNumber, 'B-1');
 });
 
 test('stamping audits the billing once, with the header it was given', async () => {

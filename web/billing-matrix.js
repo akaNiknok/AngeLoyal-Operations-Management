@@ -15,6 +15,19 @@
             let rateMatrix = []; // rows for the selected origin
             let fuelPrices = [];
             let seedRatesParsed = null; // { sheets: [{ name, rows }] }
+            // The grid is read-only until an Admin clicks "Edit rates": one
+            // stray keystroke in a live cell would change a contract rate.
+            let rateEditing = false;
+            let fuelShowAll = false;
+            let editingFuelId = null; // the price the Add form is editing
+            const FUEL_ROWS_SHOWN = 6;
+
+            // The price billing uses on `iso`: the newest one that has
+            // started. `prices` is sorted newest first. A price added ahead
+            // for next week is not in force yet.
+            function fuelPriceInForce(prices, iso) {
+                return prices.find((p) => mdyToIso(p.effectiveDate) <= iso) || null;
+            }
 
             function bandIndexForPrice(price) {
                 const p = Number(price);
@@ -147,8 +160,13 @@
                 const tbody = document.getElementById("fuel-prices-tbody");
                 if (!tbody) return;
                 const canEditRates = currentUser.role === "Admin";
+                const shown = fuelShowAll ? fuelPrices : fuelPrices.slice(0, FUEL_ROWS_SHOWN);
 
-                tbody.innerHTML = fuelPrices
+                const more = document.getElementById("fp-more");
+                more.style.display = fuelPrices.length > FUEL_ROWS_SHOWN ? "" : "none";
+                more.textContent = fuelShowAll ? "Show the latest weeks only" : `Show all ${fuelPrices.length} weeks`;
+
+                tbody.innerHTML = shown
                     .map((p) => {
                         const offCycle = !isTuesdayIso(mdyToIso(p.effectiveDate));
                         return `<tr>
@@ -167,6 +185,11 @@
                     .join("");
 
                 renderFuelReminder();
+            }
+
+            function toggleFuelHistory() {
+                fuelShowAll = !fuelShowAll;
+                renderFuelPrices();
             }
 
             // Warns when the current DOE week has no price yet. A billing dated
@@ -208,62 +231,57 @@
                 )
                     return;
 
-                call("addFuelPrice", {
-                    effectiveDate: isoToMDY(dateVal),
-                    dieselPrice: Number(priceVal),
-                }).then((r) => {
+                const payload = { effectiveDate: isoToMDY(dateVal), dieselPrice: Number(priceVal) };
+                const editing = editingFuelId;
+                const req = editing
+                    ? call("updateFuelPrice", editing, payload)
+                    : call("addFuelPrice", payload);
+                req.then((r) => {
                     if (!r.success) {
                         showToast(r.error, "error");
                         return;
                     }
-                    fuelPrices.unshift(r.fuelPrice);
+                    if (editing) {
+                        const p = fuelPrices.find((x) => x.id === editing);
+                        if (p) Object.assign(p, r.fuelPrice);
+                    } else {
+                        fuelPrices.unshift(r.fuelPrice);
+                    }
                     sortFuelPrices();
-                    document.getElementById("fp-price").value = "";
+                    cancelFuelEdit();
                     renderFuelPrices();
                     renderRateMatrix();
                     showToast(
-                        `Price saved — band ${r.fuelPrice.band}.`,
+                        `Price ${editing ? "updated" : "saved"} — band ${r.fuelPrice.band}.`,
                         "success",
                     );
                 }, toastError);
+            }
+
+            // Loads a price into the Add form, which then saves over it.
+            function editFuelPrice(priceId) {
+                const p = fuelPrices.find((x) => x.id === priceId);
+                if (!p) return;
+                editingFuelId = priceId;
+                document.getElementById("fp-date").value = mdyToIso(p.effectiveDate);
+                document.getElementById("fp-price").value = p.dieselPrice;
+                document.getElementById("fp-submit").textContent = "Save price";
+                document.getElementById("fp-cancel").style.display = "";
+                document.getElementById("fp-price").focus();
+            }
+
+            function cancelFuelEdit() {
+                editingFuelId = null;
+                document.getElementById("fp-date").value = latestTuesdayIso();
+                document.getElementById("fp-price").value = "";
+                document.getElementById("fp-submit").textContent = "+ Add price";
+                document.getElementById("fp-cancel").style.display = "none";
             }
 
             function sortFuelPrices() {
                 fuelPrices.sort(
                     (a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate),
                 );
-            }
-
-            function editFuelPrice(priceId) {
-                const p = fuelPrices.find((x) => x.id === priceId);
-                if (!p) return;
-
-                const dateIn = prompt(
-                    "Effective date (M/d/yyyy) — a DOE week starts on a Tuesday",
-                    p.effectiveDate,
-                );
-                if (dateIn === null) return;
-                const priceIn = prompt("Diesel price", String(p.dieselPrice));
-                if (priceIn === null) return;
-                if (!(Number(priceIn) > 0)) {
-                    showToast("Enter the diesel price.", "warning");
-                    return;
-                }
-
-                call("updateFuelPrice", priceId, {
-                    effectiveDate: dateIn.trim(),
-                    dieselPrice: Number(priceIn),
-                }).then((r) => {
-                    if (!r.success) {
-                        showToast(r.error, "error");
-                        return;
-                    }
-                    Object.assign(p, r.fuelPrice);
-                    sortFuelPrices();
-                    renderFuelPrices();
-                    renderRateMatrix();
-                    showToast(`Price updated — band ${r.fuelPrice.band}.`, "success");
-                }, toastError);
             }
 
             function removeFuelPrice(priceId) {
@@ -282,6 +300,7 @@
                         return;
                     }
                     fuelPrices = fuelPrices.filter((x) => x.id !== priceId);
+                    if (editingFuelId === priceId) cancelFuelEdit();
                     renderFuelPrices();
                     renderRateMatrix();
                     showToast("Price removed.", "success");
@@ -302,13 +321,13 @@
                     .getElementById("bm-search")
                     .value.trim()
                     .toUpperCase();
-                const isAdmin = currentUser.role === "Admin";
+                const editable = currentUser.role === "Admin" && rateEditing;
+                document.getElementById("bm-edit-warn").style.display = editable ? "" : "none";
 
-                // The band the newest price lands in, highlighted so the column
-                // in use is obvious in a 25-column table.
-                const liveBand = fuelPrices.length
-                    ? bandLabelForPrice(fuelPrices[0].dieselPrice)
-                    : "";
+                // The band of the price in force today, highlighted so the
+                // column in use is obvious in a 25-column table.
+                const today = fuelPriceInForce(fuelPrices, todayStr());
+                const liveBand = today ? bandLabelForPrice(today.dieselPrice) : "";
                 document.getElementById("bm-band-hint").textContent = liveBand
                     ? `Current band ${liveBand}`
                     : "No diesel price recorded yet";
@@ -319,11 +338,15 @@
                     document.getElementById("bm-focus-band").checked && liveBand;
                 const cols = focus ? [liveBand] : FUEL_BANDS;
 
+                const missingOnly = document.getElementById("bm-missing").checked && liveBand;
+                const isMissing = (r) => r.bands[liveBand] === null || r.bands[liveBand] === undefined;
+
                 const inForce = effective ? null : ratesInForce(rateMatrix, todayStr());
                 const rows = rateMatrix
                     .filter((r) => (effective ? r.effectiveDate === effective : inForce.has(r)))
                     .filter((r) => !truckType || r.truckType === truckType)
                     .filter((r) => !search || r.area.toUpperCase().includes(search))
+                    .filter((r) => !missingOnly || isMissing(r))
                     .sort(
                         (a, b) =>
                             a.origin.localeCompare(b.origin) ||
@@ -370,17 +393,23 @@
                             .map((b) => {
                                 const v = r.bands[b];
                                 const shown = v === null || v === undefined ? "" : v;
-                                const hl =
-                                    b === liveBand ? "background:var(--blue-bg)" : "";
-                                return isAdmin
-                                    ? `<td style="${hl}"><input class="cell-input" style="width:64px;text-align:right" value="${esc(shown)}" onchange="saveRateCell(${r.id},'${b}',this.value)"></td>`
-                                    : `<td style="${hl};text-align:right;font-family:'DM Mono',monospace">${esc(shown) || "—"}</td>`;
+                                // An empty cell in the live band leaves a
+                                // trip on this row unpriced.
+                                const cls = b !== liveBand ? "" : shown === "" ? "rm-live rm-missing" : "rm-live";
+                                return editable
+                                    ? `<td class="${cls}"><input class="cell-input" style="width:64px;text-align:right" value="${esc(shown)}" onchange="saveRateCell(${r.id},'${b}',this.value)"></td>`
+                                    : `<td class="${cls}" style="text-align:right;font-family:'DM Mono',monospace">${esc(shown) || "—"}</td>`;
                             })
                             .join("");
 
                         return `${head}<tr${alt ? ' class="rm-alt"' : ""}><td class="rm-pin">${esc(r.area)}</td><td class="rm-pin rm-pin-2">${esc(r.truckType)}</td>${cells}</tr>`;
                     })
-                    .join("");
+                    .join("") ||
+                    `<tr><td colspan="${span}" class="bl-empty">${
+                        search
+                            ? `No rate row matches "${esc(search)}". A trip to that area cannot be priced until a rates workbook with that row is imported.`
+                            : "No rate matches these filters."
+                    }</td></tr>`;
 
                 // The Type column pins beside Area, so its offset is the width
                 // Area actually rendered at, not the width the markup asked for.
@@ -392,6 +421,12 @@
                         first.offsetWidth + "px",
                     );
                 }
+            }
+
+            function toggleRateEditing() {
+                rateEditing = !rateEditing;
+                document.getElementById("bm-edit-toggle").textContent = rateEditing ? "Done editing" : "Edit rates";
+                renderRateMatrix();
             }
 
             function saveRateCell(rateId, band, value) {

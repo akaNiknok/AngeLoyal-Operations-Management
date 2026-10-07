@@ -252,10 +252,39 @@
   <th style="width:70px"></th>
 </tr>`;
 
-                tbody.innerHTML = rows.map(billingRowHtml).join("");
+                tbody.innerHTML = rows.length
+                    ? rows.map(billingRowHtml).join("")
+                    : `<tr><td colspan="${12 + billingChargeCols.length}" class="bl-empty">${billingEmptyText()}</td></tr>`;
 
                 renderBillingChips();
+                renderBillingSelection();
                 renderBillingFooter(rows);
+            }
+
+            function billingEmptyText() {
+                if (billingLines.length) return "No line matches these filters.";
+                const from = document.getElementById("bl-from").value;
+                const to = document.getElementById("bl-to").value;
+                return `No billable waybills from ${esc(isoToMDY(from))} to ${esc(isoToMDY(to))}.`;
+            }
+
+            // What a stamp or a bulk action would take: the ticked lines the
+            // filters show. A tick a filter hides is named, because it is
+            // left out of both.
+            function renderBillingSelection() {
+                const ticked = tickedBillingLines();
+                const hidden = billingSelected.size - ticked.length;
+                const parts = [];
+                if (ticked.length) {
+                    const sum = ticked.reduce((s, l) => s + Number(l.total || 0), 0);
+                    parts.push(`<strong>${ticked.length} ticked · ₱${PESO(sum)}</strong>`);
+                }
+                if (hidden) parts.push(`${hidden} more ticked, hidden by the filters`);
+                document.getElementById("bl-selection").innerHTML = parts.join(" · ");
+
+                const show = (id, on) => (document.getElementById(id).style.display = on ? "" : "none");
+                show("bl-defer-ticked", ticked.some((l) => l.status === "Not Billed"));
+                show("bl-restore-ticked", ticked.some((l) => l.status === "Deferred"));
             }
 
             // One row of the table. Held apart from renderBilling so a saved
@@ -265,7 +294,7 @@
                 const money = (field) =>
                     locked
                         ? `<td style="text-align:right;font-family:'DM Mono',monospace">${PESO(l[field])}</td>`
-                        : `<td style="text-align:right"><input class="cell-input" style="width:84px;text-align:right"
+                        : `<td style="text-align:right"><input class="cell-input${l.overrides.includes(field) ? " bl-typed" : ""}" style="width:84px;text-align:right"
    data-field="${field}"
    title="${l.overrides.includes(field) ? "Typed over — clear the cell to recompute" : "Computed"}"
    value="${l[field] === 0 ? "" : l[field]}"
@@ -288,7 +317,7 @@
   <td style="font-family:'DM Mono',monospace">${esc(l.waybillNumber)}</td>
   <td style="font-family:'DM Mono',monospace">${esc(l.foNumber) || "—"}</td>
   <td>${esc(l.truckType)}</td>
-  <td>${esc(l.area) || "—"}${l.drops > 1 ? ` <span class="tb-label">×${l.drops}</span>` : ""}${l.warning ? `<div class="bl-warn">${esc(l.warning)}</div>` : ""}</td>
+  <td>${esc(l.area) || "—"}${l.drops > 1 ? ` <span class="tb-label">×${l.drops}</span>` : ""}${l.warning ? `<div class="bl-warn">${esc(l.warning)}${locked ? "" : billingMatrixLink(l)}</div>` : ""}</td>
   ${charges}
   ${money("mano")}
   ${money("dropFee")}
@@ -296,10 +325,25 @@
   <td class="bl-total" style="text-align:right;font-family:'DM Mono',monospace"><strong>${PESO(l.total)}</strong></td>
   <td>${
       locked
-          ? `<span class="tb-label">${esc(l.billingNumber)}</span>`
+          ? `<button class="bl-link" title="Open billing ${esc(l.billingNumber)}" data-num="${esc(l.billingNumber)}" onclick="openBillingByNumber(this.dataset.num)">${esc(l.billingNumber)}</button>`
           : `<button class="btn btn-ghost btn-sm" onclick="toggleBillingDefer(${l.id})">${l.status === "Deferred" ? "Restore" : "Defer"}</button>`
   }</td>
 </tr>${open ? billingDetailHtml(l) : ""}`;
+            }
+
+            // A link to the Matrix rows a "no rate" warning names: the line's
+            // origin and truck type, searched on the first stop with no
+            // rate. It is a plain hash link, so applyHash opens the panel.
+            function billingMatrixLink(l) {
+                const stop = (l.stops || []).find((s) => s.rate === null);
+                if (!stop) return "";
+                const q = new URLSearchParams({
+                    "bm-origin": l.origin || "",
+                    "bm-effective": "",
+                    "bm-type": l.truckType || "",
+                    "bm-search": stop.area || "",
+                });
+                return ` <a class="bl-fix" href="#billing-matrix?${esc(q.toString())}">Open in Matrix ›</a>`;
             }
 
             // The row under a line that shows how it was priced: the stops,
@@ -395,6 +439,7 @@
                     if (field) {
                         inp.value = line[field] === 0 ? "" : line[field];
                         const on = line.overrides.includes(field);
+                        inp.classList.toggle("bl-typed", on);
                         inp.title = on
                             ? "Typed over — clear the cell to recompute"
                             : "Computed";
@@ -418,29 +463,8 @@
                 }
 
                 renderBillingChips();
+                renderBillingSelection();
                 renderBillingFooter(visibleBillingLines());
-            }
-
-            // Enter moves to the same cell one row down, as in Excel;
-            // Shift+Enter moves up. A stamped row has no input and is skipped.
-            // Leaving the cell fires its change, so the move also saves.
-            function billingGridKey(e) {
-                const inp = e.target;
-                if (e.key !== "Enter" || !inp.matches || !inp.matches("input.cell-input")) return;
-                const same = inp.dataset.field
-                    ? `input[data-field="${inp.dataset.field}"]`
-                    : `input[data-charge="${inp.dataset.charge}"]`;
-                const rows = Array.from(document.querySelectorAll("#billing-tbody tr[data-line]"));
-                const step = e.shiftKey ? -1 : 1;
-                for (let i = rows.indexOf(inp.closest("tr")) + step; i >= 0 && i < rows.length; i += step) {
-                    const next = rows[i].querySelector(same);
-                    if (next) {
-                        e.preventDefault();
-                        next.focus();
-                        next.select();
-                        return;
-                    }
-                }
             }
 
             // Totals are recomputed from what is on screen so the footer always
@@ -500,6 +524,7 @@
                 billingTickAnchor = lineId;
                 if (!shift || a < 0 || b < 0) {
                     toggleBillingRow(lineId, on);
+                    renderBillingSelection();
                     return;
                 }
                 ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((id) => toggleBillingRow(id, on));
@@ -580,6 +605,31 @@
                 });
             }
 
+            // Defers or restores every ticked line the filters show, in one
+            // call. A stamped line is skipped. The moved lines lose their
+            // tick: the chip in force usually hides them next.
+            function setTickedBillingStatus(next) {
+                const lines = tickedBillingLines().filter(
+                    (l) => l.status !== "Billed" && l.status !== next,
+                );
+                if (!lines.length) return;
+                const old = lines.map((l) => l.status);
+                lines.forEach((l) => {
+                    l.status = next;
+                    billingSelected.delete(l.id);
+                });
+                renderBilling();
+
+                bgSave("setBillingLineStatus", [lines.map((l) => l.id), next], {
+                    onOk: () =>
+                        showToast(`${lines.length} line(s) ${next === "Deferred" ? "deferred" : "restored"}.`, "success"),
+                    revert: () => {
+                        lines.forEach((l, i) => (l.status = old[i]));
+                        renderBilling();
+                    },
+                });
+            }
+
             // ── Billing documents: preview, stamp, print, .xlsx ──────
             //
             // One document feeds the preview, the print and the workbook:
@@ -603,23 +653,45 @@
                 };
             }
 
+            // The stamped billings, read when the stamp preview opens, so a
+            // typed number that is already in use can be named before it
+            // merges. Null until the read returns.
+            let knownBillings = null;
+
+            // Only Not billed lines take a stamp; the server refuses the rest.
+            // A ticked deferred or billed line is left out and named.
             function openStampPreview() {
-                const number = document.getElementById("bl-number").value.trim();
-                const lines = tickedBillingLines();
+                const ticked = tickedBillingLines();
+                const lines = ticked.filter((l) => l.status === "Not Billed");
                 if (!lines.length) {
-                    showToast("Tick the lines this billing covers.", "warning");
+                    showToast("Tick the Not billed lines this billing covers.", "warning");
                     return;
                 }
-                if (!number) {
-                    showToast("Type the billing number first.", "warning");
-                    return;
-                }
+                knownBillings = null;
                 showBillingPreview(
                     Object.assign(
-                        { mode: "stamp", number, lines, cols: billingChargeCols },
+                        {
+                            mode: "stamp",
+                            number: document.getElementById("bl-number").value.trim(),
+                            lines,
+                            skipped: ticked.length - lines.length,
+                            cols: billingChargeCols,
+                        },
                         billingToolbarHeader(),
                     ),
                 );
+                call("getBillings").then((r) => {
+                    if (!r.success) return; // the stamp still works; it just cannot warn
+                    knownBillings = r.billings;
+                    if (billingDoc && billingDoc.mode === "stamp") refreshBillingPreview();
+                }, () => {});
+            }
+
+            // The billing a stamp under `number` would join, or null. The
+            // server matches numbers without regard to case (COLLATE NOCASE).
+            function existingBilling(number) {
+                const key = String(number || "").toUpperCase();
+                return (knownBillings || []).find((b) => b.billingNumber.toUpperCase() === key) || null;
             }
 
             function openDraftPreview() {
@@ -639,23 +711,53 @@
             const BILLING_PREVIEW_TEXT = {
                 draft: (d) => ["Draft billing", "A draft has no billing number. Tick the lines and stamp them to submit a billing."],
                 stamp: (d) => [
-                    `Stamp billing ${d.number}`,
-                    `${d.lines.length} line(s) take billing ${d.number} and stop recomputing. Check the page, then stamp it.`,
+                    d.number ? `Stamp billing ${d.number}` : "Stamp billing",
+                    (d.number
+                        ? `${d.lines.length} line(s) take billing ${d.number} and stop recomputing. Check the page, then stamp it.`
+                        : `Type the billing number for these ${d.lines.length} line(s).`) +
+                        (d.skipped ? ` ${d.skipped} ticked line(s) are deferred or billed and are left out.` : ""),
                 ],
                 billed: (d) => [`Billing ${d.number}`, "This is the billing exactly as it was stamped."],
             };
 
             function showBillingPreview(doc) {
                 billingDoc = doc;
-                const [title, hint] = BILLING_PREVIEW_TEXT[doc.mode](doc);
-                document.getElementById("bl-preview-title").textContent = title;
-                document.getElementById("bl-preview-hint").textContent = hint;
-
                 const show = (id, on) => (document.getElementById(id).style.display = on ? "" : "none");
+                // The header fields: the date for a draft or a stamp, the
+                // number for a stamp. A stamped billing is read back as is.
+                show("bl-preview-fields", doc.mode !== "billed");
+                show("bl-number-wrap", doc.mode === "stamp");
                 show("bl-preview-stamp", doc.mode === "stamp");
                 show("bl-preview-reopen", doc.mode === "billed");
                 show("bl-preview-xlsx", doc.mode !== "stamp");
                 show("bl-preview-print", doc.mode !== "stamp");
+                drawBillingPreview();
+                openModal("modal-billing-preview");
+                if (doc.mode === "stamp") document.getElementById("bl-number").focus();
+            }
+
+            // A typed number or date changes the document; redraw it.
+            function refreshBillingPreview() {
+                const doc = billingDoc;
+                if (!doc || doc.mode === "billed") return;
+                doc.docDate = document.getElementById("bl-doc-date").value;
+                if (doc.mode === "stamp") doc.number = document.getElementById("bl-number").value.trim();
+                drawBillingPreview();
+            }
+
+            function drawBillingPreview() {
+                const doc = billingDoc;
+                const [title, hint] = BILLING_PREVIEW_TEXT[doc.mode](doc);
+                document.getElementById("bl-preview-title").textContent = title;
+                document.getElementById("bl-preview-hint").textContent = hint;
+
+                const stamp = document.getElementById("bl-preview-stamp");
+                const joins = doc.mode === "stamp" && existingBilling(doc.number);
+                stamp.disabled = doc.mode === "stamp" && !doc.number;
+                stamp.textContent = joins ? `Add to billing ${doc.number} & print` : "Stamp & print";
+                document.getElementById("bl-number-warn").innerHTML = joins
+                    ? `<strong>Billing ${esc(joins.billingNumber)} already exists:</strong> ${joins.lineCount} line(s), ₱${PESO(joins.total)}, stamped by ${esc(joins.stampedBy)} on ${esc(joins.stampedAt)}. These ${doc.lines.length} line(s) join it, and its printout covers all ${joins.lineCount + doc.lines.length}. For a new billing, type a new number.`
+                    : "";
 
                 // A blank frame written in place, as printHtmlDocument does:
                 // the CSP lets the OMS frame nothing but the Google sign-in.
@@ -665,7 +767,6 @@
                     d.write(billingDocHtml(doc));
                     d.close();
                 }
-                openModal("modal-billing-preview");
             }
 
             // Stamps, then prints what the server now holds under that number.
@@ -674,6 +775,10 @@
             function confirmStampAndPrint() {
                 const doc = billingDoc;
                 if (!doc || doc.mode !== "stamp") return;
+                if (!doc.number) {
+                    showToast("Type the billing number first.", "warning");
+                    return;
+                }
                 return call("setBillingNumber", doc.lines.map((l) => l.id), doc.number, {
                     docDate: isoToMDY(doc.docDate),
                     from: isoToMDY(doc.from),
@@ -681,6 +786,14 @@
                 }).then((r) => {
                     if (!r.success) {
                         showToast(r.error, "error");
+                        return;
+                    }
+                    // The lines are gone from the server (a re-import, a
+                    // delete): nothing was stamped, so there is nothing to print.
+                    if (!r.updated) {
+                        showToast("No line was stamped: these lines no longer exist. The list is reloaded.", "warning");
+                        closeModal("modal-billing-preview");
+                        loadBilling();
                         return;
                     }
                     showToast(`Billing ${doc.number} stamped on ${r.updated} line(s).`, "success");
@@ -712,6 +825,22 @@
                               .join("")
                         : `<tr><td colspan="7" style="text-align:center;color:var(--hint)">No billing is stamped yet.</td></tr>`;
                     openModal("modal-billings");
+                }, toastError);
+            }
+
+            // A stamped line knows its billing by number only.
+            function openBillingByNumber(number) {
+                return call("getBillings").then((r) => {
+                    if (!r.success) {
+                        showToast(r.error, "error");
+                        return;
+                    }
+                    const b = r.billings.find((x) => x.billingNumber === number);
+                    if (!b) {
+                        showToast(`Billing ${number} is not found.`, "error");
+                        return;
+                    }
+                    return openSavedBilling(b.id);
                 }, toastError);
             }
 

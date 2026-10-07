@@ -653,7 +653,9 @@ export async function setBillingLineStatus(lineIds, status) {
 /**
  * Stamps a Rebisco billing number on a set of lines and marks them Billed. A
  * blank number clears the stamp, reopening the lines for editing. A number
- * already in use adds the lines to that billing.
+ * already in use adds the lines to that billing. Only Not Billed lines take a
+ * stamp: a deferred line is held out on purpose, and a billed line moves only
+ * by reopening its billing first.
  * @param {number[]|number} lineIds
  * @param {string} billingNumber
  * @param {{ docDate?: string, from?: string, to?: string }} [header]
@@ -671,10 +673,19 @@ export async function setBillingNumber(lineIds, billingNumber, header) {
 
     const marks = ids.map(() => '?').join(',');
     const found = await q(
-      `SELECT b.id, b.trip_date, b.billing_id, bl.billing_number
+      `SELECT b.id, b.trip_date, b.billing_id, b.status, bl.billing_number, w.waybill_number
        FROM billing_lines b LEFT JOIN billings bl ON bl.id = b.billing_id
+       LEFT JOIN waybills w ON w.id = b.waybill_id
        WHERE b.id IN (${marks})`, ...ids);
     if (!found.length) return { success: true, updated: 0, billingNumber: num };
+
+    // All or nothing: a partial stamp would print a billing nobody previewed.
+    const refused = clearing ? [] : found.filter((r) => r.status !== 'Not Billed');
+    if (refused.length) {
+      const names = refused.slice(0, 5).map((r) => `${r.waybill_number || r.id} (${r.status})`).join(', ');
+      throw new Error(`Only Not Billed lines can be stamped. Refused: ${names}${refused.length > 5 ? ', …' : ''}. ` +
+        'Restore a deferred line first; reopen a billing to move its lines.');
+    }
 
     // One batch: the billing, the lines and the cleanup land together, so a
     // concurrent clear can never delete the billing between the two.

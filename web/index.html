@@ -983,21 +983,6 @@
                         style="width: 140px"
                     ></select>
                     <div class="tb-spacer"></div>
-                    <input
-                        type="text"
-                        id="bl-number"
-                        placeholder="Billing #"
-                        style="width: 120px"
-                    />
-                    <!-- The DATE: line of the printed billing. It is the
-                         submission date, not the trip range, so it is typed
-                         rather than derived. -->
-                    <input
-                        type="date"
-                        id="bl-doc-date"
-                        title="The DATE: line on the printed billing"
-                        style="width: 150px"
-                    />
                     <button
                         class="btn btn-primary btn-sm"
                         onclick="openStampPreview()"
@@ -1023,6 +1008,24 @@
                 <div class="toolbar">
                     <div class="pill-group" id="bl-chips"></div>
                     <span class="tb-label" id="bl-count"></span>
+                    <div class="tb-spacer"></div>
+                    <span class="tb-label" id="bl-selection"></span>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="bl-defer-ticked"
+                        onclick="setTickedBillingStatus('Deferred')"
+                        title="Hold the ticked lines out of this billing"
+                    >
+                        Defer ticked
+                    </button>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        id="bl-restore-ticked"
+                        onclick="setTickedBillingStatus('Not Billed')"
+                        title="Put the ticked deferred lines back to Not billed"
+                    >
+                        Restore ticked
+                    </button>
                 </div>
                 <!-- One scroller for both axes: an inner overflow box would
                      become the sticky header's scroller and the header would
@@ -1030,7 +1033,7 @@
                 <div class="admin-scroll">
                     <table class="data-table" id="billing-table">
                         <thead id="billing-thead"></thead>
-                        <tbody id="billing-tbody" onkeydown="billingGridKey(event)"></tbody>
+                        <tbody id="billing-tbody" onkeydown="gridEnterKey(event)"></tbody>
                         <tfoot id="billing-tfoot"></tfoot>
                     </table>
                     <div id="billing-footer" style="padding: 12px"></div>
@@ -1084,6 +1087,18 @@
                         />
                         Current band only
                     </label>
+                    <label
+                        class="tb-label"
+                        style="display: flex; align-items: center; gap: 4px; cursor: pointer"
+                        title="Rows with no rate in the current band. A trip on one of them shows under Needs attention in Billing."
+                    >
+                        <input
+                            type="checkbox"
+                            id="bm-missing"
+                            onchange="renderRateMatrix()"
+                        />
+                        Missing rates only
+                    </label>
                     <span class="tb-label" id="bm-count"></span>
                     <div class="tb-spacer"></div>
                     <span class="tb-label" id="bm-band-hint"></span>
@@ -1091,7 +1106,7 @@
                         class="btn btn-primary btn-sm admin-only"
                         onclick="openSeedRatesModal()"
                     >
-                        Seed from .xlsx
+                        Import rates (.xlsx)
                     </button>
                 </div>
                 <div class="admin-scroll">
@@ -1124,7 +1139,16 @@
                                     style="width: 90px"
                                 />
                                 <button
+                                    class="btn btn-ghost btn-sm"
+                                    id="fp-cancel"
+                                    onclick="cancelFuelEdit()"
+                                    style="display: none"
+                                >
+                                    Cancel
+                                </button>
+                                <button
                                     class="btn btn-primary btn-sm"
+                                    id="fp-submit"
                                     onclick="submitFuelPrice()"
                                 >
                                     + Add price
@@ -1153,6 +1177,12 @@
                                 </thead>
                                 <tbody id="fuel-prices-tbody"></tbody>
                             </table>
+                            <button
+                                class="btn btn-ghost btn-sm"
+                                id="fp-more"
+                                onclick="toggleFuelHistory()"
+                                style="margin-top: 6px"
+                            ></button>
                         </div>
 
                         <!-- Rate matrix -->
@@ -1161,20 +1191,38 @@
                                 <span class="settings-section-title"
                                     >Freight rates</span
                                 >
+                                <div class="tb-spacer"></div>
+                                <button
+                                    class="btn btn-ghost btn-sm admin-only"
+                                    id="bm-edit-toggle"
+                                    onclick="toggleRateEditing()"
+                                >
+                                    Edit rates
+                                </button>
                             </div>
                             <p class="settings-section-hint">
                                 One row per area and truck type; one column per
-                                diesel price band. Editing a cell changes the
-                                rate from now on — a billing already computed
-                                keeps the rate it was priced at.
+                                diesel price band. An empty cell in the current
+                                band is marked: a trip that needs it cannot be
+                                priced.
                             </p>
+                            <!-- updateFreightRate edits the block in place:
+                                 there is no new effective date. -->
+                            <div class="bm-edit-warn" id="bm-edit-warn" style="display: none">
+                                <strong>You are editing this rate block in place.</strong>
+                                Every billing line not yet stamped that prices
+                                from it re-prices, back to the block's effective
+                                date. Stamped billings keep their amounts. For a
+                                new rate from a new date, import a rates
+                                workbook with that effective date.
+                            </div>
                             <!-- The height cap makes this box the vertical
                                  scroller too; without it the sticky header
                                  pins to a box that never scrolls. -->
                             <div style="overflow: auto; max-height: 70vh">
                                 <table class="data-table" id="rate-matrix-table">
                                     <thead id="rate-matrix-thead"></thead>
-                                    <tbody id="rate-matrix-tbody"></tbody>
+                                    <tbody id="rate-matrix-tbody" onkeydown="gridEnterKey(event)"></tbody>
                                 </table>
                             </div>
                         </div>
@@ -1705,6 +1753,29 @@
                     </button>
                 </div>
                 <div class="modal-body">
+                    <!-- The header of the printed billing. The preview
+                         redraws as you type. -->
+                    <div class="bl-preview-fields" id="bl-preview-fields">
+                        <label id="bl-number-wrap"
+                            >Billing #
+                            <input
+                                type="text"
+                                id="bl-number"
+                                oninput="refreshBillingPreview()"
+                                style="width: 140px"
+                        /></label>
+                        <!-- The submission date, not the trip range, so it
+                             is typed rather than derived. -->
+                        <label
+                            >Date on the billing
+                            <input
+                                type="date"
+                                id="bl-doc-date"
+                                oninput="refreshBillingPreview()"
+                                style="width: 150px"
+                        /></label>
+                    </div>
+                    <div class="bl-number-warn" id="bl-number-warn"></div>
                     <div
                         id="bl-preview-hint"
                         style="font-size: 11px; color: var(--hint); margin-bottom: 8px"
@@ -2066,7 +2137,7 @@
         <div class="modal-backdrop" id="modal-seed-rates">
             <div class="modal">
                 <div class="modal-head">
-                    <span class="modal-head-title">Seed rates from .xlsx</span>
+                    <span class="modal-head-title">Import rates from .xlsx</span>
                     <button
                         class="modal-close"
                         onclick="closeModal('modal-seed-rates')"
@@ -2093,7 +2164,7 @@
                         <label class="form-label">Effective date</label>
                         <input type="date" id="sr-date" />
                         <p class="settings-section-hint">
-                            The first date these rates apply. Seeding the same
+                            The first date these rates apply. Importing the same
                             origin and date again replaces that block.
                         </p>
                     </div>

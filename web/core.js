@@ -186,6 +186,28 @@
                 );
             }
 
+            // Enter moves to the same column one row down, as in Excel;
+            // Shift+Enter moves up. Bound on a grid's <tbody>. A row with no
+            // input in that column (a stamped line, a heading, a detail row)
+            // is skipped. Leaving the cell fires its change, so the move saves.
+            function gridEnterKey(e) {
+                const inp = e.target;
+                if (e.key !== "Enter" || !inp.matches || !inp.matches("input.cell-input")) return;
+                const td = inp.closest("td");
+                const rows = Array.from(e.currentTarget.rows);
+                const step = e.shiftKey ? -1 : 1;
+                for (let i = rows.indexOf(td.parentElement) + step; i >= 0 && i < rows.length; i += step) {
+                    const cell = rows[i].cells[td.cellIndex];
+                    const next = cell && cell.colSpan === 1 && cell.querySelector("input.cell-input");
+                    if (next) {
+                        e.preventDefault();
+                        next.focus();
+                        next.select();
+                        return;
+                    }
+                }
+            }
+
             // Re-reads the server's truth for whichever panel is open. bgSave
             // serves every panel, not just the board: the master data comes
             // from getBootData, and re-opening the panel re-renders it (and

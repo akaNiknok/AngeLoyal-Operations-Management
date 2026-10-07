@@ -49,7 +49,7 @@ function loadBilling(fields = {}) {
     // URL and a full location: the print document resolves the letterhead.
     // The host Date: ExcelJS checks `instanceof Date`, which a date built in
     // the sandbox's own realm fails. In the browser both share one realm.
-    { document, URL, Date, location: { hostname: 'localhost', href: 'http://localhost:8788/' } },
+    { document, URL, URLSearchParams, Date, location: { hostname: 'localhost', href: 'http://localhost:8788/' } },
     'globalThis.__setLines = (lines, cols) => {' +
       ' billingLines = lines;' +
       ' billingChargeCols = cols || [];' +
@@ -61,7 +61,9 @@ function loadBilling(fields = {}) {
       'globalThis.__bands = () => FUEL_BANDS.slice();' +
       'globalThis.__setRates = (rows) => { rateMatrix = rows; };' +
       'globalThis.__setSeed = (parsed) => { seedRatesParsed = parsed; };' +
-      'globalThis.__excelReady = () => { excelJsReady = true; };'
+      'globalThis.__excelReady = () => { excelJsReady = true; };' +
+      'globalThis.__setRole = (r) => { currentUser.role = r; };' +
+      'globalThis.__setFuel = (list) => { fuelPrices = list; };'
   );
   // The status filter is a chip now; 'bl-status' names the chip to start on.
   sandbox.setBillingStatus(values['bl-status']);
@@ -311,9 +313,9 @@ test('stamping skips ticked lines that the filter now hides', async () => {
   await ui.confirmStampAndPrint();
   await tick();
 
-  assert.equal(sent[0].fn, 'setBillingNumber');
-  assert.deepEqual(Array.from(sent[0].args[0]), [1]);
-  assert.equal(sent[0].args[1], 'B-0042');
+  const stamp = sent.find((s) => s.fn === 'setBillingNumber');
+  assert.deepEqual(Array.from(stamp.args[0]), [1]);
+  assert.equal(stamp.args[1], 'B-0042');
 });
 
 test('stamping with every ticked line filtered away opens nothing and sends nothing', () => {
@@ -329,14 +331,17 @@ test('stamping with every ticked line filtered away opens nothing and sends noth
   assert.equal(sent.length, 0);
 });
 
-test('stamping needs a billing number before it opens the preview', () => {
+test('the stamp preview opens without a number, but nothing stamps until one is typed', async () => {
   const { ui } = loadBilling({ 'bl-number': '  ' });
   ui.__setLines([line({ id: 1 })]);
   ui.toggleBillingRow(1, true);
 
-  const { opened } = stubStampCalls(ui);
+  const { sent, opened } = stubStampCalls(ui);
   ui.openStampPreview();
-  assert.deepEqual(opened, []);
+  assert.deepEqual(opened, ['modal-billing-preview']);
+  assert.equal(ui.document.getElementById('bl-preview-stamp').disabled, true);
+  await ui.confirmStampAndPrint();
+  assert.ok(!sent.some((s) => s.fn === 'setBillingNumber'));
 });
 
 // The printout after a stamp is the billing the server holds under that
@@ -358,9 +363,10 @@ test('stamp & print sends the header, then prints the billing read back', async 
   await ui.confirmStampAndPrint();
   await tick();
 
-  assert.deepEqual({ ...sent[0].args[2] }, { docDate: '7/8/2026', from: '6/29/2026', to: '7/4/2026' });
-  assert.equal(sent[1].fn, 'getBilling');
-  assert.equal(sent[1].args[0], 77);
+  const fns = sent.map((s) => s.fn);
+  assert.deepEqual(fns, ['getBillings', 'setBillingNumber', 'getBilling']);
+  assert.deepEqual({ ...sent[1].args[2] }, { docDate: '7/8/2026', from: '6/29/2026', to: '7/4/2026' });
+  assert.equal(sent[2].args[0], 77);
   assert.equal(printed.length, 1);
   assert.match(printed[0], /AY-11799[\s\S]*AY-11801/);
   assert.match(printed[0], /BILLING #<\/span> B-0042/);
@@ -721,4 +727,162 @@ test('a rate import that would re-price unbilled lines asks first; Cancel stops 
       ? [['TANZA', false], ['TANZA', true], ['LINGUNAN', false]]
       : [['TANZA', false]]);
   }
+});
+
+// ── Stamping into a number already in use ─────────────────────
+
+test('a billing number already in use is named before the stamp merges into it', async () => {
+  const { ui, els } = loadBilling({ 'bl-number': 'B-0042' });
+  ui.__setLines([line({ id: 1 }), line({ id: 2, waybillNumber: 'AY-11802' })]);
+  ui.toggleAllBilling(true);
+  stubStampCalls(ui);
+  ui.call = (fn) => Promise.resolve(fn === 'getBillings'
+    ? { success: true, billings: [{ id: 5, billingNumber: 'B-0042', lineCount: 3, total: 50000, stampedBy: 'pay@x', stampedAt: '7/1/2026 9:00' }] }
+    : { success: true });
+
+  ui.openStampPreview();
+  await tick();
+  assert.match(els['bl-number-warn'].innerHTML, /Billing B-0042 already exists:<\/strong> 3 line\(s\), ₱50,000\.00/);
+  assert.match(els['bl-number-warn'].innerHTML, /These 2 line\(s\) join it, and its printout covers all 5/);
+  assert.equal(els['bl-preview-stamp'].textContent, 'Add to billing B-0042 & print');
+
+  // The server matches numbers without regard to case, so the warning does too.
+  els['bl-number'].value = 'b-0042';
+  ui.refreshBillingPreview();
+  assert.match(els['bl-number-warn'].innerHTML, /already exists/);
+
+  // A new number clears the warning.
+  els['bl-number'].value = 'B-0043';
+  ui.refreshBillingPreview();
+  assert.equal(els['bl-number-warn'].innerHTML, '');
+  assert.equal(els['bl-preview-stamp'].textContent, 'Stamp & print');
+});
+
+// ── The selection and bulk status ─────────────────────────────
+
+test('the selection names its count and sum, and the ticks a filter hides', () => {
+  const { ui, els } = loadBilling();
+  ui.__setLines([
+    line({ id: 1, total: 1000, origin: 'TANZA' }),
+    line({ id: 2, waybillNumber: 'AY-11802', total: 2500, origin: 'TANZA' }),
+    line({ id: 3, waybillNumber: 'AY-11803', total: 9000, origin: 'LINGUNAN' }),
+  ]);
+  ui.toggleAllBilling(true);
+  ui.document.getElementById('bl-origin').value = 'TANZA';
+  ui.renderBilling();
+
+  assert.equal(els['bl-selection'].innerHTML, '<strong>2 ticked · ₱3,500.00</strong> · 1 more ticked, hidden by the filters');
+});
+
+test('Defer ticked sends the visible unstamped lines in one call and drops their ticks', () => {
+  const { ui } = loadBilling();
+  ui.__setLines([
+    line({ id: 1 }),
+    line({ id: 2, waybillNumber: 'AY-11802', status: 'Billed', billingNumber: 'B-1' }),
+    line({ id: 3, waybillNumber: 'AY-11803', status: 'Deferred' }),
+  ]);
+  ui.toggleAllBilling(true);
+  const sent = [];
+  ui.bgSave = (fn, args) => sent.push({ fn, args });
+
+  ui.setTickedBillingStatus('Deferred');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].fn, 'setBillingLineStatus');
+  assert.deepEqual(Array.from(sent[0].args[0]), [1]);
+  assert.deepEqual(Array.from(ui.tickedBillingLines().map((l) => l.id)), [2, 3]);
+});
+
+// ── Empty states and links ────────────────────────────────────
+
+test('an empty range says so instead of showing a blank table', () => {
+  const { ui, els } = loadBilling({ 'bl-status': 'unbilled', 'bl-from': '2026-07-06', 'bl-to': '2026-07-11' });
+  ui.__setLines([]);
+  ui.renderBilling();
+  assert.match(els['billing-tbody'].innerHTML, /No billable waybills from 7\/6\/2026 to 7\/11\/2026\./);
+
+  ui.__setLines([line({ id: 1, status: 'Billed' })]);
+  ui.renderBilling();
+  assert.match(els['billing-tbody'].innerHTML, /No line matches these filters\./);
+});
+
+test('a "no rate" warning links to the Matrix rows of its first unpriced stop', () => {
+  const { ui } = loadBilling();
+  const html = ui.billingRowHtml(line({
+    id: 1, origin: 'TANZA', truckType: '6W', warning: 'Priced without Bay',
+    stops: [{ area: 'Calamba', rate: 17000 }, { area: 'Bay', rate: null }],
+  }));
+  assert.match(html, /href="#billing-matrix\?bm-origin=TANZA&amp;bm-effective=&amp;bm-type=6W&amp;bm-search=Bay"/);
+  // A stamped line needs no fix.
+  assert.ok(!ui.billingRowHtml(line({ status: 'Billed', warning: 'x', stops: [{ area: 'Bay', rate: null }] })).includes('bl-fix'));
+});
+
+test('a stamped line opens its billing from its number', async () => {
+  const { ui } = loadBilling();
+  const opened = [];
+  ui.openSavedBilling = (id) => opened.push(id);
+  ui.call = () => Promise.resolve({ success: true, billings: [{ id: 4, billingNumber: 'B-1' }, { id: 9, billingNumber: 'B-2' }] });
+  await ui.openBillingByNumber('B-2');
+  assert.deepEqual(opened, [9]);
+});
+
+// ── The rate matrix view ──────────────────────────────────────
+
+test('the band in force today ignores a price added ahead for next week', () => {
+  const { ui } = loadBilling();
+  const prices = [
+    { id: 3, effectiveDate: '10/13/2026', dieselPrice: 72 },
+    { id: 2, effectiveDate: '10/6/2026', dieselPrice: 68 },
+    { id: 1, effectiveDate: '9/29/2026', dieselPrice: 66 },
+  ];
+  assert.equal(ui.fuelPriceInForce(prices, '2026-10-12').id, 2);
+  assert.equal(ui.fuelPriceInForce(prices, '2026-10-13').id, 3);
+  assert.equal(ui.fuelPriceInForce(prices, '2026-09-01'), null);
+});
+
+test('the matrix is read-only for an Admin until Edit rates, and marks a gap in the live band', () => {
+  const { ui, els } = loadBilling({ 'bm-origin': 'TANZA', 'bm-effective': '', 'bm-type': '', 'bm-search': '' });
+  ui.__setRole('Admin');
+  ui.__setFuel([{ id: 1, effectiveDate: '1/6/2025', dieselPrice: 67 }]); // band 65.01-70
+  ui.__setRates([
+    rate({ id: 1, area: 'Calamba', effectiveDate: '1/7/2025', bands: { '65.01-70': 17670 } }),
+    rate({ id: 2, area: 'Bay', effectiveDate: '1/7/2025', bands: {} }),
+  ]);
+  ui.document.getElementById('bm-focus-band').checked = true;
+  ui.renderRateMatrix();
+  assert.ok(!els['rate-matrix-tbody'].innerHTML.includes('<input'));
+  assert.match(els['rate-matrix-tbody'].innerHTML, /class="rm-live rm-missing"/);
+
+  ui.toggleRateEditing();
+  assert.match(els['rate-matrix-tbody'].innerHTML, /<input class="cell-input"/);
+  assert.equal(els['bm-edit-warn'].style.display, '');
+
+  ui.document.getElementById('bm-missing').checked = true;
+  ui.renderRateMatrix();
+  assert.equal(els['bm-count'].textContent, '1 rates');
+  assert.match(els['rate-matrix-tbody'].innerHTML, /Bay/);
+});
+
+test('a stamp takes only the Not billed ticks and names the ones it leaves out', async () => {
+  const { ui, els } = loadBilling({ 'bl-number': 'B-0042' });
+  ui.__setLines([
+    line({ id: 1 }),
+    line({ id: 2, waybillNumber: 'AY-11802', status: 'Deferred' }),
+    line({ id: 3, waybillNumber: 'AY-11803', status: 'Billed', billingNumber: 'B-1' }),
+  ]);
+  ui.toggleAllBilling(true);
+  const { sent } = stubStampCalls(ui);
+
+  ui.openStampPreview();
+  assert.match(els['bl-preview-hint'].textContent, /2 ticked line\(s\) are deferred or billed and are left out/);
+  await ui.confirmStampAndPrint();
+  assert.deepEqual(Array.from(sent.find((x) => x.fn === 'setBillingNumber').args[0]), [1]);
+});
+
+test('with no Not billed line ticked, the stamp preview does not open', () => {
+  const { ui } = loadBilling();
+  ui.__setLines([line({ id: 2, status: 'Deferred' })]);
+  ui.toggleAllBilling(true);
+  const { opened } = stubStampCalls(ui);
+  ui.openStampPreview();
+  assert.deepEqual(opened, []);
 });
