@@ -2375,6 +2375,18 @@
                 color: var(--amber);
                 font-size: 12px;
             }
+            /* An edge mark, not a row fill: most lines can need attention
+               at once, and a filled row hides the hover and the selection. */
+            #billing-table tr.bl-warn-row > td:first-child {
+                box-shadow: inset 3px 0 var(--amber);
+            }
+            /* Amount headers wrap, so a long charge name ("Bad Orders
+               @5.00 / Bx") leaves the width to Area and its warning. */
+            #billing-table thead th.n {
+                text-align: right;
+                white-space: normal;
+                line-height: 1.2;
+            }
             .pill.bl-chip-warn:not(.active) {
                 color: var(--amber);
                 border-color: var(--amber);
